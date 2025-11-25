@@ -8,9 +8,9 @@ const App = {
     currentYear: null,
     authInProgress: false,
 
-    init() {
-        // Initialize data
-        DataManager.init();
+    async init() {
+        // Initialize data (now async for file storage)
+        await DataManager.init();
 
         // Check authentication status and update logout button
         AuthManager.isAuth();
