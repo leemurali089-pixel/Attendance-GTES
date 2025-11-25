@@ -1,0 +1,30 @@
+# Backup files - contains sensitive employee data
+Backup/*.json
+Backup/*.crswap
+
+# Generated PDF files - contains salary information
+Salary Payout/*.pdf
+
+# Test files
+test*.html
+test*.csv
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies (if you add any in future)
+node_modules/
+package-lock.json

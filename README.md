@@ -2,7 +2,13 @@
 
 A comprehensive web-based attendance and salary management system built with HTML, CSS, and JavaScript.
 
-## Features
+## 🌐 Live Demo
+
+**Coming Soon:** `https://leemurali089-pixel.github.io/Attendance-GTES/`
+
+> **Note:** See [DEPLOYMENT.md](DEPLOYMENT.md) for instructions on deploying your own instance.
+
+## ✨ Features
 
 ### 1. Employee Management
 - Add, edit, delete, and view employees
