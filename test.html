@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>Test Page - File Loading Test</h1>
+    <p>If you can see this, your browser can open HTML files.</p>
+    <h2>Checking JavaScript Files:</h2>
+    <div id="test-results"></div>
+    
+    <script>
+        const files = [
+            'js/data.js',
+            'js/auth.js',
+            'js/app.js',
+            'js/employees.js',
+            'js/holidays.js',
+            'js/attendance.js',
+            'js/filterAttendance.js',
+            'js/advances.js',
+            'js/salary.js',
+            'js/employeeView.js',
+            'js/admin.js',
+            'js/reports.js',
+            'css/style.css'
+        ];
+        
+        const results = document.getElementById('test-results');
+        let loaded = 0;
+        let failed = 0;
+        
+        files.forEach(file => {
+            fetch(file)
+                .then(response => {
+                    if (response.ok) {
+                        loaded++;
+                        results.innerHTML += `<p style="color: green;">✓ ${file} - OK</p>`;
+                    } else {
+                        failed++;
+                        results.innerHTML += `<p style="color: red;">✗ ${file} - Not Found (${response.status})</p>`;
+                    }
+                    checkComplete();
+                })
+                .catch(error => {
+                    failed++;
+                    results.innerHTML += `<p style="color: red;">✗ ${file} - Error: ${error.message}</p>`;
+                    checkComplete();
+                });
+        });
+        
+        function checkComplete() {
+            if (loaded + failed === files.length) {
+                results.innerHTML += `<hr><h3>Summary:</h3>`;
+                results.innerHTML += `<p><strong>Loaded: ${loaded}/${files.length}</strong></p>`;
+                results.innerHTML += `<p><strong>Failed: ${failed}/${files.length}</strong></p>`;
+                if (failed === 0) {
+                    results.innerHTML += `<p style="color: green; font-size: 20px;"><strong>All files loaded successfully! You can now open index.html</strong></p>`;
+                } else {
+                    results.innerHTML += `<p style="color: red; font-size: 20px;"><strong>Some files are missing. Please check the file structure.</strong></p>`;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+
+

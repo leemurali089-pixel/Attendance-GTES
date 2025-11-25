@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Test</title>
+</head>
+<body>
+    <h1>File Structure Test</h1>
+    <p>If you see this page, your browser can load HTML files.</p>
+    <p><strong>Now try opening index.html - it should work!</strong></p>
+    
+    <h2>Testing CSS:</h2>
+    <link rel="stylesheet" href="css/style.css">
+    <div style="padding: 20px; background: #f0f0f0; margin: 20px 0;">
+        <p>If this box has custom styling, CSS is loading correctly.</p>
+    </div>
+    
+    <h2>Testing JavaScript:</h2>
+    <script src="js/data.js"></script>
+    <script>
+        if (typeof DataManager !== 'undefined') {
+            document.write('<p style="color: green;">✓ JavaScript files are loading correctly!</p>');
+            document.write('<p>DataManager initialized: ' + (DataManager.COMPANY_PROFILE ? 'Yes' : 'No') + '</p>');
+        } else {
+            document.write('<p style="color: red;">✗ JavaScript files failed to load</p>');
+        }
+    </script>
+    
+    <hr>
+    <p><strong>If you see green checkmarks above, your setup is correct!</strong></p>
+    <p><a href="index.html">Click here to open the main application</a></p>
+</body>
+</html>
+
+
+
+

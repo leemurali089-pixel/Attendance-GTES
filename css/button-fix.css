@@ -1,0 +1,20 @@
+/* Fix for buttons not working inside cards - ensure buttons are above pseudo-elements */
+.card .btn,
+.card button,
+.card-body .btn,
+.card-body button {
+    position: relative;
+    z-index: 10 !important;
+    pointer-events: auto !important;
+}
+
+.card-body {
+    position: relative;
+    z-index: 5;
+}
+
+/* Ensure pseudo-elements don't block interactions */
+.card::before,
+.card::after {
+    pointer-events: none !important;
+}

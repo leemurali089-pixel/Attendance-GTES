@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gas Tech Engineering Service - Attendance & Salary Management</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/dashboard-enhancements.css">
+
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-building"></i> Gas Tech Engineering Service
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto position-relative">
+                    <div class="magic-indicator"></div>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="dashboard">
+                            <span class="nav-icon"><i class="bi bi-house-door"></i></span>
+                            <span class="nav-text">Dashboard</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="employees">
+                            <span class="nav-icon"><i class="bi bi-people"></i></span>
+                            <span class="nav-text">Employees</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="attendance">
+                            <span class="nav-icon"><i class="bi bi-calendar-check"></i></span>
+                            <span class="nav-text">Attendance</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="filterAttendance">
+                            <span class="nav-icon"><i class="bi bi-funnel"></i></span>
+                            <span class="nav-text">Filter</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="holidays">
+                            <span class="nav-icon"><i class="bi bi-calendar-event"></i></span>
+                            <span class="nav-text">Holidays</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="advances">
+                            <span class="nav-icon"><i class="bi bi-cash-coin"></i></span>
+                            <span class="nav-text">Advances</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="salary"
+                            onclick="event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); if (App.authInProgress) return false; App.authInProgress = true; const prevView = App.currentView || 'dashboard'; AuthManager.requireAuth(() => { App.authInProgress = false; App.showView('salary'); }, { onCancel: () => { App.authInProgress = false; const backdrops = document.querySelectorAll('.modal-backdrop'); backdrops.forEach(b => b.remove()); document.body.classList.remove('modal-open'); document.body.style.overflow = ''; document.body.style.paddingRight = ''; setTimeout(() => { App.showView(prevView); }, 100); } }); return false;">
+                            <span class="nav-icon"><i class="bi bi-calculator"></i></span>
+                            <span class="nav-text">Salary</span>
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <div class="theme-toggle-wrapper me-3">
+                            <input type="checkbox" class="checkbox" id="theme-toggle" />
+                            <label for="theme-toggle" class="label">
+                                <i class="bi bi-moon-stars-fill"></i>
+                                <i class="bi bi-sun-fill"></i>
+                                <div class="ball"></div>
+                            </label>
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-outline-light btn-sm me-2" id="adminPanelBtn">
+                            <i class="bi bi-gear"></i> Admin Panel
+                        </button>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <button class="btn btn-outline-light btn-sm dropdown-toggle me-2" id="backupDropdown"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-hdd-stack"></i> Backup
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="backupDropdown">
+                            <li>
+                                <a class="dropdown-item" href="#"
+                                    onclick="event.preventDefault(); AdminModule.exportBackup();">
+                                    <i class="bi bi-download me-2"></i>Export Backup
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="#"
+                                    onclick="event.preventDefault(); document.getElementById('navImportFile').click();">
+                                    <i class="bi bi-upload me-2"></i>Import Backup
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-outline-light btn-sm" id="logoutBtn" style="display: none;">
+                            <i class="bi bi-box-arrow-right"></i> Logout
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    <input type="file" id="navImportFile" accept=".json,.csv" class="d-none">
+
+    <!-- Main Content -->
+    <!-- Main Content -->
+    <div class="container-fluid main-content-container">
+        <!-- Dashboard View -->
+        <div id="dashboardView" class="view-section">
+            <div class="dashboard-hero text-center">
+                <h1 class="display-4 fw-bold text-white mb-3">Welcome Back</h1>
+                <p class="lead text-light opacity-75">Gas Tech Engineering Service - Management Portal</p>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="row g-4 mb-5">
+                <div class="col-md-4">
+                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('active')">
+                        <div class="card-body text-center">
+                            <div class="stat-icon mb-3">
+                                <i class="bi bi-people-fill"></i>
+                            </div>
+                            <h2 id="dashActiveEmployees">0</h2>
+                            <p>Active Employees</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('present')">
+                        <div class="card-body text-center">
+                            <div class="stat-icon mb-3 text-success">
+                                <i class="bi bi-check-circle-fill"></i>
+                            </div>
+                            <h2 id="dashTodayAttendance">0</h2>
+                            <p>Today's Present</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('absence')">
+                        <div class="card-body text-center">
+                            <div class="stat-icon mb-3 text-danger">
+                                <i class="bi bi-x-circle-fill"></i>
+                            </div>
+                            <h2 id="dashTodayAbsence">0</h2>
+                            <p>Today's Absence</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Quick Actions -->
+            <h4 class="mb-4 text-white fw-bold px-2">Quick Actions</h4>
+            <div class="row g-4 mb-5">
+                <div class="col-md-2 col-6">
+                    <a href="#" onclick="event.preventDefault(); App.showView('attendance')" class="quick-action-btn">
+                        <i class="bi bi-calendar-check"></i>
+                        <span>Mark Attendance</span>
+                    </a>
+                </div>
+                <div class="col-md-2 col-6">
+                    <a href="#" onclick="event.preventDefault(); App.showView('filterAttendance')"
+                        class="quick-action-btn">
+                        <i class="bi bi-funnel"></i>
+                        <span>Filter Attendance</span>
+                    </a>
+                </div>
+                <div class="col-md-2 col-6">
+                    <a href="#" onclick="event.preventDefault(); App.showView('employees')" class="quick-action-btn">
+                        <i class="bi bi-people"></i>
+                        <span>Manage Employees</span>
+                    </a>
+                </div>
+                <div class="col-md-2 col-6">
+                    <a href="#" onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('salary'))"
+                        class="quick-action-btn">
+                        <i class="bi bi-calculator"></i>
+                        <span>Calculate Salary</span>
+                    </a>
+                </div>
+                <div class="col-md-2 col-6">
+                    <a href="#"
+                        onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('advances'))"
+                        class="quick-action-btn">
+                        <i class="bi bi-cash-coin"></i>
+                        <span>Manage Advances</span>
+                    </a>
+                </div>
+                <div class="col-md-2 col-6">
+                    <a href="#" onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('admin'))"
+                        class="quick-action-btn">
+                        <i class="bi bi-gear"></i>
+                        <span>Admin Panel</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Employees View -->
+        <div id="employeesView" class="view-section d-none"></div>
+
+        <!-- Attendance View -->
+        <div id="attendanceView" class="view-section d-none"></div>
+
+        <!-- Filter Attendance View -->
+        <div id="filterAttendanceView" class="view-section d-none"></div>
+
+        <!-- Holidays View -->
+        <div id="holidaysView" class="view-section d-none"></div>
+
+        <!-- Advances View -->
+        <div id="advancesView" class="view-section d-none"></div>
+
+        <!-- Salary View -->
+        <div id="salaryView" class="view-section d-none"></div>
+
+        <!-- Employee View -->
+        <div id="employeeView" class="view-section d-none"></div>
+
+        <div id="adminView" class="view-section d-none"></div>
+    </div>
+
+    <!-- Custom Password Modal -->
+    <div class="modal fade" id="passwordModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content glass-panel border-0">
+                <div class="modal-body p-4 text-center">
+                    <div class="mb-4">
+                        <div class="lock-icon-wrapper">
+                            <i class="fas fa-lock text-primary display-4"></i>
+                        </div>
+                    </div>
+                    <h4 class="mb-3 fw-bold text-white">Admin Access</h4>
+                    <p class="text-muted mb-4">Please enter your password to continue</p>
+
+                    <form id="passwordForm" onsubmit="return false;">
+                        <div class="mb-3">
+                            <input type="password"
+                                class="form-control form-control-lg text-center bg-dark border-secondary text-white"
+                                id="modalPasswordInput" placeholder="Enter Password" autocomplete="off">
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-primary btn-lg" id="modalSubmitBtn">
+                                <i class="fas fa-unlock me-2"></i>Unlock Access
+                            </button>
+                            <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer-premium mt-auto">
+        <div class="container-fluid">
+            <div class="row g-4">
+                <!-- Brand Section -->
+                <div class="col-lg-4 col-md-6">
+                    <div class="footer-section h-100">
+                        <h5 class="footer-brand mb-3">Gas Tech Engineering Service</h5>
+                        <p class="text-muted small mb-3">Excellence in Engineering & Service Solutions.</p>
+                        <div class="footer-address small text-muted">
+                            <p class="mb-1"><i class="fas fa-map-marker-alt me-2 text-primary"></i> Registered:
+                                No.232/233, Nageshwara Road, Athipet, Chennai – 600058</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Section -->
+                <div class="col-lg-4 col-md-6">
+                    <div class="footer-section h-100">
+                        <h6 class="footer-heading mb-3">Contact Us</h6>
+                        <ul class="list-unstyled footer-links small">
+                            <li class="mb-2">
+                                <i class="fas fa-envelope me-2 text-primary"></i>
+                                <a href="mailto:gastechengservice@gmail.com"
+                                    class="text-decoration-none text-muted">gastechengservice@gmail.com</a>
+                            </li>
+                            <li class="mb-2">
+                                <i class="fas fa-envelope me-2 text-primary"></i>
+                                <a href="mailto:rajmohan67raj@gmail.com"
+                                    class="text-decoration-none text-muted">rajmohan67raj@gmail.com</a>
+                            </li>
+                            <li class="mb-2">
+                                <i class="fas fa-phone me-2 text-primary"></i>
+                                <span class="text-muted">+91 96000 19839, +91 95662 02896</span>
+                            </li>
+                            <li class="mb-2">
+                                <i class="fas fa-building me-2 text-primary"></i>
+                                <span class="text-muted">Work: 236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai
+                                    – 600058</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Legal Section -->
+                <div class="col-lg-4 col-md-12">
+                    <div class="footer-section h-100">
+                        <h6 class="footer-heading mb-3">Legal Information</h6>
+                        <div class="row small text-muted">
+                            <div class="col-6 mb-2">
+                                <span class="d-block fw-bold text-light">GSTIN</span>
+                                33AFXPR3235A3ZF
+                            </div>
+                            <div class="col-6 mb-2">
+                                <span class="d-block fw-bold text-light">PAN</span>
+                                AFXPR3235A
+                            </div>
+                            <div class="col-6 mb-2">
+                                <span class="d-block fw-bold text-light">IEC</span>
+                                AFXPR3235A
+                            </div>
+                        </div>
+                        <div class="social-icons mt-3">
+                            <a href="#" class="social-link me-2"><i class="fab fa-linkedin"></i></a>
+                            <a href="#" class="social-link me-2"><i class="fab fa-twitter"></i></a>
+                            <a href="#" class="social-link"><i class="fab fa-facebook"></i></a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer-bottom mt-4 pt-3 text-center small text-muted">
+                <p class="mb-0">&copy; 2025 Gas Tech Engineering Service. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- html2pdf library for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- SheetJS for Excel Import/Export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Employee Details Modal -->
+    <div class="modal fade" id="employeeDetailsModal" tabindex="-1" aria-labelledby="employeeDetailsModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="employeeDetailsModalLabel">Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="employeeDetailsModalBody">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Scripts -->
+    <script src="js/data.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/employees.js"></script>
+    <script src="js/holidays.js"></script>
+    <script src="js/attendance.js"></script>
+    <script src="js/filterAttendance.js"></script>
+    <script src="js/advances.js"></script>
+    <script src="js/salary.js"></script>
+    <script src="js/employeeView.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/reports.js"></script>
+
+    <!-- Error Handling -->
+    <script>
+        window.addEventListener('error', function (e) {
+            console.error('Error:', e.message, 'at', e.filename, ':', e.lineno);
+            // Only show alert for critical errors, not script errors from other origins
+            if (e.filename && !e.filename.includes('://') && e.message !== 'Script error.') {
+                console.error('Application error detected');
+            }
+        });
+
+        // Check if all scripts loaded
+        window.addEventListener('load', function () {
+            if (typeof DataManager === 'undefined' || typeof App === 'undefined') {
+                alert('Some required scripts failed to load. Please check:\n1. All files are in the correct folders\n2. No file names are misspelled\n3. You have internet connection for Bootstrap and icons');
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const navImportInput = document.getElementById('navImportFile');
+            if (navImportInput) {
+                navImportInput.addEventListener('change', function (event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        AdminModule.importBackup(file);
+                        event.target.value = '';
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Date Parser Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        .pass {
+            color: #4caf50;
+        }
+
+        .fail {
+            color: #f44336;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Date Parser Tests</h2>
+    <div id="results"></div>
+
+    <script>
+        // Mock DataManager
+        const DataManager = {
+            formatDate(date) {
+                if (!date) return '';
+                const d = new Date(date);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+        };
+
+        // Function to test
+        function parseImportDate(dateInput) {
+            if (!dateInput) return null;
+
+            // Handle Excel serial date (number)
+            if (typeof dateInput === 'number') {
+                // Excel base date is Dec 30, 1899
+                const excelBaseDate = new Date(1899, 11, 30);
+                const date = new Date(excelBaseDate.getTime() + dateInput * 24 * 60 * 60 * 1000);
+                return DataManager.formatDate(date);
+            }
+
+            const dateStr = String(dateInput).trim();
+            if (!dateStr) return null;
+
+            // Handle DD-MM-YYYY or DD/MM/YYYY
+            if (dateStr.match(/^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/)) {
+                const parts = dateStr.split(/[-/]/);
+                const day = parts[0].padStart(2, '0');
+                const month = parts[1].padStart(2, '0');
+                const year = parts[2];
+                return `${year}-${month}-${day}`;
+            }
+
+            // Handle YYYY-MM-DD (already correct)
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                return dateStr;
+            }
+
+            // Try parsing standard date string
+            const date = new Date(dateStr);
+            if (!isNaN(date.getTime())) {
+                return DataManager.formatDate(date);
+            }
+
+            return null;
+        }
+
+        // Test Runner
+        const tests = [
+            { input: '15-01-2024', expected: '2024-01-15', name: 'DD-MM-YYYY' },
+            { input: '15/01/2024', expected: '2024-01-15', name: 'DD/MM/YYYY' },
+            { input: '2024-01-15', expected: '2024-01-15', name: 'YYYY-MM-DD' },
+            { input: 45306, expected: '2024-01-15', name: 'Excel Serial (45306 -> 15 Jan 2024)' },
+            { input: 'invalid', expected: null, name: 'Invalid Date' }
+        ];
+
+        const resultsDiv = document.getElementById('results');
+
+        tests.forEach(test => {
+            const result = parseImportDate(test.input);
+            const passed = result === test.expected;
+            const div = document.createElement('div');
+            div.className = passed ? 'pass' : 'fail';
+            div.textContent = `${test.name}: ${passed ? 'PASS' : 'FAIL'} (Input: ${test.input}, Expected: ${test.expected}, Got: ${result})`;
+            resultsDiv.appendChild(div);
+        });
+    </script>
+</body>
+
+</html>
