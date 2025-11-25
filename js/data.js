@@ -33,28 +33,47 @@ const DataManager = {
     },
 
     // Initialize data storage
-    init() {
+    async init() {
+        // Initialize FileStorage first
+        const fileStorageEnabled = await FileStorage.init();
+
+        if (fileStorageEnabled) {
+            console.log('Using Dropbox file storage');
+        } else {
+            console.log('Using localStorage fallback');
+        }
+
         // Set default admin password if not exists
-        if (!localStorage.getItem(this.KEYS.ADMIN_PASSWORD)) {
-            localStorage.setItem(this.KEYS.ADMIN_PASSWORD, this.DEFAULT_SETTINGS.defaultAdminPassword);
+        const existingPassword = await this.loadData(this.KEYS.ADMIN_PASSWORD);
+        if (!existingPassword) {
+            await this.saveData(this.KEYS.ADMIN_PASSWORD, this.DEFAULT_SETTINGS.defaultAdminPassword);
         }
 
         // Initialize empty arrays if not exists
-        if (!localStorage.getItem(this.KEYS.EMPLOYEES)) {
-            localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify([]));
+        if (!(await this.loadData(this.KEYS.EMPLOYEES))) {
+            await this.saveData(this.KEYS.EMPLOYEES, []);
         }
-        if (!localStorage.getItem(this.KEYS.ATTENDANCE)) {
-            localStorage.setItem(this.KEYS.ATTENDANCE, JSON.stringify([]));
+        if (!(await this.loadData(this.KEYS.ATTENDANCE))) {
+            await this.saveData(this.KEYS.ATTENDANCE, []);
         }
-        if (!localStorage.getItem(this.KEYS.HOLIDAYS)) {
-            localStorage.setItem(this.KEYS.HOLIDAYS, JSON.stringify([]));
+        if (!(await this.loadData(this.KEYS.HOLIDAYS))) {
+            await this.saveData(this.KEYS.HOLIDAYS, []);
         }
-        if (!localStorage.getItem(this.KEYS.ADVANCES)) {
-            localStorage.setItem(this.KEYS.ADVANCES, JSON.stringify([]));
+        if (!(await this.loadData(this.KEYS.ADVANCES))) {
+            await this.saveData(this.KEYS.ADVANCES, []);
         }
-        if (!localStorage.getItem(this.KEYS.SETTINGS)) {
-            localStorage.setItem(this.KEYS.SETTINGS, JSON.stringify(this.DEFAULT_SETTINGS));
+        if (!(await this.loadData(this.KEYS.SETTINGS))) {
+            await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
         }
+    },
+
+    // Helper methods for storage operations
+    async saveData(key, data) {
+        return await FileStorage.saveData(key, data);
+    },
+
+    async loadData(key) {
+        return await FileStorage.loadData(key);
     },
 
     // Employee Operations
