@@ -659,7 +659,8 @@ const EmployeesModule = {
                             name,
                             baseSalary,
                             'Salary updated',
-                            new Date().toISOString().split('T')[0]
+                            new Date().toISOString().split('T')[0],
+                            oldEmployee
                         );
                     }
 

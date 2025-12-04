@@ -413,11 +413,17 @@ const DataManager = {
      * @param {number} newSalary - New salary amount
      * @param {string} reason - Reason for revision
      * @param {string} effectiveDate - Date when revision takes effect (YYYY-MM-DD)
+     * @param {Object} employeeObj - Employee object (optional, for in-transaction updates)
      * @returns {Promise<boolean>} - Success status
      */
-    async addSalaryRevision(employeeName, newSalary, reason, effectiveDate) {
-        const employees = await this.getEmployees();
-        const employee = employees.find(emp => emp.name === employeeName);
+    async addSalaryRevision(employeeName, newSalary, reason, effectiveDate, employeeObj = null) {
+        // Use provided employee object or fetch from database
+        let employee = employeeObj;
+
+        if (!employee) {
+            const employees = await this.getEmployees();
+            employee = employees.find(emp => emp.name === employeeName);
+        }
 
         if (!employee) {
             console.error('Employee not found:', employeeName);
@@ -448,9 +454,6 @@ const DataManager = {
 
         // Update the base salary
         employee.baseSalary = newSalary;
-
-        // Save employees
-        await this.saveEmployees(employees);
 
         console.log(`Salary revision added for ${employeeName}: ₹${oldSalary} → ₹${newSalary}`);
         return true;
