@@ -26,10 +26,55 @@ const DataManager = {
     DEFAULT_SETTINGS: {
         otRate: 200, // OT rate per hour (for fixed rate method)
         otCalculationMethod: 'salaryBased', // 'salaryBased' or 'fixedRate'
+        sOtCalculationMethod: 'salaryBased8', // Standard OT: salary / 30 / 8
+        hOtCalculationMethod: 'salaryBased8', // Holiday OT: salary / 30 / 8
         financialYearStart: 4, // April (month index 3, but we use 4 for April)
         defaultAdminPassword: 'admin123',
         // Track salary payout status per month (key: "year_monthIndex")
         salaryPayouts: {}
+    },
+
+    // Device ID for tracking changes (used for sync and audit)
+    _deviceId: null,
+
+    /**
+     * Get or create a unique device ID
+     * Stored in localStorage to persist across sessions
+     */
+    getDeviceId() {
+        if (this._deviceId) return this._deviceId;
+
+        let deviceId = localStorage.getItem('gtes_device_id');
+        if (!deviceId) {
+            deviceId = 'device_' + Math.random().toString(36).substring(2, 15) +
+                Math.random().toString(36).substring(2, 15);
+            localStorage.setItem('gtes_device_id', deviceId);
+        }
+        this._deviceId = deviceId;
+        return deviceId;
+    },
+
+    /**
+     * Add timestamp metadata to a record
+     * @param {Object} record - The record to add metadata to
+     * @returns {Object} - Record with updatedAt and updatedBy fields
+     */
+    addTimestamp(record) {
+        if (!record || typeof record !== 'object') return record;
+
+        return {
+            ...record,
+            updatedAt: new Date().toISOString(),
+            updatedBy: this.getDeviceId()
+        };
+    },
+
+    /**
+     * Add timestamps to an array of records
+     */
+    addTimestamps(records) {
+        if (!Array.isArray(records)) return records;
+        return records.map(record => this.addTimestamp(record));
     },
 
     // Initialize data storage
@@ -41,6 +86,11 @@ const DataManager = {
             console.log('Using Dropbox file storage');
         } else {
             console.log('Using localStorage fallback');
+        }
+
+        // Initialize SyncManager (Phase 5)
+        if (window.SyncManager) {
+            window.SyncManager.init();
         }
 
         // Set default admin password if not exists
@@ -65,10 +115,21 @@ const DataManager = {
         if (!(await this.loadData(this.KEYS.SETTINGS))) {
             await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
         }
+
+        // Phase 2: Migrate employees to new schema
+        await this.migrateEmployeesToV2();
+
+        // Version 2.0: Migrate employees to add salary revisions
+        await this.migrateToSalaryRevisions();
     },
 
     // Helper methods for storage operations
     async saveData(key, data) {
+        // Phase 5: Check for conflicts before saving
+        if (window.SyncManager) {
+            const canProceed = await window.SyncManager.checkConflict(key);
+            if (!canProceed) return false;
+        }
         return await FileStorage.saveData(key, data);
     },
 
@@ -77,34 +138,227 @@ const DataManager = {
     },
 
     // Employee Operations
-    getEmployees() {
-        return JSON.parse(localStorage.getItem(this.KEYS.EMPLOYEES) || '[]');
+    async getEmployees() {
+        const data = await this.loadData(this.KEYS.EMPLOYEES);
+        return data || [];
     },
 
-    saveEmployees(employees) {
-        localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(employees));
+    async saveEmployees(employees) {
+        await this.saveData(this.KEYS.EMPLOYEES, employees);
     },
 
-    getActiveEmployees() {
-        const employees = this.getEmployees();
-        const today = new Date();
-        return employees.filter(emp => {
-            const doj = new Date(emp.dateOfJoining);
-            const dor = emp.dateOfRelieving ? new Date(emp.dateOfRelieving) : null;
-            return doj <= today && (!dor || dor >= today);
+    /**
+     * Generate next employee ID
+     * Format: emp_0001, emp_0002, etc.
+     */
+    async generateEmployeeId() {
+        const employees = await this.getEmployees();
+
+        // Find max ID number
+        let maxId = 0;
+        employees.forEach(emp => {
+            if (emp.id && emp.id.startsWith('emp_')) {
+                const idNum = parseInt(emp.id.substring(4));
+                if (!isNaN(idNum) && idNum > maxId) {
+                    maxId = idNum;
+                }
+            }
         });
+
+        // Generate next ID
+        const nextId = maxId + 1;
+        return 'emp_' + String(nextId).padStart(4, '0');
+    },
+
+    /**
+     * Migrate employees to Phase 2 schema (one-time)
+     * Adds employee IDs and new fields with defaults
+     */
+    async migrateEmployeesToV2() {
+        const employees = await this.getEmployees();
+        if (employees.length === 0) return;
+
+        let modified = false;
+
+        // Sort by dateOfJoining for consistent ID assignment
+        const sorted = [...employees].sort((a, b) => {
+            const dateA = new Date(a.dateOfJoining);
+            const dateB = new Date(b.dateOfJoining);
+            return dateA - dateB;
+        });
+
+        sorted.forEach((emp, index) => {
+            let empModified = false;
+
+            // Add ID if missing
+            if (!emp.id) {
+                emp.id = 'emp_' + String(index + 1).padStart(4, '0');
+                empModified = true;
+            }
+
+            // Add paymentMode if missing
+            if (!emp.paymentMode) {
+                emp.paymentMode = 'bank';
+                empModified = true;
+            }
+
+            // Add bank object if missing
+            if (!emp.bank) {
+                emp.bank = {
+                    beneficiaryName: "",
+                    accountNo: "",
+                    ifsc: "",
+                    branchName: "",
+                    address: ""
+                };
+                empModified = true;
+            }
+
+            // Add KYC fields if missing
+            if (emp.pan === undefined) {
+                emp.pan = "";
+                empModified = true;
+            }
+            if (emp.aadhaar === undefined) {
+                emp.aadhaar = "";
+                empModified = true;
+            }
+
+            // Add address if missing
+            if (!emp.address) {
+                emp.address = {
+                    permanent: "",
+                    present: ""
+                };
+                empModified = true;
+            }
+
+            if (empModified) {
+                modified = true;
+            }
+        });
+
+        if (modified) {
+            console.log('Migrating employees to Phase 2 schema...');
+            await this.saveEmployees(sorted);
+            console.log('Employee migration complete');
+        }
+    },
+
+    async getActiveEmployees() {
+        const employees = await this.getEmployees();
+        const today = new Date();
+        return employees.filter(emp => this.isActiveOnDate(emp, today));
+    },
+
+    /**
+     * Check if an employee is active on a specific date
+     * @param {Object} employee - Employee object with dateOfJoining and dateOfRelieving
+     * @param {Date|string} date - Date to check (Date object or YYYY-MM-DD string)
+     * @returns {boolean} - True if employee is active on that date
+     * 
+     * Rules:
+     * - date >= dateOfJoining (midnight normalized)
+     * - AND (dateOfRelieving == null OR date <= dateOfRelieving)
+     */
+    isActiveOnDate(employee, date) {
+        if (!employee || !employee.dateOfJoining) {
+            return false;
+        }
+
+        // Normalize date to midnight (remove time component)
+        const checkDate = typeof date === 'string' ? new Date(date) : new Date(date);
+        checkDate.setHours(0, 0, 0, 0);
+
+        // Parse joining date
+        const doj = new Date(employee.dateOfJoining);
+        doj.setHours(0, 0, 0, 0);
+
+        // Check if date is before joining
+        if (checkDate < doj) {
+            return false;
+        }
+
+        // Check if employee has relieving date
+        if (employee.dateOfRelieving) {
+            const dor = new Date(employee.dateOfRelieving);
+            dor.setHours(0, 0, 0, 0);
+
+            // Employee is active only if check date is on or before relieving date
+            return checkDate <= dor;
+        }
+
+        // No relieving date means employee is still active
+        return true;
+    },
+
+    /**
+     * Calculate overtime hours from checkin/checkout times
+     * @param {string} checkin - Check-in time in HH:MM format
+     * @param {string} checkout - Check-out time in HH:MM format
+     * @param {boolean} isOnDuty - Whether this is duty time (default: true)
+     * @param {number} shiftHours - Standard shift duration in hours (default: 9)
+     * @returns {number} - Overtime hours (rounded to 2 decimals)
+     * 
+     * Rules:
+     * - If either time missing → return 0
+     * - If checkout <= checkin, assume overnight shift (add 24h to checkout)
+     * - hoursWorked = (checkout - checkin) in hours
+     * - if isOnDuty: OT = max(0, hoursWorked - shiftHours)
+     * - else: OT = hoursWorked
+     */
+    calcOT(checkin, checkout, isOnDuty = true, shiftHours = 9) {
+        // Return 0 if either time is missing
+        if (!checkin || !checkout) {
+            return 0;
+        }
+
+        try {
+            // Parse times (HH:MM format)
+            const [checkinHour, checkinMin] = checkin.split(':').map(Number);
+            const [checkoutHour, checkoutMin] = checkout.split(':').map(Number);
+
+            // Create Date objects for calculation (use same day as base)
+            const baseDate = new Date(2000, 0, 1); // Arbitrary date
+            const checkinTime = new Date(baseDate);
+            checkinTime.setHours(checkinHour, checkinMin, 0, 0);
+
+            let checkoutTime = new Date(baseDate);
+            checkoutTime.setHours(checkoutHour, checkoutMin, 0, 0);
+
+            // Handle overnight shift (checkout earlier than checkin)
+            if (checkoutTime <= checkinTime) {
+                checkoutTime.setDate(checkoutTime.getDate() + 1); // Add 24 hours
+            }
+
+            // Calculate hours worked
+            const millisDiff = checkoutTime - checkinTime;
+            const hoursWorked = millisDiff / (1000 * 60 * 60);
+
+            // Calculate OT
+            let otHours;
+            if (isOnDuty) {
+                // For duty: OT is hours beyond shift duration
+                otHours = Math.max(0, hoursWorked - shiftHours);
+            } else {
+                // For non-duty (like holidays): all hours are OT
+                otHours = hoursWorked;
+            }
+
+            // Round to 2 decimals
+            return Math.round(otHours * 100) / 100;
+
+        } catch (error) {
+            console.error('Error calculating OT:', error);
+            return 0;
+        }
     },
 
     // Employees active on specific date
-    getEmployeesActiveOnDate(dateInput) {
+    async getEmployeesActiveOnDate(dateInput) {
         const targetDate = this.parseDate(dateInput) || new Date();
-        const employees = this.getEmployees();
-        return employees.filter(emp => {
-            const doj = this.parseDate(emp.dateOfJoining);
-            const dor = emp.dateOfRelieving ? this.parseDate(emp.dateOfRelieving) : null;
-            if (!doj) return false;
-            return doj <= targetDate && (!dor || dor >= targetDate);
-        });
+        const employees = await this.getEmployees();
+        return employees.filter(emp => this.isActiveOnDate(emp, targetDate));
     },
 
     // Helper to parse dates robustly (handles YYYY-MM-DD, DD-MM-YYYY, etc.)
@@ -126,11 +380,11 @@ const DataManager = {
     },
 
     // Get employees who were active during a specific month
-    getEmployeesActiveInMonth(year, month) {
-        const employees = this.getEmployees();
+    async getEmployeesActiveInMonth(year, month) {
+        const employees = await this.getEmployees();
         const monthStart = new Date(year, month, 1);
         const monthEnd = new Date(year, month + 1, 0); // Last day of month
-        const attendance = this.getAttendanceByMonth(year, month);
+        const attendance = await this.getAttendanceByMonth(year, month);
         const employeesWithAttendance = new Set(attendance.map(a => a.employee));
 
         return employees.filter(emp => {
@@ -153,33 +407,141 @@ const DataManager = {
         });
     },
 
+    /**
+     * Add a salary revision record for an employee
+     * @param {string} employeeName - Employee name
+     * @param {number} newSalary - New salary amount
+     * @param {string} reason - Reason for revision
+     * @param {string} effectiveDate - Date when revision takes effect (YYYY-MM-DD)
+     * @returns {Promise<boolean>} - Success status
+     */
+    async addSalaryRevision(employeeName, newSalary, reason, effectiveDate) {
+        const employees = await this.getEmployees();
+        const employee = employees.find(emp => emp.name === employeeName);
+
+        if (!employee) {
+            console.error('Employee not found:', employeeName);
+            return false;
+        }
+
+        // Initialize salaryRevisions array if it doesn't exist
+        if (!employee.salaryRevisions) {
+            employee.salaryRevisions = [];
+        }
+
+        // Get old salary
+        const oldSalary = employee.baseSalary || 0;
+
+        // Create revision record
+        const revision = {
+            id: 'rev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            date: effectiveDate || new Date().toISOString().split('T')[0],
+            oldSalary: oldSalary,
+            newSalary: newSalary,
+            reason: reason || 'Salary revision',
+            changedBy: this.getDeviceId(),
+            changedAt: new Date().toISOString()
+        };
+
+        // Add to revisions array
+        employee.salaryRevisions.push(revision);
+
+        // Update the base salary
+        employee.baseSalary = newSalary;
+
+        // Save employees
+        await this.saveEmployees(employees);
+
+        console.log(`Salary revision added for ${employeeName}: ₹${oldSalary} → ₹${newSalary}`);
+        return true;
+    },
+
+    /**
+     * Get all salary revisions for an employee
+     * @param {string} employeeName - Employee name
+     * @returns {Promise<Array>} - Array of revision records, sorted by date (newest first)
+     */
+    async getSalaryRevisionsForEmployee(employeeName) {
+        const employees = await this.getEmployees();
+        const employee = employees.find(emp => emp.name === employeeName);
+
+        if (!employee || !employee.salaryRevisions) {
+            return [];
+        }
+
+        // Sort by date, newest first
+        return [...employee.salaryRevisions].sort((a, b) => {
+            return new Date(b.date) - new Date(a.date);
+        });
+    },
+
+    /**
+     * Migrate employees to add salaryRevisions array (Version 2.0)
+     * Creates initial revision entry if employee has existing salary
+     */
+    async migrateToSalaryRevisions() {
+        const employees = await this.getEmployees();
+        if (employees.length === 0) return;
+
+        let modified = false;
+
+        employees.forEach(emp => {
+            // Add salaryRevisions array if missing
+            if (!emp.salaryRevisions) {
+                emp.salaryRevisions = [];
+
+                // If employee has existing salary, create initial revision entry
+                if (emp.baseSalary && emp.baseSalary > 0) {
+                    emp.salaryRevisions.push({
+                        id: 'rev_init_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        date: emp.dateOfJoining || new Date().toISOString().split('T')[0],
+                        oldSalary: 0,
+                        newSalary: emp.baseSalary,
+                        reason: 'Initial salary',
+                        changedBy: 'system',
+                        changedAt: new Date().toISOString()
+                    });
+                }
+
+                modified = true;
+            }
+        });
+
+        if (modified) {
+            console.log('Migrating employees to Version 2.0 (salary revisions)...');
+            await this.saveEmployees(employees);
+            console.log('Salary revisions migration complete');
+        }
+    },
+
     // Attendance Operations
-    getAttendance() {
-        return JSON.parse(localStorage.getItem(this.KEYS.ATTENDANCE) || '[]');
+    async getAttendance() {
+        const data = await this.loadData(this.KEYS.ATTENDANCE);
+        return data || [];
     },
 
-    saveAttendance(attendance) {
-        localStorage.setItem(this.KEYS.ATTENDANCE, JSON.stringify(attendance));
+    async saveAttendance(attendance) {
+        await this.saveData(this.KEYS.ATTENDANCE, attendance);
     },
 
-    getAttendanceByDateRange(startDate, endDate) {
-        const attendance = this.getAttendance();
+    async getAttendanceByDateRange(startDate, endDate) {
+        const attendance = await this.getAttendance();
         return attendance.filter(record => {
             const recordDate = new Date(record.date);
             return recordDate >= startDate && recordDate <= endDate;
         });
     },
 
-    getAttendanceByMonth(year, month) {
-        const attendance = this.getAttendance();
+    async getAttendanceByMonth(year, month) {
+        const attendance = await this.getAttendance();
         return attendance.filter(record => {
             const recordDate = new Date(record.date);
             return recordDate.getFullYear() === year && recordDate.getMonth() === month;
         });
     },
 
-    getAttendanceByEmployee(employeeName, startDate, endDate) {
-        const attendance = this.getAttendance();
+    async getAttendanceByEmployee(employeeName, startDate, endDate) {
+        const attendance = await this.getAttendance();
         return attendance.filter(record => {
             const recordDate = new Date(record.date);
             return record.employee === employeeName &&
@@ -189,16 +551,17 @@ const DataManager = {
     },
 
     // Holiday Operations
-    getHolidays() {
-        return JSON.parse(localStorage.getItem(this.KEYS.HOLIDAYS) || '[]');
+    async getHolidays() {
+        const data = await this.loadData(this.KEYS.HOLIDAYS);
+        return data || [];
     },
 
-    saveHolidays(holidays) {
-        localStorage.setItem(this.KEYS.HOLIDAYS, JSON.stringify(holidays));
+    async saveHolidays(holidays) {
+        await this.saveData(this.KEYS.HOLIDAYS, holidays);
     },
 
-    isHoliday(date) {
-        const holidays = this.getHolidays();
+    async isHoliday(date) {
+        const holidays = await this.getHolidays();
         const dateStr = this.formatDate(date);
         return holidays.some(h => this.formatDate(new Date(h.date)) === dateStr);
     },
@@ -207,27 +570,28 @@ const DataManager = {
         return date.getDay() === 0;
     },
 
-    getHolidayReason(date) {
+    async getHolidayReason(date) {
         if (this.isSunday(date)) {
             return 'Sunday';
         }
-        const holidays = this.getHolidays();
+        const holidays = await this.getHolidays();
         const dateStr = this.formatDate(date);
         const holiday = holidays.find(h => this.formatDate(new Date(h.date)) === dateStr);
         return holiday ? holiday.reason : '';
     },
 
     // Advance Operations
-    getAdvances() {
-        return JSON.parse(localStorage.getItem(this.KEYS.ADVANCES) || '[]');
+    async getAdvances() {
+        const data = await this.loadData(this.KEYS.ADVANCES);
+        return data || [];
     },
 
-    saveAdvances(advances) {
-        localStorage.setItem(this.KEYS.ADVANCES, JSON.stringify(advances));
+    async saveAdvances(advances) {
+        await this.saveData(this.KEYS.ADVANCES, advances);
     },
 
-    getAdvancesByEmployee(employeeName, year, month) {
-        const advances = this.getAdvances();
+    async getAdvancesByEmployee(employeeName, year, month) {
+        const advances = await this.getAdvances();
         return advances.filter(adv => {
             if (adv.employee !== employeeName) return false;
             // If year is -1, return all advances for this employee
@@ -239,18 +603,18 @@ const DataManager = {
     },
 
     // Get total advance for employee in a specific month (for display purposes)
-    getTotalAdvanceForEmployee(employeeName, year, month) {
-        const advances = this.getAdvancesByEmployee(employeeName, year, month);
+    async getTotalAdvanceForEmployee(employeeName, year, month) {
+        const advances = await this.getAdvancesByEmployee(employeeName, year, month);
         return advances.reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
     },
 
     // Get total advance for employee in financial year
-    getTotalAdvanceForEmployeeFY(employeeName, year, month) {
+    async getTotalAdvanceForEmployeeFY(employeeName, year, month) {
         const fy = this.getFinancialYearForDate(new Date(year, month, 1));
         const fyStartDate = new Date(fy.startYear, 3, 1); // April 1
         const fyEndDate = new Date(fy.endYear, 2, 31); // March 31
 
-        const advances = this.getAdvances();
+        const advances = await this.getAdvances();
         const fyAdvances = advances.filter(adv => {
             if (adv.employee !== employeeName) return false;
             const advDate = new Date(adv.date);
@@ -261,21 +625,21 @@ const DataManager = {
     },
 
     // Get total advance balance for employee (all time)
-    getTotalAdvanceBalance(employeeName) {
-        const advances = this.getAdvances();
+    async getTotalAdvanceBalance(employeeName) {
+        const advances = await this.getAdvances();
         return advances
             .filter(adv => adv.employee === employeeName)
             .reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
     },
 
     // Get cumulative debited advance amount for employee (up to a specific month)
-    getCumulativeDebitedAdvance(employeeName, year, month) {
-        const settings = this.getSettings();
+    async getCumulativeDebitedAdvance(employeeName, year, month) {
+        const settings = await this.getSettings();
         const debitedAdvances = settings.debitedAdvances || {};
         let totalDebited = 0;
 
         // Sum all debits up to and including the specified month
-        Object.keys(debitedAdvances).forEach(key => {
+        for (const key of Object.keys(debitedAdvances)) {
             if (key.startsWith(`${employeeName}_`)) {
                 const [empName, debYear, debMonth] = key.split('_');
                 const debYearNum = parseInt(debYear);
@@ -284,57 +648,57 @@ const DataManager = {
                 // Check if this debit is before or equal to the specified month
                 if (debYearNum < year || (debYearNum === year && debMonthNum <= month)) {
                     // Only count if payout is done for that month
-                    if (this.isSalaryPayoutDone(debYearNum, debMonthNum)) {
+                    if (await this.isSalaryPayoutDone(debYearNum, debMonthNum)) {
                         totalDebited += parseFloat(debitedAdvances[key] || 0);
                     }
                 }
             }
-        });
+        }
 
         return totalDebited;
     },
 
     // Get debited advance amount for employee in a specific month
-    getDebitedAdvance(employeeName, year, month) {
-        const settings = this.getSettings();
+    async getDebitedAdvance(employeeName, year, month) {
+        const settings = await this.getSettings();
         const debitedAdvances = settings.debitedAdvances || {};
         const key = `${employeeName}_${year}_${month}`;
         return parseFloat(debitedAdvances[key] || 0);
     },
 
     // Save debited advance amount
-    saveDebitedAdvance(employeeName, year, month, amount) {
-        const settings = this.getSettings();
+    async saveDebitedAdvance(employeeName, year, month, amount) {
+        const settings = await this.getSettings();
         if (!settings.debitedAdvances) {
             settings.debitedAdvances = {};
         }
         const key = `${employeeName}_${year}_${month}`;
         settings.debitedAdvances[key] = amount;
-        this.saveSettings(settings);
+        await this.saveSettings(settings);
     },
 
     // Save waived advance amount (Free Funds)
-    saveWaivedAdvance(employeeName, year, month, amount) {
-        const settings = this.getSettings();
+    async saveWaivedAdvance(employeeName, year, month, amount) {
+        const settings = await this.getSettings();
         if (!settings.waivedAdvances) {
             settings.waivedAdvances = {};
         }
         const key = `${employeeName}_${year}_${month}`;
         settings.waivedAdvances[key] = amount;
-        this.saveSettings(settings);
+        await this.saveSettings(settings);
     },
 
     // Get waived advance amount
-    getWaivedAdvance(employeeName, year, month) {
-        const settings = this.getSettings();
+    async getWaivedAdvance(employeeName, year, month) {
+        const settings = await this.getSettings();
         const waivedAdvances = settings.waivedAdvances || {};
         const key = `${employeeName}_${year}_${month}`;
         return parseFloat(waivedAdvances[key] || 0);
     },
 
     // Get cumulative waived advance amount for employee (up to a specific month)
-    getCumulativeWaivedAdvance(employeeName, year, month) {
-        const settings = this.getSettings();
+    async getCumulativeWaivedAdvance(employeeName, year, month) {
+        const settings = await this.getSettings();
         const waivedAdvances = settings.waivedAdvances || {};
         let totalWaived = 0;
 
@@ -356,7 +720,7 @@ const DataManager = {
     },
 
     // Get remaining advance balance (total - cumulative debited - cumulative waived) for financial year
-    getRemainingAdvanceBalance(employeeName, year, month) {
+    async getRemainingAdvanceBalance(employeeName, year, month) {
         const fy = this.getFinancialYear();
         const fyStartYear = fy.startYear;
         const fyEndYear = fy.endYear;
@@ -365,7 +729,7 @@ const DataManager = {
         const fyStartDate = new Date(fyStartYear, 3, 1); // April 1
         const fyEndDate = new Date(fyEndYear, 2, 31); // March 31
 
-        const advances = this.getAdvances();
+        const advances = await this.getAdvances();
         const fyAdvances = advances.filter(adv => {
             if (adv.employee !== employeeName) return false;
             const advDate = new Date(adv.date);
@@ -375,10 +739,10 @@ const DataManager = {
         const totalFyAdvance = fyAdvances.reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
 
         // Get cumulative debited amount for the financial year up to the specified month
-        const cumulativeDebited = this.getCumulativeDebitedAdvance(employeeName, year, month);
+        const cumulativeDebited = await this.getCumulativeDebitedAdvance(employeeName, year, month);
 
         // Get cumulative waived amount for the financial year up to the specified month
-        const cumulativeWaived = this.getCumulativeWaivedAdvance(employeeName, year, month);
+        const cumulativeWaived = await this.getCumulativeWaivedAdvance(employeeName, year, month);
 
         // Calculate remaining balance for current FY
         const remainingFyBalance = Math.max(totalFyAdvance - cumulativeDebited - cumulativeWaived, 0);
@@ -403,10 +767,10 @@ const DataManager = {
             const totalPrevFyAdvance = prevFyAdvances.reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
 
             // Get debited amount for previous FY (up to March)
-            const prevFyDebited = this.getCumulativeDebitedAdvance(employeeName, prevFyEndYear, 2);
+            const prevFyDebited = await this.getCumulativeDebitedAdvance(employeeName, prevFyEndYear, 2);
 
             // Get waived amount for previous FY (up to March)
-            const prevFyWaived = this.getCumulativeWaivedAdvance(employeeName, prevFyEndYear, 2);
+            const prevFyWaived = await this.getCumulativeWaivedAdvance(employeeName, prevFyEndYear, 2);
 
             const prevFyRemaining = Math.max(totalPrevFyAdvance - prevFyDebited - prevFyWaived, 0);
 
@@ -430,9 +794,9 @@ const DataManager = {
     },
 
     // Settings Operations
-    getSettings() {
-        const settings = localStorage.getItem(this.KEYS.SETTINGS);
-        const parsed = settings ? JSON.parse(settings) : this.DEFAULT_SETTINGS;
+    async getSettings() {
+        const data = await this.loadData(this.KEYS.SETTINGS);
+        const parsed = data || this.DEFAULT_SETTINGS;
         // Ensure new properties exist for backward compatibility
         if (!parsed.salaryPayouts) {
             parsed.salaryPayouts = {};
@@ -440,13 +804,13 @@ const DataManager = {
         return parsed;
     },
 
-    saveSettings(settings) {
-        localStorage.setItem(this.KEYS.SETTINGS, JSON.stringify(settings));
+    async saveSettings(settings) {
+        await this.saveData(this.KEYS.SETTINGS, settings);
     },
 
     // Mark salary payout as completed for a specific month (year, monthIndex 0-11)
-    markSalaryPayoutDone(year, month, creditDate = null) {
-        const settings = this.getSettings();
+    async markSalaryPayoutDone(year, month, creditDate = null) {
+        const settings = await this.getSettings();
         if (!settings.salaryPayouts) {
             settings.salaryPayouts = {};
         }
@@ -456,12 +820,12 @@ const DataManager = {
             timestamp: new Date().toISOString(),
             creditDate: creditDate
         };
-        this.saveSettings(settings);
+        await this.saveSettings(settings);
     },
 
     // Cancel salary payout for a specific month for selected employees
-    cancelSalaryPayout(year, month, employeeNames) {
-        const settings = this.getSettings();
+    async cancelSalaryPayout(year, month, employeeNames) {
+        const settings = await this.getSettings();
 
         // 1. Remove debited advances for selected employees
         if (settings.debitedAdvances) {
@@ -483,7 +847,15 @@ const DataManager = {
             });
         }
 
-        // 3. Check if ANY data remains for this month
+        // 3. For daily-paid employees, we need to handle accumulated months
+        // Get all employees to check their salary types
+        const allEmployees = await this.getEmployees();
+        const canceledDailyEmployees = employeeNames.filter(empName => {
+            const emp = allEmployees.find(e => e.name === empName);
+            return emp && emp.salaryType === 'daily';
+        });
+
+        // 4. Check if ANY data remains for this month (from other employees)
         let hasData = false;
 
         if (settings.debitedAdvances) {
@@ -496,37 +868,140 @@ const DataManager = {
             if (hasWaivers) hasData = true;
         }
 
-        // 4. If no data remains, remove payout status
-        if (!hasData && settings.salaryPayouts) {
+        // 5. If canceling daily employees OR no data remains, remove payout status
+        if (settings.salaryPayouts) {
             const key = `${year}_${month}`;
-            delete settings.salaryPayouts[key];
+
+            // Remove if:
+            // a) No advance data remains for ANY employee, OR
+            // b) Only daily employees were canceled (their accumulated months need to be freed)
+            if (!hasData || canceledDailyEmployees.length > 0) {
+                delete settings.salaryPayouts[key];
+            }
         }
 
-        this.saveSettings(settings);
+        await this.saveSettings(settings);
     },
 
     // Check if salary payout is completed for a specific month
-    isSalaryPayoutDone(year, month) {
-        const settings = this.getSettings();
+    async isSalaryPayoutDone(year, month) {
+        const settings = await this.getSettings();
         const payouts = settings.salaryPayouts || {};
         const key = `${year}_${month}`;
         const record = payouts[key];
         return !!(record && record.done);
     },
 
+    // Check if ANY employee has a salary payout for the month
+    async hasAnySalaryPayout(year, month) {
+        const settings = await this.getSettings();
+
+        // Check debited advances
+        if (settings.debitedAdvances) {
+            const hasDebits = Object.keys(settings.debitedAdvances).some(key => key.endsWith(`_${year}_${month}`));
+            if (hasDebits) return true;
+        }
+
+        // Check waived advances
+        if (settings.waivedAdvances) {
+            const hasWaivers = Object.keys(settings.waivedAdvances).some(key => key.endsWith(`_${year}_${month}`));
+            if (hasWaivers) return true;
+        }
+
+        return false;
+    },
+
     // Get salary payout details for a specific month
-    getSalaryPayoutDetails(year, month) {
-        const settings = this.getSettings();
+    async getSalaryPayoutDetails(year, month) {
+        const settings = await this.getSettings();
         const payouts = settings.salaryPayouts || {};
         const key = `${year}_${month}`;
         return payouts[key] || null;
     },
 
-    getOTRate() {
-        return this.getSettings().otRate || this.DEFAULT_SETTINGS.otRate;
+    async getOTRate() {
+        const settings = await this.getSettings();
+        return settings.otRate || this.DEFAULT_SETTINGS.otRate;
     },
 
     // Utility Functions
+    /**
+     * Validate IFSC code format
+     * Format: First 4 alpha, 5th is 0, last 6 alphanumeric
+     * Example: SBIN0001234
+     */
+    validateIFSC(ifsc) {
+        if (!ifsc) return { valid: false, message: "IFSC code is required" };
+        const pattern = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+        if (!pattern.test(ifsc)) {
+            return { valid: false, message: "Invalid IFSC format (e.g., SBIN0001234)" };
+        }
+        return { valid: true };
+    },
+
+    /**
+     * Validate PAN number format
+     * Format: 5 alpha, 4 numeric, 1 alpha
+     * Example: ABCDE1234F
+     */
+    validatePAN(pan) {
+        if (!pan) return { valid: true }; // PAN is optional
+        const pattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+        if (!pattern.test(pan)) {
+            return { valid: false, message: "Invalid PAN format (e.g., ABCDE1234F)" };
+        }
+        return { valid: true };
+    },
+
+    /**
+     * Validate Aadhaar number
+     * Format: 12 digits
+     */
+    validateAadhaar(aadhaar) {
+        if (!aadhaar) return { valid: true }; // Aadhaar is optional
+        const pattern = /^[0-9]{12}$/;
+        if (!pattern.test(aadhaar)) {
+            return { valid: false, message: "Aadhaar must be exactly 12 digits" };
+        }
+        return { valid: true };
+    },
+
+    /**
+     * Validate employee bank details (when paymentMode = 'bank')
+     */
+    validateBankDetails(employee) {
+        if (employee.paymentMode !== 'bank') {
+            return { valid: true }; // Bank details not required for cash/cheque
+        }
+
+        const errors = [];
+        const bank = employee.bank || {};
+
+        if (!bank.beneficiaryName || !bank.beneficiaryName.trim()) {
+            errors.push("Beneficiary name is required for bank payment");
+        }
+        if (!bank.accountNo || !bank.accountNo.trim()) {
+            errors.push("Account number is required for bank payment");
+        }
+        if (!bank.branchName || !bank.branchName.trim()) {
+            errors.push("Branch name is required for bank payment");
+        }
+        if (!bank.address || !bank.address.trim()) {
+            errors.push("Bank branch address is required for bank payment");
+        }
+
+        // Validate IFSC
+        const ifscValidation = this.validateIFSC(bank.ifsc);
+        if (!ifscValidation.valid) {
+            errors.push(ifscValidation.message);
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors: errors
+        };
+    },
+
     formatDate(date) {
         if (!date) return '';
         const d = new Date(date);
@@ -750,6 +1225,7 @@ const DataManager = {
     calculateOTPay(otHours, baseSalary, salaryType = 'monthly', options = {}) {
         const {
             hWorkingOtHours = 0,
+            sOtHours = 0,
             perDaySalary = null,
             returnBreakdown = false
         } = options;
@@ -762,32 +1238,71 @@ const DataManager = {
                 standardPay: 0,
                 hWorkingHours: 0,
                 hWorkingRate: 0,
-                hWorkingPay: 0
+                hWorkingPay: 0,
+                sOtHours: 0,
+                sOtRate: 0,
+                sOtPay: 0
             } : 0;
         }
 
-        const standardOtHours = Math.max(otHours - hWorkingOtHours, 0);
-        const settings = this.getSettings();
-        const otMethod = settings.otCalculationMethod || this.DEFAULT_SETTINGS.otCalculationMethod;
-
-        let standardRate = 0;
-        if (standardOtHours > 0) {
-            if (otMethod === 'fixedRate') {
-                standardRate = settings.otRate || this.DEFAULT_SETTINGS.otRate;
-            } else {
-                standardRate = this.calculatePerHourSalary(baseSalary, salaryType);
-            }
-        }
-        const standardPay = standardOtHours * standardRate;
+        const standardOtHours = Math.max(otHours - hWorkingOtHours - sOtHours, 0);
+        // Use provided settings or fall back to defaults (cannot await here as function is sync)
+        const settings = options.settings || this.DEFAULT_SETTINGS;
+        const sOtMethod = settings.otCalculationMethod || 'salaryBased8'; // Use S-OT method for standard OT too
 
         let daySalary = perDaySalary;
         if (daySalary == null) {
             daySalary = salaryType === 'daily' ? baseSalary : baseSalary / 30;
         }
-        const hWorkingRate = hWorkingOtHours > 0 ? this.calculateHWorkingPerHour(daySalary) : 0;
+
+        // Standard OT uses S-OT calculation method
+        let standardRate = 0;
+        if (standardOtHours > 0) {
+            if (sOtMethod === 'fixedRate') {
+                standardRate = settings.otRate || this.DEFAULT_SETTINGS.otRate;
+            } else if (sOtMethod === 'salaryBased9') {
+                standardRate = daySalary / 9;
+            } else {
+                standardRate = daySalary / 8;
+            }
+        }
+        const standardPay = standardOtHours * standardRate;
+
+        // H-OT Calculation Logic
+        const hOtMethod = settings.hOtCalculationMethod || 'salaryBased8'; // Default to /8
+        let hWorkingRate = 0;
+
+        if (hWorkingOtHours > 0) {
+            if (hOtMethod === 'fixedRate') {
+                // Use the same fixed rate as normal OT
+                hWorkingRate = settings.otRate || this.DEFAULT_SETTINGS.otRate;
+            } else if (hOtMethod === 'salaryBased9') {
+                // Salary / 30 / 9
+                hWorkingRate = daySalary / 9;
+            } else {
+                // Default: salaryBased8 (Salary / 30 / 8)
+                hWorkingRate = daySalary / 8;
+            }
+        }
+
         const hWorkingPay = hWorkingOtHours * hWorkingRate;
 
-        const totalPay = standardPay + hWorkingPay;
+        // S-OT Calculation Logic (reuse sOtMethod from above)
+        let sOtRate = 0;
+
+        if (sOtHours > 0) {
+            if (sOtMethod === 'fixedRate') {
+                sOtRate = settings.otRate || this.DEFAULT_SETTINGS.otRate;
+            } else if (sOtMethod === 'salaryBased9') {
+                sOtRate = daySalary / 9;
+            } else {
+                sOtRate = daySalary / 8;
+            }
+        }
+
+        const sOtPay = sOtHours * sOtRate;
+
+        const totalPay = standardPay + hWorkingPay + sOtPay;
 
         if (returnBreakdown) {
             return {
@@ -797,7 +1312,10 @@ const DataManager = {
                 standardPay,
                 hWorkingHours: hWorkingOtHours,
                 hWorkingRate,
-                hWorkingPay
+                hWorkingPay,
+                sOtHours,
+                sOtRate,
+                sOtPay
             };
         }
 
@@ -829,9 +1347,104 @@ const DataManager = {
         if (data.holidays) this.saveHolidays(data.holidays);
         if (data.advances) this.saveAdvances(data.advances);
         if (data.settings) this.saveSettings(data.settings);
+    },
+
+    // ========================================
+    // PHASE 3: Salary Payout Tracking
+    // ========================================
+
+    /**
+     * Check if salary payout has been done for a specific month
+     * @param {number} year - The year
+     * @param {number} month - The month (0-11)
+     * @returns {Promise<boolean>} True if payout is done
+     */
+    async isSalaryPayoutDone(year, month) {
+        const settings = await this.getSettings();
+        const payouts = settings.salaryPayouts || {};
+        const key = `${year}_${month}`;
+        return payouts[key]?.done === true;
+    },
+
+    /**
+     * Check if ANY salary payout exists for a specific month (even if partial)
+     * @param {number} year - The year
+     * @param {number} month - The month (0-11)
+     * @returns {Promise<boolean>} True if any payout exists
+     */
+    async hasAnySalaryPayout(year, month) {
+        const settings = await this.getSettings();
+        const payouts = settings.salaryPayouts || {};
+        const key = `${year}_${month}`;
+        // Return true if the record exists and has employees
+        return !!(payouts[key] && payouts[key].employees && payouts[key].employees.length > 0);
+    },
+
+    /**
+     * Get salary payout details for a specific month
+     * @param {number} year - The year
+     * @param {number} month - The month (0-11)
+     * @returns {Promise<Object|null>} Payout details or null
+     */
+    async getSalaryPayoutDetails(year, month) {
+        const settings = await this.getSettings();
+        const payouts = settings.salaryPayouts || {};
+        const key = `${year}_${month}`;
+        return payouts[key] || null;
+    },
+
+    /**
+     * Mark salary payout as done for a specific month
+     * @param {number} year - The year
+     * @param {number} month - The month (0-11)
+     * @param {Object} details - Payout details
+     */
+    async markSalaryPayoutDone(year, month, details) {
+        const settings = await this.getSettings();
+        if (!settings.salaryPayouts) {
+            settings.salaryPayouts = {};
+        }
+
+        const key = `${year}_${month}`;
+        settings.salaryPayouts[key] = {
+            done: true,
+            creditDate: details.creditDate || null,
+            generatedAt: new Date().toISOString(),
+            employees: details.employees || [],
+            totalPaid: details.totalPaid || 0
+        };
+
+        await this.saveSettings(settings);
+        console.log(`Marked salary payout as done for ${year}-${month}`);
+    },
+
+    /**
+     * Validate bank details for all employees with bank payment mode
+     * @param {Array} employees - Array of employee objects
+     * @returns {Object} Validation result with errors array
+     */
+    validateBankDetailsForPayout(employees) {
+        const errors = [];
+
+        employees.forEach(emp => {
+            if (emp.paymentMode === 'bank') {
+                const validation = this.validateBankDetails(emp);
+                if (!validation.valid) {
+                    errors.push({
+                        employee: emp.name,
+                        errors: validation.errors
+                    });
+                }
+            }
+        });
+
+        return {
+            valid: errors.length === 0,
+            errors: errors
+        };
     }
+
 };
 
 // Initialize on load
 DataManager.init();
-

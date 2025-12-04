@@ -2,11 +2,11 @@
 const EmployeesModule = {
     editingEmployee: null,
 
-    load() {
-        this.renderEmployeeList();
+    async load() {
+        await this.renderEmployeeList();
     },
 
-    renderEmployeeList() {
+    async renderEmployeeList() {
         const view = document.getElementById('employeesView');
         if (!view) {
             console.error('employeesView element not found');
@@ -17,13 +17,24 @@ const EmployeesModule = {
         view.classList.remove('d-none');
         view.style.display = '';
 
-        const employees = DataManager.getEmployees();
-        const activeEmployees = DataManager.getActiveEmployees();
+        const employees = await DataManager.getEmployees();
+        const activeEmployees = await DataManager.getActiveEmployees();
+        const canManage = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_EMPLOYEES);
 
         view.innerHTML = `
             <div class="row mb-4">
-                <div class="col-12">
+                <div class="col-12 d-flex justify-content-between align-items-center">
                     <h2>Employee Directory</h2>
+                    ${canManage ? `
+                    <div>
+                        <button class="btn btn-success me-2" onclick="EmployeesModule.exportSampleFile()">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Export Sample
+                        </button>
+                        <button class="btn btn-primary" onclick="EmployeesModule.showEmployeeForm()">
+                            <i class="bi bi-plus-circle"></i> Add New Employee
+                        </button>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
             <div class="row">
@@ -59,6 +70,14 @@ const EmployeesModule = {
                                                     <button class="btn btn-sm btn-info" onclick="EmployeesModule.viewEmployeeDetails('${emp.name.replace(/'/g, "\\'")}')">
                                                         <i class="bi bi-eye"></i> View Details
                                                     </button>
+                                                    ${canManage ? `
+                                                    <button class="btn btn-sm btn-primary ms-1" onclick="EmployeesModule.editEmployee('${emp.id}')">
+                                                        <i class="bi bi-pencil"></i> Edit
+                                                    </button>
+                                                    <button class="btn btn-sm btn-danger ms-1" onclick="EmployeesModule.deleteEmployee('${emp.id}')">
+                                                        <i class="bi bi-trash"></i> Delete
+                                                    </button>
+                                                    ` : ''}
                                                 </td>
                                             </tr>
                                         `).join('')}
@@ -75,9 +94,9 @@ const EmployeesModule = {
         this.initializeModal();
     },
 
-    getAdminTableHTML() {
-        const employees = DataManager.getEmployees();
-        const activeEmployees = DataManager.getActiveEmployees();
+    async getAdminTableHTML() {
+        const employees = await DataManager.getEmployees();
+        const activeEmployees = await DataManager.getActiveEmployees();
 
         return `
             <div class="card">
@@ -133,66 +152,182 @@ const EmployeesModule = {
     getModalHTML() {
         return `
             <div id="employeeFormModal" class="modal fade" tabindex="-1">
-                <div class="modal-dialog">
+                <div class="modal-dialog modal-xl">
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="employeeFormTitle">Add Employee</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            <form id="employeeForm">
+                            <ul class="nav nav-tabs" id="employeeTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="personal-tab" data-bs-toggle="tab" data-bs-target="#personal" type="button">
+                                        <i class="bi bi-person"></i> Personal
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation" id="bank-tab-nav">
+                                    <button class="nav-link" id="bank-tab" data-bs-toggle="tab" data-bs-target="#bank" type="button">
+                                        <i class="bi bi-bank"></i> Bank Details
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="kyc-tab" data-bs-toggle="tab" data-bs-target="#kyc" type="button">
+                                        <i class="bi bi-card-text"></i> KYC
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="address-tab" data-bs-toggle="tab" data-bs-target="#address" type="button">
+                                        <i class="bi bi-geo-alt"></i> Address
+                                    </button>
+                                </li>
+                            </ul>
+                            
+                            <form id="employeeForm" class="mt-3">
                                 <input type="hidden" id="employeeId">
-                                <div class="mb-3">
-                                    <label for="employeeName" class="form-label">Name *</label>
-                                    <input type="text" class="form-control" id="employeeName" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="dateOfJoining" class="form-label">Date of Joining *</label>
-                                    <input type="date" class="form-control" id="dateOfJoining" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="dateOfRelieving" class="form-label">Date of Relieving (Optional)</label>
-                                    <input type="date" class="form-control" id="dateOfRelieving">
-                                </div>
-                                <div class="mb-3">
-                                    <label for="salaryType" class="form-label">Salary Type *</label>
-                                    <select class="form-select" id="salaryType" required>
-                                        <option value="monthly">Monthly Salary</option>
-                                        <option value="daily">Daily Salary</option>
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="baseSalary" class="form-label">Basic Salary (₹) *</label>
-                                    <input type="number" class="form-control" id="baseSalary" step="0.01" min="0" required>
-                                    <small class="form-text text-muted">Enter monthly salary if Monthly, or daily salary if Daily</small>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="idProofType" class="form-label">ID Proof Type *</label>
-                                    <select class="form-select" id="idProofType" required>
-                                        <option value="">Select ID Proof</option>
-                                        <option value="Aadhar Card">Aadhar Card</option>
-                                        <option value="Voter ID">Voter ID</option>
-                                        <option value="Driving License">Driving License</option>
-                                        <option value="PAN Card">PAN Card</option>
-                                        <option value="Passport">Passport</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="idProofNumber" class="form-label">ID Proof Number *</label>
-                                    <input type="text" class="form-control" id="idProofNumber" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="employeePhoto" class="form-label">Employee Photo</label>
-                                    <input type="file" class="form-control" id="employeePhoto" accept="image/*" onchange="EmployeesModule.handlePhotoUpload(event)">
-                                    <small class="form-text text-muted">Maximum file size: 20 MB</small>
-                                    <div id="photoPreview" class="mt-2"></div>
+                                <div class="tab-content" id="employeeTabsContent">
+                                    <!-- Personal Tab -->
+                                    <div class="tab-pane fade show active" id="personal" role="tabpanel">
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="employeeName" class="form-label">Name *</label>
+                                                <input type="text" class="form-control" id="employeeName" required>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="phone" class="form-label">Phone</label>
+                                                <input type="tel" class="form-control" id="phone" pattern="[0-9]{10}">
+                                                <small class="form-text text-muted">10 digits</small>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="email" class="form-label">Email</label>
+                                                <input type="email" class="form-control" id="email">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="dateOfJoining" class="form-label">Date of Joining *</label>
+                                                <input type="date" class="form-control" id="dateOfJoining" required>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="dateOfRelieving" class="form-label">Date of Relieving</label>
+                                                <input type="date" class="form-control" id="dateOfRelieving">
+                                                <small class="form-text text-muted">Leave empty if currently active</small>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="salaryType" class="form-label">Salary Type *</label>
+                                                <select class="form-select" id="salaryType" required>
+                                                    <option value="monthly">Monthly Salary</option>
+                                                    <option value="daily">Daily Salary</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="baseSalary" class="form-label">Basic Salary (₹) *</label>
+                                                <input type="number" class="form-control" id="baseSalary" step="0.01" min="0" required>
+                                                <small class="form-text text-muted">Monthly or daily rate</small>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="paymentMode" class="form-label">Payment Mode *</label>
+                                                <select class="form-select" id="paymentMode" required onchange="EmployeesModule.handlePaymentModeChange()">
+                                                    <option value="bank">Bank Transfer</option>
+                                                    <option value="cash">Cash</option>
+                                                    <option value="cheque">Cheque</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Bank Details Tab -->
+                                    <div class="tab-pane fade" id="bank" role="tabpanel">
+                                        <div class="alert alert-info">
+                                            <i class="bi bi-info-circle"></i> These details are required for salary remittance via bank transfer
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="beneficiaryName" class="form-label">Beneficiary Name *</label>
+                                                <input type="text" class="form-control" id="beneficiaryName">
+                                                <small class="form-text text-muted">As per bank records</small>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="accountNo" class="form-label">Account Number *</label>
+                                                <input type="text" class="form-control" id="accountNo">
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="ifsc" class="form-label">IFSC Code *</label>
+                                                <input type="text" class="form-control" id="ifsc" pattern="[A-Z]{4}0[A-Z0-9]{6}" style="text-transform: uppercase">
+                                                <small class="form-text text-muted">Format: SBIN0001234</small>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="branchName" class="form-label">Branch Name *</label>
+                                                <input type="text" class="form-control" id="branchName">
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="bankAddress" class="form-label">Bank Branch Address *</label>
+                                            <textarea class="form-control" id="bankAddress" rows="2"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <!-- KYC Tab -->
+                                    <div class="tab-pane fade" id="kyc" role="tabpanel">
+                                        <div class="alert alert-warning">
+                                            <i class="bi bi-shield-check"></i> KYC details are optional but recommended for compliance
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="pan" class="form-label">PAN Number</label>
+                                                <input type="text" class="form-control" id="pan" maxlength="10" style="text-transform: uppercase">
+                                                <small class="form-text text-muted">Format: ABCDE1234F</small>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="aadhaar" class="form-label">Aadhaar Number</label>
+                                                <input type="text" class="form-control" id="aadhaar" maxlength="12">
+                                                <small class="form-text text-muted">12 digits</small>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="employeePhoto" class="form-label">Employee Photo</label>
+                                                <input type="file" class="form-control" id="employeePhoto" accept="image/*" onchange="EmployeesModule.handlePhotoUpload(event, 'employee')">
+                                                <small class="form-text text-muted">Max 15 MB</small>
+                                                <div id="employeePhotoPreview" class="mt-2"></div>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label for="aadhaarPhoto" class="form-label">Aadhaar Card Photo</label>
+                                                <input type="file" class="form-control" id="aadhaarPhoto" accept="image/*" onchange="EmployeesModule.handlePhotoUpload(event, 'aadhaar')">
+                                                <small class="form-text text-muted">Max 15 MB</small>
+                                                <div id="aadhaarPhotoPreview" class="mt-2"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Address Tab -->
+                                    <div class="tab-pane fade" id="address" role="tabpanel">
+                                        <div class="mb-3">
+                                            <label for="permanentAddress" class="form-label">Permanent Address</label>
+                                            <textarea class="form-control" id="permanentAddress" rows="3"></textarea>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="presentAddress" class="form-label">Present Address</label>
+                                            <textarea class="form-control" id="presentAddress" rows="3"></textarea>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="sameAsPermAddress" onchange="EmployeesModule.handleSameAddress()">
+                                            <label class="form-check-label" for="sameAsPermAddress">
+                                                Same as Permanent Address
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                             </form>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" onclick="EmployeesModule.saveEmployee()">Save</button>
+                            <button type="button" class="btn btn-primary" onclick="EmployeesModule.saveEmployee()">Save Employee</button>
                         </div>
                     </div>
                 </div>
@@ -209,6 +344,42 @@ const EmployeesModule = {
         const modalElement = document.getElementById('employeeFormModal');
         if (modalElement) {
             this.modal = new bootstrap.Modal(modalElement);
+        }
+    },
+
+    /**
+     * Handle payment mode change - show/hide bank tab
+     */
+    handlePaymentModeChange() {
+        const paymentMode = document.getElementById('paymentMode')?.value;
+        const bankTabNav = document.getElementById('bank-tab-nav');
+
+        if (paymentMode === 'bank') {
+            bankTabNav?.classList.remove('d-none');
+        } else {
+            bankTabNav?.classList.add('d-none');
+            // Switch to personal tab if currently on bank tab
+            const bankTab = document.getElementById('bank');
+            if (bankTab?.classList.contains('active')) {
+                const personalTabBtn = document.getElementById('personal-tab');
+                personalTabBtn?.click();
+            }
+        }
+    },
+
+    /**
+     * Handle same address checkbox
+     */
+    handleSameAddress() {
+        const same = document.getElementById('sameAsPermAddress')?.checked;
+        const permanent = document.getElementById('permanentAddress')?.value;
+        const present = document.getElementById('presentAddress');
+
+        if (same && present) {
+            present.value = permanent;
+            present.readOnly = true;
+        } else if (present) {
+            present.readOnly = false;
         }
     },
 
@@ -249,7 +420,7 @@ const EmployeesModule = {
         }, 100); // Reduced timeout for faster attachment
     },
 
-    showEmployeeForm(employeeId = null) {
+    async showEmployeeForm(employeeId = null) {
         this.editingEmployee = employeeId;
 
         // Ensure modal HTML exists in DOM first
@@ -268,32 +439,72 @@ const EmployeesModule = {
         const title = document.getElementById('employeeFormTitle');
 
         if (employeeId) {
-            const employees = DataManager.getEmployees();
+            const employees = await DataManager.getEmployees();
             const employee = employees.find(e => e.id === employeeId);
             if (employee) {
-                document.getElementById('employeeId').value = employee.id;
-                document.getElementById('employeeName').value = employee.name;
+                // Personal Tab
+                document.getElementById('employeeId').value = employee.id || '';
+                document.getElementById('employeeName').value = employee.name || '';
+                if (document.getElementById('phone')) document.getElementById('phone').value = employee.phone || '';
+                if (document.getElementById('email')) document.getElementById('email').value = employee.email || '';
                 document.getElementById('dateOfJoining').value = DataManager.formatDate(employee.dateOfJoining);
                 document.getElementById('dateOfRelieving').value = employee.dateOfRelieving ? DataManager.formatDate(employee.dateOfRelieving) : '';
                 document.getElementById('salaryType').value = employee.salaryType || 'monthly';
                 document.getElementById('baseSalary').value = employee.baseSalary || '';
-                document.getElementById('idProofType').value = employee.idProofType || '';
-                document.getElementById('idProofNumber').value = employee.idProofNumber || '';
+                if (document.getElementById('paymentMode')) document.getElementById('paymentMode').value = employee.paymentMode || 'bank';
 
-                // Show existing photo if available
-                if (employee.photo) {
-                    const preview = document.getElementById('photoPreview');
-                    preview.innerHTML = `<img src="${employee.photo}" alt="Employee Photo" style="max-width: 150px; max-height: 150px; border-radius: 5px;">`;
-                    this.photoData = employee.photo; // Preserve existing photo
+                // Bank Tab
+                const bank = employee.bank || {};
+                if (document.getElementById('beneficiaryName')) document.getElementById('beneficiaryName').value = bank.beneficiaryName || '';
+                if (document.getElementById('accountNo')) document.getElementById('accountNo').value = bank.accountNo || '';
+                if (document.getElementById('ifsc')) document.getElementById('ifsc').value = bank.ifsc || '';
+                if (document.getElementById('branchName')) document.getElementById('branchName').value = bank.branchName || '';
+                if (document.getElementById('bankAddress')) document.getElementById('bankAddress').value = bank.address || '';
+
+                // KYC Tab
+                if (document.getElementById('pan')) document.getElementById('pan').value = employee.pan || '';
+                if (document.getElementById('aadhaar')) document.getElementById('aadhaar').value = employee.aadhaar || '';
+
+                // Photos
+                if (employee.employeePhoto) {
+                    this.employeePhotoData = employee.employeePhoto;
+                    const preview = document.getElementById('employeePhotoPreview');
+                    if (preview) {
+                        preview.innerHTML = `<img src="${employee.employeePhoto}" alt="Employee Photo" style="max-width: 150px; max-height: 150px; border-radius: 5px; object-fit: cover;">`;
+                    }
                 }
+                if (employee.aadhaarPhoto) {
+                    this.aadhaarPhotoData = employee.aadhaarPhoto;
+                    const preview = document.getElementById('aadhaarPhotoPreview');
+                    if (preview) {
+                        preview.innerHTML = `<img src="${employee.aadhaarPhoto}" alt="Aadhaar Photo" style="max-width: 150px; max-height: 150px; border-radius: 5px; object-fit: cover;">`;
+                    }
+                }
+
+                // Address Tab
+                const address = employee.address || {};
+                if (document.getElementById('permanentAddress')) document.getElementById('permanentAddress').value = address.permanent || '';
+                if (document.getElementById('presentAddress')) document.getElementById('presentAddress').value = address.present || '';
+
+                // Handle payment mode visibility
+                this.handlePaymentModeChange();
 
                 title.textContent = 'Edit Employee';
             }
         } else {
             form.reset();
             document.getElementById('employeeId').value = '';
-            document.getElementById('photoPreview').innerHTML = '';
-            this.photoData = null;
+            if (document.getElementById('paymentMode')) document.getElementById('paymentMode').value = 'bank';
+
+            // Clear photo previews
+            this.employeePhotoData = null;
+            this.aadhaarPhotoData = null;
+            const employeePhotoPreview = document.getElementById('employeePhotoPreview');
+            const aadhaarPhotoPreview = document.getElementById('aadhaarPhotoPreview');
+            if (employeePhotoPreview) employeePhotoPreview.innerHTML = '';
+            if (aadhaarPhotoPreview) aadhaarPhotoPreview.innerHTML = '';
+
+            this.handlePaymentModeChange();
             title.textContent = 'Add Employee';
         }
 
@@ -312,91 +523,195 @@ const EmployeesModule = {
         }
     },
 
-    saveEmployee() {
-        const form = document.getElementById('employeeForm');
-        if (!form.checkValidity()) {
-            form.reportValidity();
-            return;
-        }
+    async saveEmployee() {
+        console.log('Save Employee called');
 
-        const employeeId = document.getElementById('employeeId').value;
-        const name = document.getElementById('employeeName').value.trim();
-        const dateOfJoining = document.getElementById('dateOfJoining').value;
-        const dateOfRelieving = document.getElementById('dateOfRelieving').value;
-        const salaryType = document.getElementById('salaryType').value;
-        const baseSalary = parseFloat(document.getElementById('baseSalary').value);
-        const idProofType = document.getElementById('idProofType').value;
-        const idProofNumber = document.getElementById('idProofNumber').value.trim();
-        const photoInput = document.getElementById('employeePhoto');
-        const photoData = this.photoData || null;
-
-        if (!name || !dateOfJoining || !salaryType || isNaN(baseSalary) || baseSalary < 0 || !idProofType || !idProofNumber) {
-            App.showNotification('Please fill all required fields with valid values', 'error');
-            return;
-        }
-
-        const employees = DataManager.getEmployees();
-
-        if (employeeId) {
-            // Update existing
-            const index = employees.findIndex(e => e.id === employeeId);
-            if (index !== -1) {
-                employees[index] = {
-                    ...employees[index],
-                    name,
-                    dateOfJoining,
-                    dateOfRelieving: dateOfRelieving || null,
-                    salaryType,
-                    baseSalary,
-                    idProofType,
-                    idProofNumber,
-                    photo: photoData || employees[index].photo
-                };
+        try {
+            const form = document.getElementById('employeeForm');
+            if (!form) {
+                console.error('Form not found');
+                App.showNotification('Form not found', 'error');
+                return;
             }
-        } else {
-            // Add new
-            const newEmployee = {
-                id: 'emp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+
+            if (!form.checkValidity()) {
+                console.log('Form validation failed');
+                form.reportValidity();
+                return;
+            }
+
+            console.log('Form is valid, collecting data...');
+
+            const employeeId = document.getElementById('employeeId')?.value;
+
+            // Personal Tab
+            const name = document.getElementById('employeeName')?.value.trim();
+            const phone = document.getElementById('phone')?.value.trim();
+            const email = document.getElementById('email')?.value.trim();
+            const dateOfJoining = document.getElementById('dateOfJoining')?.value;
+            const dateOfRelieving = document.getElementById('dateOfRelieving')?.value;
+            const salaryType = document.getElementById('salaryType')?.value;
+            const baseSalary = parseFloat(document.getElementById('baseSalary')?.value);
+            const paymentMode = document.getElementById('paymentMode')?.value;
+
+            // Bank Tab
+            const beneficiaryName = document.getElementById('beneficiaryName')?.value?.trim() || "";
+            const accountNo = document.getElementById('accountNo')?.value?.trim() || "";
+            const ifsc = document.getElementById('ifsc')?.value?.trim().toUpperCase() || "";
+            const branchName = document.getElementById('branchName')?.value?.trim() || "";
+            const bankAddress = document.getElementById('bankAddress')?.value?.trim() || "";
+
+            // KYC Tab
+            const pan = document.getElementById('pan')?.value?.trim().toUpperCase() || "";
+            const aadhaar = document.getElementById('aadhaar')?.value?.trim() || "";
+
+            // Address Tab
+            const permanentAddress = document.getElementById('permanentAddress')?.value?.trim() || "";
+            const presentAddress = document.getElementById('presentAddress')?.value?.trim() || "";
+
+            console.log('Data collected:', { name, dateOfJoining, salaryType, baseSalary, paymentMode });
+
+            // Basic validation
+            if (!name || !dateOfJoining || !salaryType || isNaN(baseSalary) || baseSalary < 0) {
+                console.error('Required fields missing:', { name: !!name, dateOfJoining: !!dateOfJoining, salaryType: !!salaryType, baseSalary });
+                App.showNotification('Please fill all required fields with valid values', 'error');
+                return;
+            }
+
+            // Build employee object
+            const employeeData = {
                 name,
+                phone,
+                email,
                 dateOfJoining,
                 dateOfRelieving: dateOfRelieving || null,
                 salaryType,
                 baseSalary,
-                idProofType,
-                idProofNumber,
-                photo: photoData
+                paymentMode: paymentMode || 'bank',
+                bank: {
+                    beneficiaryName,
+                    accountNo,
+                    ifsc,
+                    branchName,
+                    address: bankAddress
+                },
+                pan,
+                aadhaar,
+                address: {
+                    permanent: permanentAddress,
+                    present: presentAddress
+                },
+                employeePhoto: this.employeePhotoData || null,
+                aadhaarPhoto: this.aadhaarPhotoData || null
             };
-            employees.push(newEmployee);
+
+            console.log('Employee data built, validating...');
+
+            // Validate bank details if paymentMode is bank
+            const bankValidation = DataManager.validateBankDetails(employeeData);
+            if (!bankValidation.valid) {
+                console.error('Bank validation failed:', bankValidation.errors);
+                App.showNotification(bankValidation.errors.join('\n'), 'error');
+                return;
+            }
+
+            // Validate PAN if provided
+            if (pan) {
+                const panValidation = DataManager.validatePAN(pan);
+                if (!panValidation.valid) {
+                    console.error('PAN validation failed:', panValidation.message);
+                    App.showNotification(panValidation.message, 'error');
+                    return;
+                }
+            }
+
+            // Validate Aadhaar if provided
+            if (aadhaar) {
+                const aadhaarValidation = DataManager.validateAadhaar(aadhaar);
+                if (!aadhaarValidation.valid) {
+                    console.error('Aadhaar validation failed:', aadhaarValidation.message);
+                    App.showNotification(aadhaarValidation.message, 'error');
+                    return;
+                }
+            }
+
+            console.log('All validations passed, saving...');
+
+            const employees = await DataManager.getEmployees();
+
+            if (employeeId) {
+                // Update existing
+                console.log('Updating employee:', employeeId);
+                const index = employees.findIndex(e => e.id === employeeId);
+                if (index !== -1) {
+                    const oldEmployee = employees[index];
+                    const oldSalary = oldEmployee.baseSalary || 0;
+
+                    // Check if salary has changed
+                    if (oldSalary !== baseSalary) {
+                        console.log(`Salary changed for ${name}: ₹${oldSalary} → ₹${baseSalary}`);
+
+                        // Track revision (will be saved with employees)
+                        await DataManager.addSalaryRevision(
+                            name,
+                            baseSalary,
+                            'Salary updated',
+                            new Date().toISOString().split('T')[0]
+                        );
+                    }
+
+                    employees[index] = DataManager.addTimestamp({
+                        ...employees[index],
+                        ...employeeData,
+                        employeePhoto: this.employeePhotoData || employees[index].employeePhoto || null,
+                        aadhaarPhoto: this.aadhaarPhotoData || employees[index].aadhaarPhoto || null
+                    });
+                }
+            } else {
+                // Add new - generate ID
+                console.log('Adding new employee');
+                const newId = await DataManager.generateEmployeeId();
+                const newEmployee = DataManager.addTimestamp({
+                    id: newId,
+                    ...employeeData
+                });
+                employees.push(newEmployee);
+            }
+
+            // Clear photo data
+            this.employeePhotoData = null;
+            this.aadhaarPhotoData = null;
+
+            console.log('Saving to database...');
+            await DataManager.saveEmployees(employees);
+
+            console.log('Hiding modal...');
+            this.modal.hide();
+
+            console.log('Refreshing view...');
+            if (App.currentView === 'admin') {
+                await AdminModule.load();
+            } else {
+                await this.renderEmployeeList();
+            }
+
+            console.log('Save complete!');
+            App.showNotification('Employee saved successfully', 'success');
+
+        } catch (error) {
+            console.error('Error saving employee:', error);
+            App.showNotification('Error saving employee: ' + error.message, 'error');
         }
-
-        // Clear photo data
-        this.photoData = null;
-        const photoPreview = document.getElementById('photoPreview');
-        if (photoPreview) photoPreview.innerHTML = '';
-        if (photoInput) photoInput.value = '';
-
-        DataManager.saveEmployees(employees);
-        this.modal.hide();
-        DataManager.saveEmployees(employees);
-        this.modal.hide();
-
-        if (App.currentView === 'admin') {
-            AdminModule.load();
-        } else {
-            this.renderEmployeeList();
-        }
-
-        App.showNotification('Employee saved successfully', 'success');
     },
 
-    handlePhotoUpload(event) {
+    handlePhotoUpload(event, type = 'employee') {
         const file = event.target.files[0];
         if (!file) return;
 
-        // Check file size (20 MB = 20 * 1024 * 1024 bytes)
-        const maxSize = 20 * 1024 * 1024;
+        // Check file size (15 MB = 15 * 1024 * 1024 bytes)
+        const maxSize = 15 * 1024 * 1024;
         if (file.size > maxSize) {
-            App.showNotification('File size exceeds 20 MB limit. Please select a smaller file.', 'error');
+            App.showNotification('File size exceeds 15 MB limit. Please select a smaller file.', 'error');
             event.target.value = '';
             return;
         }
@@ -408,13 +723,29 @@ const EmployeesModule = {
             return;
         }
 
-        // Convert to base64
         const reader = new FileReader();
         reader.onload = (e) => {
-            this.photoData = e.target.result;
-            const preview = document.getElementById('photoPreview');
-            preview.innerHTML = `<img src="${e.target.result}" alt="Preview" style="max-width: 150px; max-height: 150px; border-radius: 5px; margin-top: 10px;">`;
+            const photoData = e.target.result;
+
+            if (type === 'employee') {
+                this.employeePhotoData = photoData;
+                const preview = document.getElementById('employeePhotoPreview');
+                if (preview) {
+                    preview.innerHTML = `<img src="${photoData}" alt="Employee Photo" style="max-width: 150px; max-height: 150px; border-radius: 5px; object-fit: cover;">`;
+                }
+            } else if (type === 'aadhaar') {
+                this.aadhaarPhotoData = photoData;
+                const preview = document.getElementById('aadhaarPhotoPreview');
+                if (preview) {
+                    preview.innerHTML = `<img src="${photoData}" alt="Aadhaar Photo" style="max-width: 150px; max-height: 150px; border-radius: 5px; object-fit: cover;">`;
+                }
+            }
         };
+
+        reader.onerror = () => {
+            App.showNotification('Error reading file. Please try again.', 'error');
+        };
+
         reader.readAsDataURL(file);
     },
 
@@ -422,23 +753,45 @@ const EmployeesModule = {
         this.showEmployeeForm(employeeId);
     },
 
-    deleteEmployee(employeeId) {
+    async deleteEmployee(employeeId) {
         if (!App.confirmAction('Are you sure you want to delete this employee? This action cannot be undone.')) {
             return;
         }
 
-        const employees = DataManager.getEmployees();
+        const employees = await DataManager.getEmployees();
         const filtered = employees.filter(e => e.id !== employeeId);
-        DataManager.saveEmployees(filtered);
+        await DataManager.saveEmployees(filtered);
 
         // Refresh the appropriate view
         if (App.currentView === 'admin') {
-            AdminModule.load();
+            await AdminModule.load();
         } else {
-            this.renderEmployeeList();
+            // Assuming renderEmployeeList is async or will be made async elsewhere
+            // If it's not async, 'await' here will still work but won't pause execution
+            await this.renderEmployeeList();
         }
 
         App.showNotification('Employee deleted successfully', 'success');
+    },
+
+    exportSampleFile() {
+        const headers = ['Name', 'Employee ID', 'Designation', 'Date of Joining (YYYY-MM-DD)', 'Basic Salary', 'Salary Type (monthly/daily)', 'Phone', 'Email'];
+        const sampleData = ['John Doe', 'EMP001', 'Engineer', '2023-01-01', '25000', 'monthly', '9876543210', 'john@example.com'];
+
+        const csvContent = [
+            headers.join(','),
+            sampleData.join(',')
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'employee_bulk_import_sample.csv';
+        a.click();
+        window.URL.revokeObjectURL(url);
     }
 };
 
+// Expose to window
+window.EmployeesModule = EmployeesModule;
