@@ -74,6 +74,9 @@ const EmployeesModule = {
                                                     <button class="btn btn-sm btn-primary ms-1" onclick="EmployeesModule.editEmployee('${emp.id}')">
                                                         <i class="bi bi-pencil"></i> Edit
                                                     </button>
+                                                    <button class="btn btn-sm btn-warning ms-1" onclick="EmployeesModule.viewSalaryHistory('${emp.name.replace(/'/g, "\\'")}')">
+                                                        <i class="bi bi-clock-history"></i> Salary History
+                                                    </button>
                                                     <button class="btn btn-sm btn-danger ms-1" onclick="EmployeesModule.deleteEmployee('${emp.id}')">
                                                         <i class="bi bi-trash"></i> Delete
                                                     </button>
@@ -790,6 +793,100 @@ const EmployeesModule = {
         a.download = 'employee_bulk_import_sample.csv';
         a.click();
         window.URL.revokeObjectURL(url);
+    },
+
+    async viewSalaryHistory(employeeName) {
+        console.log('View Salary History for:', employeeName);
+
+        const revisions = await DataManager.getSalaryRevisionsForEmployee(employeeName);
+
+        // Create or get modal
+        let modal = document.getElementById('salaryHistoryModal');
+        if (!modal) {
+            // Create modal HTML
+            const modalHTML = `
+                <div id="salaryHistoryModal" class="modal fade" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Salary Revision History - <span id="salaryHistoryEmployeeName"></span></h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body" id="salaryHistoryContent">
+                                <!-- Content will be populated here -->
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            modal = document.getElementById('salaryHistoryModal');
+        }
+
+        // Update modal content
+        document.getElementById('salaryHistoryEmployeeName').textContent = employeeName;
+
+        const content = document.getElementById('salaryHistoryContent');
+        if (revisions.length === 0) {
+            content.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> No salary revision history found for this employee.
+                </div>
+            `;
+        } else {
+            content.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Old Salary</th>
+                                <th>New Salary</th>
+                                <th>Change</th>
+                                <th>Reason</th>
+                                <th>Changed By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${revisions.map(rev => {
+                const change = rev.newSalary - rev.oldSalary;
+                const changePercent = rev.oldSalary > 0 ? ((change / rev.oldSalary) * 100).toFixed(2) : 0;
+                const changeClass = change > 0 ? 'text-success' : (change < 0 ? 'text-danger' : 'text-muted');
+                const changeIcon = change > 0 ? '↑' : (change < 0 ? '↓' : '—');
+
+                return `
+                                    <tr>
+                                        <td>${DataManager.formatDateDisplay(rev.date)}</td>
+                                        <td>₹${rev.oldSalary.toLocaleString('en-IN')}</td>
+                                        <td>₹${rev.newSalary.toLocaleString('en-IN')}</td>
+                                        <td class="${changeClass}">
+                                            ${changeIcon} ₹${Math.abs(change).toLocaleString('en-IN')}
+                                            ${rev.oldSalary > 0 ? `(${changePercent}%)` : ''}
+                                        </td>
+                                        <td>${rev.reason}</td>
+                                        <td><small class="text-muted">${rev.changedBy === 'system' ? 'System' : 'Admin'}</small></td>
+                                    </tr>
+                                `;
+            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-3">
+                    <p class="text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        Total revisions: ${revisions.length} | 
+                        Current salary: ₹${revisions[0].newSalary.toLocaleString('en-IN')}
+                    </p>
+                </div>
+            `;
+        }
+
+        // Show modal
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
     }
 };
 
