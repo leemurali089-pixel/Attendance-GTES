@@ -190,6 +190,14 @@ const VouchersUI = {
         const isPayment = type === 'payment';
         const title = isPayment ? 'Payment Out (To Supplier)' : 'Receipt In (From Customer)';
 
+        // Cleanup existing modal if any
+        const existing = document.getElementById('createVoucherModal');
+        if (existing) {
+            const inst = bootstrap.Modal.getInstance(existing);
+            if (inst) inst.dispose();
+            existing.remove();
+        }
+
         const modalHtml = `
             <div class="modal fade" id="createVoucherModal" tabindex="-1">
                 <div class="modal-dialog modal-xl modal-dialog-centered"> <!-- XL modal for more space -->
@@ -302,11 +310,16 @@ const VouchersUI = {
             </div>
         `;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('createVoucherModal'));
+        const modalEl = document.getElementById('createVoucherModal');
+        const modal = new bootstrap.Modal(modalEl);
         
         // Setup the custom dropdown logic
         this.setupPartyDropdown();
         
+        modalEl.addEventListener('hidden.bs.modal', function() {
+            this.remove(); // Self-destruct after hiding to clean up DOM
+        });
+
         modal.show();
     },
 
@@ -502,8 +515,8 @@ const VouchersUI = {
         modal.show();
 
         // Ensure clicking close cleans up
-        modalEl.addEventListener('hidden.bs.modal', () => {
-            this.cleanupBackdrops();
+        modalEl.addEventListener('hidden.bs.modal', function() {
+            this.remove(); 
         });
 
         // Store transactions temporarily
@@ -1047,23 +1060,28 @@ const VouchersUI = {
                 await VoucherManager.saveBankMapping(bankDesc, name);
             }
 
-            const modal = bootstrap.Modal.getInstance(document.getElementById('createVoucherModal'));
-            if (modal) modal.hide();
+            const modalEl = document.getElementById('createVoucherModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
             
-            this.cleanupBackdrops();
-            this.updateTable();
+            if (modalEl) {
+                modalEl.addEventListener('hidden.bs.modal', () => {
+                    this.updateTable();
 
-            // --- NEW: Update Bank Statement Status ---
-            if (txIndex !== null && txIndex !== '' && this.currentBankTransactions) {
-                const idx = parseInt(txIndex);
-                if (this.currentBankTransactions[idx]) {
-                    this.currentBankTransactions[idx].converted = true;
-                    this.currentBankTransactions[idx].voucherId = newVoucher.id; // Track for export
-                    // Re-open the statement modal to continue processing
-                    setTimeout(() => {
-                        this.showStatementProcessingModal(this.currentBankTransactions);
-                    }, 600);
-                }
+                    // --- NEW: Update Bank Statement Status ---
+                    if (txIndex !== null && txIndex !== '' && this.currentBankTransactions) {
+                        const idx = parseInt(txIndex);
+                        if (this.currentBankTransactions[idx]) {
+                            this.currentBankTransactions[idx].converted = true;
+                            this.currentBankTransactions[idx].voucherId = newVoucher.id; 
+                            // Only re-open AFTER the create modal is fully hidden
+                            this.showStatementProcessingModal(this.currentBankTransactions);
+                        }
+                    }
+                }, { once: true });
+                
+                modal.hide();
+            } else {
+                this.updateTable();
             }
 
         } catch (e) {
