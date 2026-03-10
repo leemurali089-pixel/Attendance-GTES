@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GTES_Backup>
+  <metadata>
+    <exportDate>2023-10-27T10:00:00.000Z</exportDate>
+    <version>1.0</version>
+    <appName>GTES Management System</appName>
+    <type>Transactions Only</type>
+  </metadata>
+  <inventory_List>
+    <inventory_Item>
+      <id>ITEM_XML_001</id>
+      <name>Test Item XML</name>
+      <category>General</category>
+      <unit>Nos</unit>
+      <openingStock>100</openingStock>
+      <currentStock>100</currentStock>
+      <rate>500</rate>
+      <purchaseRate>300</purchaseRate>
+      <mrp>600</mrp>
+      <gstRate>GST@18%</gstRate>
+      <updatedAt>2023-10-27T10:00:00.000Z</updatedAt>
+    </inventory_Item>
+  </inventory_List>
+  <accounts_List>
+    <accounts_Item>
+      <name>XML Customer</name>
+      <accountType>Customer</accountType>
+      <openingBalance>0</openingBalance>
+      <phone>9998887776</phone>
+      <email>xml@example.com</email>
+      <address>123 XML Lane</address>
+      <createdAt>2023-10-27T10:00:00.000Z</createdAt>
+    </accounts_Item>
+  </accounts_List>
+  <invoices_List>
+    <invoices_Item>
+      <id>INV_XML_001</id>
+      <date>2023-10-27</date>
+      <customerName>XML Customer</customerName>
+      <totalAmount>590</totalAmount>
+      <status>paid</status>
+      <items_List>
+        <items_Item>
+          <name>Test Item XML</name>
+          <qty>1</qty>
+          <rate>500</rate>
+          <tax>GST@18%</tax>
+          <amount>500</amount>
+        </items_Item>
+      </items_List>
+      <createdAt>2023-10-27T10:00:00.000Z</createdAt>
+    </invoices_Item>
+  </invoices_List>
+</GTES_Backup>

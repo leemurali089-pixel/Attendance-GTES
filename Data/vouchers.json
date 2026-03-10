@@ -27073,28 +27073,5 @@
     "referenceId": "",
     "createdAt": "2026-03-10T14:50:06.134Z",
     "source": "bookkeeper"
-  },
-  {
-    "id": "RCT-260310-001",
-    "date": "2026-03-10",
-    "type": "receipt",
-    "customerName": "BHARATH OXYGEN  LICENSEE - C",
-    "customerId": "CUST-1773154205467-mjsrz",
-    "amount": 1458244,
-    "tdsAmount": 0,
-    "paymentMode": "bank",
-    "referenceId": "",
-    "linkedInvoices": [
-      "000624"
-    ],
-    "allocations": [
-      {
-        "id": "000624",
-        "no": "000624",
-        "amount": 1458244
-      }
-    ],
-    "remarks": "Bank Import: NEFT-IDIB-IDIBH06933049718-BHARATH OX-//URGENT",
-    "createdAt": "2026-03-10T16:13:12.797Z"
   }
 ]

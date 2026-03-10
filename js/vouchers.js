@@ -33,6 +33,7 @@ const VoucherManager = {
             customerId: data.customerId,
             amount: parseFloat(data.amount),
             tdsAmount: parseFloat(data.tdsAmount || 0),
+            discountAmount: parseFloat(data.discountAmount || 0),
             paymentMode: data.paymentMode, // 'cash', 'bank', 'cheque', 'upi'
             referenceId: data.referenceId || '',
             linkedInvoices: data.linkedInvoices || [], // Array of invoice IDs being paid

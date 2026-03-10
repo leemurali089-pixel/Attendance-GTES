@@ -245,7 +245,11 @@ const VouchersUI = {
                                         <label class="form-label text-warning">TDS Amount</label>
                                         <input type="number" class="form-control bg-dark border-warning text-warning" name="tdsAmount" id="tdsAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="TDS">
                                     </div>
-                                     <div class="col-md-4" id="remarksContainer"> <!-- Widened if ref hidden -->
+                                    <div class="col-md-2" id="discountContainer">
+                                        <label class="form-label text-info">Discount</label>
+                                        <input type="number" class="form-control bg-dark border-info text-info" name="discountAmount" id="discountAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="Discount">
+                                    </div>
+                                     <div class="col-md-2" id="remarksContainer"> <!-- Reduced width to accommodate discount -->
                                         <label class="form-label">Remarks</label>
                                         <input type="text" class="form-control bg-secondary text-white border-secondary" name="remarks" placeholder="Optional remarks">
                                     </div>
@@ -309,13 +313,14 @@ const VouchersUI = {
     onPaymentModeChange(select) {
         const refContainer = document.getElementById('refNoContainer');
         const remarksContainer = document.getElementById('remarksContainer');
+        const discountContainer = document.getElementById('discountContainer');
 
         if (select.value === 'cheque' || select.value === 'upi' || select.value === 'bank') {
             refContainer.style.display = 'block';
-            remarksContainer.className = 'col-md-3';
+            remarksContainer.className = 'col-md-2';
         } else {
             refContainer.style.display = 'none';
-            remarksContainer.className = 'col-md-6';
+            remarksContainer.className = 'col-md-4';
         }
     },
 
@@ -929,17 +934,13 @@ const VouchersUI = {
         }
         allocField.value = JSON.stringify(allocations);
 
-        // Add Advance and TDS amounts
+        // Add Advance, TDS and Discount amounts
         const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
         const tds = parseFloat(document.getElementById('tdsAmount')?.value) || 0;
-        allocated += (advance + tds);
+        const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
+        allocated += (advance + tds + discount);
 
-        const remaining = txnAmount - (allocated - tds); // Total expected including TDS from the bill perspective
-        // Actually, if bill is 100.103 and cash is 100,000, TDS is 103.
-        // Allocated (Invoices) = 100,103.
-        // Allocated (Total) = 100,103.
-        // Remaining = 100,000 (Bank) - (100,103 (Alloc) - 103 (TDS)) = 0.
-        const balance = txnAmount - (allocated - tds);
+        const balance = txnAmount - (allocated - tds - discount);
 
         // Update the running balance display
         const totalDisplay = document.getElementById('totalVoucherAmount');
@@ -960,7 +961,7 @@ const VouchersUI = {
                 : 'alert alert-info py-1 px-2 mt-2 mb-0 small d-flex justify-content-between';
         banner.innerHTML = `
             <span><i class="bi bi-wallet2 me-1"></i>Bank/Cash: <strong>₹${txnAmount.toFixed(2)}</strong></span>
-            <span>Allocated: <strong>₹${allocated.toFixed(2)}</strong> (TDS: ₹${tds.toFixed(2)})</span>
+            <span>Allocated: <strong>₹${allocated.toFixed(2)}</strong> (TDS: ₹${tds.toFixed(2)}, Disc: ₹${discount.toFixed(2)})</span>
             <span ${balance < 0 ? 'class="text-danger fw-bold"' : balance === 0 ? 'class="text-success fw-bold"' : ''}>
                 ${balance < 0 ? '⚠️ Over by' : 'Balance'}: <strong>₹${Math.abs(balance).toFixed(2)}</strong>
             </span>
@@ -1032,6 +1033,7 @@ const VouchersUI = {
             linkedInvoices: linkedInvoices, // New array support
             allocations: allocations, // Detailed allocations
             tdsAmount: parseFloat(formData.get('tdsAmount') || 0),
+            discountAmount: parseFloat(formData.get('discountAmount') || 0),
             remarks: formData.get('remarks')
         };
 
@@ -1100,8 +1102,8 @@ const VouchersUI = {
                     'Amount': v.amount,
                     'Narration or Any Other Remarks': v.remarks || '',
                     'Set Off Voucher Number With Amount': setOff,
-                    'Discount Account': '',
-                    'Discount Amount': '',
+                    'Discount Account': v.discountAmount > 0 ? (isReceipt ? 'Discount Allowed' : 'Discount Received') : '',
+                    'Discount Amount': v.discountAmount || '',
                     'Tax Deduction Account': v.tdsAmount > 0 ? 'Tax Deducted Receivable' : '',
                     'Tax Deduction Amount': v.tdsAmount || '',
                     'Payment Mode': v.paymentMode || '',
@@ -1187,9 +1189,17 @@ const VouchersUI = {
                         <span style="color: #666; font-size: 12px; text-transform: uppercase;">TDS Deduction</span><br>
                         <strong style="font-size: 20px; color: #b45309;">₹${parseFloat(voucher.tdsAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                     </div>
+                    ` : ''}
+                    ${voucher.discountAmount > 0 ? `
+                    <div style="margin-bottom: 10px;">
+                        <span style="color: #666; font-size: 12px; text-transform: uppercase;">Discount</span><br>
+                        <strong style="font-size: 20px; color: #059669;">₹${parseFloat(voucher.discountAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                    ` : ''}
+                    ${(voucher.tdsAmount > 0 || voucher.discountAmount > 0) ? `
                     <div style="margin-bottom: 10px;">
                         <span style="color: #666; font-size: 12px; text-transform: uppercase;">Total Adjustable</span><br>
-                        <strong style="font-size: 20px;">₹${(parseFloat(voucher.amount) + parseFloat(voucher.tdsAmount)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                        <strong style="font-size: 20px;">₹${(parseFloat(voucher.amount) + parseFloat(voucher.tdsAmount || 0) + parseFloat(voucher.discountAmount || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                     </div>
                     ` : ''}
                 </div>
