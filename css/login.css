@@ -1,0 +1,213 @@
+/* Login Overlay */
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto !important;
+    /* Force interaction enabled */
+    transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out;
+}
+
+.login-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* User Provided Custom Design - Scoped with Specific Class Names */
+.login-form-custom {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2em;
+    background-color: #171717;
+    border-radius: 25px;
+    transition: 0.4s ease-in-out;
+}
+
+.login-card-outer {
+    background-image: linear-gradient(163deg, #00ff75 0%, #3700ff 100%);
+    border-radius: 22px;
+    transition: all 0.3s;
+    padding: 2px;
+}
+
+.login-card-inner {
+    border-radius: 20px;
+    transition: all 0.2s;
+    background-color: #171717;
+}
+
+.login-card-inner:hover {
+    transform: scale(0.98);
+    border-radius: 20px;
+}
+
+.login-card-outer:hover {
+    box-shadow: 0px 0px 30px 1px rgba(0, 255, 117, 0.3);
+}
+
+#loginCompanyName {
+    text-align: center;
+    margin-bottom: 0.5em;
+    /* Closer to heading */
+    color: #aeaeae;
+    font-size: 0.9em;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+    height: 1.2em;
+    /* Reserve height */
+}
+
+.app-name-header {
+    text-align: center;
+    margin-bottom: 0.2em;
+    font-size: 2.2em;
+    font-weight: 800;
+    background: linear-gradient(to right, #00ff75, #3700ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 30px rgba(55, 0, 255, 0.3);
+    margin-top: 0;
+}
+
+#heading {
+    text-align: center;
+    margin-bottom: 1.5em;
+    color: rgb(255, 255, 255);
+    font-size: 1.2em;
+    font-weight: 500;
+    opacity: 0.8;
+}
+
+.login-field {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5em;
+    border-radius: 25px;
+    padding: 0.6em;
+    border: none;
+    outline: none;
+    color: white;
+    background-color: #171717;
+    box-shadow: inset 2px 5px 10px rgb(5, 5, 5);
+}
+
+.input-icon {
+    height: 1.3em;
+    width: 1.3em;
+    fill: white;
+    min-width: 1.3em;
+}
+
+.input-field {
+    background: none;
+    border: none;
+    outline: none;
+    width: 100%;
+    color: #d3d3d3;
+    padding-left: 5px;
+}
+
+/* Password Toggle Icon */
+.password-toggle {
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    color: #888;
+    transition: color 0.3s;
+}
+
+.password-toggle:hover {
+    color: #fff;
+}
+
+.password-toggle svg {
+    width: 1.2em;
+    height: 1.2em;
+    fill: currentColor;
+}
+
+.login-btn-wrapper {
+    display: flex;
+    justify-content: center;
+    flex-direction: row;
+    margin-top: 2em;
+    padding: 0;
+    width: 100%;
+}
+
+.login-btn-primary {
+    padding: 0.7em 2em;
+    border-radius: 5px;
+    border: none;
+    outline: none;
+    transition: 0.4s ease-in-out;
+    background-color: #252525;
+    color: white;
+    width: 100%;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 1em;
+}
+
+.login-btn-primary:hover {
+    background-color: #00ff75;
+    color: black;
+    box-shadow: 0 0 15px rgba(0, 255, 117, 0.5);
+}
+
+/* Utils - Scoped or generic if used inside login overlay */
+.login-overlay .d-none {
+    display: none !important;
+}
+
+.login-overlay .text-danger {
+    color: #ff4d4d !important;
+}
+
+.login-overlay .small {
+    font-size: 0.875em;
+}
+
+.login-overlay .text-center {
+    text-align: center;
+}
+
+.login-overlay .mt-2 {
+    margin-top: 0.5rem;
+}
+
+.login-overlay .mt-3 {
+    margin-top: 1rem;
+}
+
+/* Login Logo */
+.login-logo {
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    border-radius: 50%;
+    margin-bottom: 0.5em;
+    /* Closer to heading */
+    display: inline-block;
+}
+
+.glow-logo {
+    filter: drop-shadow(0 0 10px rgba(0, 255, 117, 0.5));
+}

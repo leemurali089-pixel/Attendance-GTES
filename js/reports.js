@@ -5,14 +5,40 @@ const ReportsModule = {
     currentSelectionCallback: null,
     salaryPayoutModalFullscreen: false,
 
-    showEmployeeSelectionModal(callback, title = 'Select Employees for PDF', confirmLabel = 'Generate PDF', year = null, month = null) {
+    async showEmployeeSelectionModal(callback, title = 'Select Employees for PDF', buttons = 'Generate PDF', year = null, month = null, onlyPaidEmployees = false) {
         // Get employees - filter by month if year and month are provided
         let employees;
         if (year !== null && month !== null) {
-            employees = DataManager.getEmployeesActiveInMonth(year, month);
+            employees = await DataManager.getEmployeesActiveInMonth(year, month);
+
+            // If onlyPaidEmployees is true, filter to only employees with active payouts
+            if (onlyPaidEmployees) {
+                const settings = await DataManager.getSettings();
+                const debitedAdvances = settings.debitedAdvances || {};
+                const waivedAdvances = settings.waivedAdvances || {};
+                const salaryPayouts = settings.salaryPayouts || {};
+
+                // Check if this month has been paid out at all
+                const payoutKey = `${year}_${month}`;
+                const isMonthPaid = salaryPayouts[payoutKey] && salaryPayouts[payoutKey].done;
+
+                // Filter employees who:
+                // 1. Have debited or waived advances for this month, OR
+                // 2. Were active in the month AND the month is marked as paid (for daily pay employees)
+                employees = employees.filter(emp => {
+                    const key = `${emp.name}_${year}_${month}`;
+                    const hasAdvanceRecord = debitedAdvances[key] !== undefined || waivedAdvances[key] !== undefined;
+
+                    // Include if they have advance records OR if the month is paid (for daily employees)
+                    return hasAdvanceRecord || isMonthPaid;
+                });
+            }
         } else {
-            employees = DataManager.getActiveEmployees();
+            employees = await DataManager.getActiveEmployees();
         }
+
+        // Normalize buttons
+        const buttonDefs = Array.isArray(buttons) ? buttons : [{ label: buttons, class: 'btn-primary', action: 'confirm' }];
 
         const modal = document.createElement('div');
         modal.className = 'modal fade';
@@ -50,7 +76,9 @@ const ReportsModule = {
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="ReportsModule.confirmEmployeeSelection(${callback.toString().replace(/"/g, '&quot;')})">${confirmLabel}</button>
+                        ${buttonDefs.map(btn => `
+                            <button type="button" class="btn ${btn.class || 'btn-primary'}" onclick="ReportsModule.confirmEmployeeSelection('${btn.action}')">${btn.label}</button>
+                        `).join('')}
                     </div>
                 </div>
             </div>
@@ -82,7 +110,7 @@ const ReportsModule = {
         document.querySelectorAll('.employee-select-checkbox').forEach(cb => cb.checked = checkbox.checked);
     },
 
-    confirmEmployeeSelection() {
+    confirmEmployeeSelection(action = 'confirm') {
         const selected = [];
         document.querySelectorAll('.employee-select-checkbox:checked').forEach(cb => {
             selected.push(cb.value);
@@ -98,37 +126,59 @@ const ReportsModule = {
         // Get callback from modal
         const modalElement = document.getElementById('employeeSelectionModal');
         const modal = bootstrap.Modal.getInstance(modalElement);
-        if (modal) modal.hide();
-        if (modalElement) {
-            modalElement.addEventListener('hidden.bs.modal', () => modalElement.remove(), { once: true });
-        }
 
-        if (typeof this.currentSelectionCallback === 'function') {
-            try {
-                this.currentSelectionCallback(selected);
-            } catch (error) {
-                console.error('Error executing selection callback:', error);
+        const executeCallback = () => {
+            if (typeof this.currentSelectionCallback === 'function') {
+                try {
+                    this.currentSelectionCallback(selected, action);
+                } catch (error) {
+                    console.error('Error executing selection callback:', error);
+                }
             }
+            this.currentSelectionCallback = null;
+        };
+
+        if (modalElement) {
+            modalElement.addEventListener('hidden.bs.modal', () => {
+                modalElement.remove();
+                executeCallback();
+            }, { once: true });
+
+            if (modal) {
+                modal.hide();
+            } else {
+                // Formatting fallback
+                modalElement.remove();
+                executeCallback();
+            }
+        } else {
+            executeCallback();
         }
-        this.currentSelectionCallback = null;
     },
 
     formatCurrency(value) {
         return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
     },
 
-    startSalaryPayoutFlow(year, month) {
+    async startSalaryPayoutFlow(year, month) {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const title = `Select Employees for Salary Payout - ${months[month]} ${year}`;
 
-        // Check if payout already exists
-        if (DataManager.isSalaryPayoutDone(year, month)) {
-            if (!confirm(`Salary payout for ${months[month]} ${year} has already been generated. Do you want to regenerate it? \n\nWARNING: This will overwrite the previous payout data.`)) {
+        // Check if payout already exists (partial or full)
+        const hasAnyPayout = await DataManager.hasAnySalaryPayout(year, month);
+        const isPayoutDone = await DataManager.isSalaryPayoutDone(year, month);
+
+        if (isPayoutDone) {
+            if (!confirm(`Full salary payout for ${months[month]} ${year} has already been completed. \n\nDo you want to re-process or update specific employees? \n\nExisting payouts will NOT be cleared unless you select the same employees.`)) {
+                return;
+            }
+        } else if (hasAnyPayout) {
+            if (!confirm(`A partial salary payout for ${months[month]} ${year} already exists. \n\nDo you want to add more employees or update existing ones?`)) {
                 return;
             }
         }
 
-        this.showEmployeeSelectionModal(
+        await this.showEmployeeSelectionModal(
             (selectedEmployees) => {
                 ReportsModule.handleSalaryPayoutSelection(year, month, selectedEmployees);
             },
@@ -139,13 +189,13 @@ const ReportsModule = {
         );
     },
 
-    handleSalaryPayoutSelection(year, month, selectedEmployees) {
+    async handleSalaryPayoutSelection(year, month, selectedEmployees) {
         if (!selectedEmployees || selectedEmployees.length === 0) {
             App.showNotification('Please select at least one employee', 'error');
             return;
         }
 
-        const employeesData = this.getSalaryPayoutData(year, month, selectedEmployees);
+        const employeesData = await this.getSalaryPayoutData(year, month, selectedEmployees);
         if (!employeesData.length) {
             App.showNotification('No employees available for payout', 'warning');
             return;
@@ -225,6 +275,12 @@ const ReportsModule = {
         }
 
         const bsModal = new bootstrap.Modal(modal, { backdrop: 'static' });
+
+        modal.addEventListener('shown.bs.modal', () => {
+            const dateInput = document.getElementById('salaryCreditDate');
+            if (dateInput) dateInput.focus();
+        });
+
         bsModal.show();
         modal.addEventListener('hidden.bs.modal', () => {
             modal.remove();
@@ -282,7 +338,8 @@ const ReportsModule = {
 
             // Calculate new outstanding after waiver
             const outstandingAfterWaiver = Math.max(carryForwardBefore - waivedAmount, 0);
-            const maxDebit = outstandingAfterWaiver;
+            // Limit debit to the LOWER of: Outstanding Amount OR Current Month's Salary
+            const maxDebit = Math.min(outstandingAfterWaiver, Math.max(emp.salaryBeforeAdvance, 0));
             emp.maxDebit = maxDebit;
 
             let debitAmount = parseFloat(emp.debitAmount);
@@ -308,16 +365,16 @@ const ReportsModule = {
             return `
                 <tr>
                     <td>${emp.name}</td>
-                    <td class="text-center">${emp.present}</td>
-                    <td class="text-center">${emp.paidLeave}</td>
-                    <td class="text-center">${emp.unpaidLeave}</td>
-                    <td class="text-center">${emp.sickLeaves || 0}</td>
-                    <td class="text-center">${emp.halfDays}</td>
-                    <td class="text-center">${emp.holidays}</td>
-                    <td class="text-center">${emp.holidayWorking}</td>
-                    <td class="text-center">${emp.otHours.toFixed(2)}</td>
-                    <td class="text-center text-primary fw-semibold">${(emp.standardOtHours || 0).toFixed(2)}</td>
-                    <td class="text-center text-info fw-semibold">${(emp.hWorkingOtHours || 0).toFixed(2)}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Present')">${emp.present}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Paid Leave')">${emp.paidLeave}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Unpaid Leave')">${emp.unpaidLeave}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Sick Leave')">${emp.sickLeaves || 0}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Half Days')">${emp.halfDays}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Holidays')">${emp.holidays}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'H-Working')">${emp.holidayWorking}</td>
+                    <td class="text-center" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'Total OT Hours')">${emp.otHours.toFixed(2)}</td>
+                    <td class="text-center text-primary fw-semibold" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'OT Hours')">${(emp.standardOtHours || 0).toFixed(2)}</td>
+                    <td class="text-center text-info fw-semibold" style="cursor: pointer;" onclick="SalaryModule.showStatusCalendar('${safeName}', 'H-OT Hours')">${(emp.hWorkingOtHours || 0).toFixed(2)}</td>
                     <td class="text-end">${this.formatCurrency(emp.standardOtPay || 0)}</td>
                     <td class="text-end">${this.formatCurrency(emp.hWorkingOtPay || 0)}</td>
                     <td class="text-end">${this.formatCurrency(emp.advanceThisMonth || 0)}</td>
@@ -439,7 +496,7 @@ const ReportsModule = {
         this.renderSalaryPayoutReviewContent();
     },
 
-    confirmSalaryPayoutGeneration() {
+    async confirmSalaryPayoutGeneration() {
         if (!this.pendingSalaryPayout || !this.pendingSalaryPayout.employees.length) {
             App.showNotification('No employees selected for payout', 'error');
             return;
@@ -454,9 +511,22 @@ const ReportsModule = {
         }
 
         const { year, month, selectedEmployees, employees } = this.pendingSalaryPayout;
-        const advances = DataManager.getAdvances(); // Get current advances
 
-        employees.forEach(emp => {
+        // PHASE 3: Validate bank details before payout
+        const employeeData = await DataManager.getEmployees();
+        const fullEmployees = employees.map(e =>
+            employeeData.find(emp => emp.name === e.name)
+        );
+
+        const validation = DataManager.validateBankDetailsForPayout(fullEmployees);
+        if (!validation.valid) {
+            this.showBankValidationErrors(validation.errors);
+            return;
+        }
+
+        const advances = await DataManager.getAdvances(); // Get current advances
+
+        for (const emp of employees) {
             const carryForwardBefore = emp.carryForwardBefore ?? emp.outstandingBefore ?? 0;
 
             // Handle Free Funds
@@ -489,17 +559,34 @@ const ReportsModule = {
             emp.carryForwardAfter = Math.max(outstandingAfterWaiver - debitAmount, 0);
             emp.netSalary = Math.max(emp.salaryBeforeAdvance - debitAmount, 0);
 
-            DataManager.saveDebitedAdvance(emp.name, year, month, debitAmount);
-            DataManager.saveWaivedAdvance(emp.name, year, month, waivedAmount);
-        });
+            await DataManager.saveDebitedAdvance(emp.name, year, month, debitAmount);
+            await DataManager.saveWaivedAdvance(emp.name, year, month, waivedAmount);
+        }
 
-        DataManager.saveAdvances(advances); // Save all new wave-off entries
+        await DataManager.saveAdvances(advances); // Save all new wave-off entries
 
-        this.generateSalaryPayout(year, month, {
-            selectedEmployees,
-            payoutData: employees,
-            creditDate: creditDate
-        });
+        try {
+            await this.generateSalaryPayout(year, month, {
+                selectedEmployees,
+                payoutData: employees,
+                creditDate: creditDate
+            });
+
+            // PHASE 3: Mark payout as done after successful generation
+            const totalPaid = employees.reduce((sum, emp) => sum + (emp.netSalary || 0), 0);
+            await DataManager.markSalaryPayoutDone(year, month, {
+                creditDate: creditDate,
+                employees: selectedEmployees,
+                totalPaid: totalPaid,
+                payoutData: employees
+            });
+
+            console.log(`Salary payout marked as done for ${year}-${month}`);
+        } catch (error) {
+            console.error('Error generating payout:', error);
+            App.showNotification('Error generating salary payout: ' + error.message, 'error');
+            return;
+        }
 
         const modalElement = document.getElementById('salaryPayoutReviewModal');
         if (modalElement) {
@@ -508,18 +595,80 @@ const ReportsModule = {
         }
 
         this.pendingSalaryPayout = null;
-        App.showNotification('Salary payout generated successfully', 'success');
+        App.showNotification('Salary payout generated and marked as done successfully', 'success');
+
+        // Refresh the Salary View to update status
+        if (window.SalaryModule && typeof window.SalaryModule.renderSalaryView === 'function') {
+            window.SalaryModule.renderSalaryView();
+        }
     },
 
-    getSalaryPayoutData(year, month, selectedEmployees = null) {
-        const allEmployees = DataManager.getEmployeesActiveInMonth(year, month);
+    // PHASE 3: Show bank validation errors modal
+    showBankValidationErrors(errors) {
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.id = 'bankValidationErrorModal';
+
+        const errorHtml = errors.map(e => `
+            <div class="alert alert-danger mb-3">
+                <h6 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> ${e.employee}</h6>
+                <ul class="mb-0">
+                    ${e.errors.map(err => `<li>${err}</li>`).join('')}
+                </ul>
+            </div>
+        `).join('');
+
+        modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title">
+                            <i class="bi bi-x-circle-fill"></i> Bank Details Validation Failed
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="lead">
+                            The following employees have incomplete or invalid bank details. 
+                            Please fix these issues before generating the salary payout.
+                        </p>
+                        <hr>
+                        ${errorHtml}
+                        <div class="alert alert-info">
+                            <strong>What to do:</strong>
+                            <ol class="mb-0 mt-2">
+                                <li>Close this dialog</li>
+                                <li>Go to <strong>Employees</strong> page</li>
+                                <li>Edit each employee and fill in missing bank details</li>
+                                <li>Save and retry payout generation</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            Close & Fix Details
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+        modal.addEventListener('hidden.bs.modal', () => modal.remove());
+    },
+
+    async getSalaryPayoutData(year, month, selectedEmployees = null) {
+        const allEmployees = await DataManager.getEmployeesActiveInMonth(year, month);
         const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
-        const attendance = DataManager.getAttendanceByMonth(year, month);
+        const attendance = await DataManager.getAttendanceByMonth(year, month);
         const daysInMonth = DataManager.getDaysInMonth(year, month);
-        const settings = DataManager.getSettings();
+        const settings = await DataManager.getSettings();
         const baseSalaries = settings.baseSalaries || {};
 
-        return employees.map(emp => {
+        // Use Promise.all to handle async map
+        return Promise.all(employees.map(async emp => {
             const empAttendance = attendance.filter(a => a.employee === emp.name);
 
             let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0, holidayWorking = 0;
@@ -546,17 +695,12 @@ const ReportsModule = {
                         holidays++;
                         break;
                     case 'H-Working':
-                        holidays++;
+                        // holidays++; // REMOVED: Do not count as regular holiday, we track as holidayWorking
                         holidayWorking++;
-                        // Double Pay Logic: If H-Working and OT is "No", add an extra paid day
-                        // Normal holiday pay is already covered by "holidays++" (which adds to paidDays)
-                        // So we just need to add one more day to make it double pay (1 day for holiday + 1 extra day)
-                        if (record.overTime === 'No') {
-                            // We will handle this by adding to a special counter or just incrementing paidDays directly later
-                            // Let's add a special property to track this
-                            if (!record.extraPaidDay) record.extraPaidDay = 0;
-                            record.extraPaidDay = 1;
-                        }
+                        // Double Pay Logic: Always add an extra day for working on holiday (Base + Work)
+                        // This matches salary.js logic which adds extraPaidDaysFromHWorking unconditionally
+                        if (!record.extraPaidDay) record.extraPaidDay = 0;
+                        record.extraPaidDay = 1;
                         break;
                 }
                 const hours = parseFloat(record.otHours || 0) || 0;
@@ -575,23 +719,34 @@ const ReportsModule = {
             // Calculate extra paid days from H-Working (Double Pay)
             const extraPaidDays = empAttendance.reduce((sum, r) => sum + (r.extraPaidDay || 0), 0);
 
-            const paidDays = present + paidLeave + holidays + (halfDays * 0.5) + extraPaidDays;
+            // CRITICAL: Different calculation for Daily vs Monthly employees
+            let paidDays;
+            if (salaryType === 'daily') {
+                // Daily employees: ONLY present + holidayWorking + half days
+                // NO paid leave, NO holidays, NO sick leave
+                paidDays = present + holidayWorking + (halfDays * 0.5);
+            } else {
+                // Monthly employees: full calculation
+                // FIX: Added holidayWorking to base paid days
+                paidDays = present + paidLeave + holidays + holidayWorking + (halfDays * 0.5) + extraPaidDays;
+            }
+
             const basePay = paidDays * perDaySalary;
             const otBreakdown = DataManager.calculateOTPay(
                 totalOtHours,
                 baseSalary,
                 salaryType,
-                { hWorkingOtHours, perDaySalary, returnBreakdown: true }
+                { hWorkingOtHours, perDaySalary, returnBreakdown: true, settings }
             );
             const otPay = otBreakdown.totalPay;
             const standardOtPay = otBreakdown.standardPay || 0;
             const hWorkingOtPay = otBreakdown.hWorkingPay || 0;
             const salaryBeforeAdvance = basePay + otPay;
 
-            const advanceThisMonth = DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
-            const totalAdvanceFY = DataManager.getTotalAdvanceForEmployeeFY(emp.name, year, month);
-            const remainingAfterExistingDebit = DataManager.getRemainingAdvanceBalance(emp.name, year, month);
-            const existingDebit = DataManager.getDebitedAdvance(emp.name, year, month) || 0;
+            const advanceThisMonth = await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
+            const totalAdvanceFY = await DataManager.getTotalAdvanceForEmployeeFY(emp.name, year, month);
+            const remainingAfterExistingDebit = await DataManager.getRemainingAdvanceBalance(emp.name, year, month);
+            const existingDebit = (await DataManager.getDebitedAdvance(emp.name, year, month)) || 0;
             const outstandingBefore = remainingAfterExistingDebit + existingDebit;
             const carryForwardPrevious = Math.max(outstandingBefore - advanceThisMonth, 0);
             const maxDebit = outstandingBefore;
@@ -629,605 +784,187 @@ const ReportsModule = {
                 carryForwardAfter: Math.max(outstandingBefore - recommendedDebit, 0),
                 netSalary: salaryBeforeAdvance - recommendedDebit
             };
-        });
+        }));
     },
 
-    generateMonthlyPDF(year, month, selectedEmployees = null) {
-        const allEmployees = DataManager.getActiveEmployees();
-        const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
-        const attendance = DataManager.getAttendanceByMonth(year, month);
-        const daysInMonth = DataManager.getDaysInMonth(year, month);
-        const settings = DataManager.getSettings();
-        const baseSalaries = settings.baseSalaries || {};
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthName = months[month];
-        const company = DataManager.COMPANY_PROFILE;
+    async generateMonthlyPDF(year, month, selectedEmployees = null) {
+        console.log('Starting Monthly PDF generation for', year, month);
+        try {
+            const allEmployees = await DataManager.getActiveEmployees();
+            console.log('All employees:', allEmployees.length);
+            const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
+            console.log('Filtered employees:', employees.length);
+            const attendance = await DataManager.getAttendanceByMonth(year, month);
+            console.log('Attendance records:', attendance.length);
+            const daysInMonth = DataManager.getDaysInMonth(year, month);
+            const settings = await DataManager.getSettings();
+            const baseSalaries = settings.baseSalaries || {};
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthName = months[month];
 
-        // Get credit date if available
-        const payoutDetails = DataManager.getSalaryPayoutDetails(year, month);
-        const creditDate = payoutDetails ? payoutDetails.creditDate : null;
-
-        // Create HTML content for PDF
-        let htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
-                    .company-name { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
-                    .company-details { font-size: 12px; line-height: 1.6; }
-                    .report-title { text-align: center; font-size: 20px; font-weight: bold; margin: 20px 0; }
-                    .report-meta { text-align: center; font-size: 14px; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                    th { background-color: #f0f0f0; font-weight: bold; }
-                    .text-right { text-align: right; }
-                    .summary { margin: 20px 0; }
-                    .footer { margin-top: 30px; font-size: 10px; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div class="company-name">${company.name}</div>
-                    <div class="company-details">
-                        Registered Address: ${company.registeredAddress}<br>
-                        Work Address: ${company.workAddress}<br>
-                        Email: ${company.emails.join(', ')} | Phone: ${company.phones.join(', ')}<br>
-                        GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
-                    </div>
-                </div>
-                <div class="report-title">Monthly Salary Report - ${monthName} ${year}</div>
-                ${creditDate ? `<div class="report-meta"><strong>Salary Credit Date:</strong> ${DataManager.formatDateDisplay(creditDate)}</div>` : ''}
-        `;
-
-        employees.forEach(emp => {
-            const empAttendance = attendance.filter(a => a.employee === emp.name);
-
-            // Calculate stats
-            let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0;
-            let standardOtHours = 0, hWorkingOtHours = 0;
-
-            empAttendance.forEach(record => {
-                switch (record.status) {
-                    case 'Present': present++; break;
-                    case 'Paid Leave': paidLeave++; break;
-                    case 'Unpaid Leave': unpaidLeave++; break;
-                    case 'Sick Leave': sickLeaves++; break;
-                    case 'Half Day': halfDays++; break;
-                    case 'Holiday': holidays++; break;
-                    case 'H-Working': holidays++; break;
-                }
-                const hours = parseFloat(record.otHours || 0) || 0;
-                if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                    hWorkingOtHours += hours;
-                } else {
-                    standardOtHours += hours;
-                }
-            });
-            const totalOtHours = standardOtHours + hWorkingOtHours;
-
-            // Get employee data
-            const employees = DataManager.getEmployees();
-            const employee = employees.find(e => e.name === emp.name);
-            const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[emp.name] || 0);
-            const salaryType = employee?.salaryType || 'monthly';
-
-            // Calculate per day salary
-            let perDaySalary;
-            if (salaryType === 'daily') {
-                perDaySalary = baseSalary;
-            } else {
-                perDaySalary = baseSalary / daysInMonth;
-            }
-
-            const paidDays = present + paidLeave + holidays + (halfDays * 0.5);
-            const basePay = paidDays * perDaySalary;
-            const otBreakdown = DataManager.calculateOTPay(
-                totalOtHours,
-                baseSalary,
-                salaryType,
-                { hWorkingOtHours, perDaySalary, returnBreakdown: true }
-            );
-            const otPay = otBreakdown.totalPay;
-            const standardOtPay = otBreakdown.standardPay || 0;
-            const hOtPay = otBreakdown.hWorkingPay || 0;
-            const totalAdvance = DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
-            const remainingAdvanceBalance = DataManager.getRemainingAdvanceBalance(emp.name, year, month);
-            const finalSalary = basePay + otPay - totalAdvance;
-
-            htmlContent += `
-                <div class="summary">
-                    <h3>${emp.name}</h3>
-                    <table>
-                        <tr><th>Item</th><th>Details</th></tr>
-                        <tr><td>Basic Salary</td><td class="text-right">₹${baseSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td>Present Days</td><td class="text-right">${present}</td></tr>
-                        <tr><td>Paid Leave</td><td class="text-right">${paidLeave}</td></tr>
-                        <tr><td>Unpaid Leave</td><td class="text-right">${unpaidLeave}</td></tr>
-                        <tr><td>Sick Leave</td><td class="text-right">${sickLeaves}</td></tr>
-                        <tr><td>Half Days</td><td class="text-right">${halfDays}</td></tr>
-                        <tr><td>Holidays</td><td class="text-right">${holidays}</td></tr>
-                        <tr><td>Paid Days</td><td class="text-right">${paidDays.toFixed(1)}</td></tr>
-                        <tr><td>Base Pay</td><td class="text-right">₹${basePay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td>OT Hours</td><td class="text-right">${totalOtHours.toFixed(2)}</td></tr>
-                        <tr><td>H-OT Hours</td><td class="text-right">${hWorkingOtHours.toFixed(2)}</td></tr>
-                        <tr><td>Standard OT Pay</td><td class="text-right">₹${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td>H-OT Pay</td><td class="text-right">₹${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td><strong>Total OT Pay</strong></td><td class="text-right"><strong>₹${otPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
-                        <tr><td>Total Advance (This Month)</td><td class="text-right">₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td>Pending Advance Balance</td><td class="text-right">₹${remainingAdvanceBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td><strong>Final Salary</strong></td><td class="text-right"><strong>₹${finalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
-                    </table>
-                </div>
-            `;
-        });
-
-        htmlContent += `
-                <div class="footer">
-                    Generated on: ${new Date().toLocaleString('en-IN')}<br>
-                    ${company.name} - ${company.registeredAddress}
-                </div>
-            </body>
-            </html>
-        `;
-
-        // Use html2pdf library if available, otherwise use print
-        if (typeof html2pdf !== 'undefined') {
-            const element = document.createElement('div');
-            element.innerHTML = htmlContent;
-            document.body.appendChild(element);
-
-            const opt = {
-                margin: [0.5, 0.5, 0.5, 0.5],
-                filename: `Monthly_Report_${monthName}_${year}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: {
-                    scale: 2,
-                    useCORS: true,
-                    logging: false,
-                    letterRendering: true
-                },
-                jsPDF: {
-                    unit: 'in',
-                    format: 'a4',
-                    orientation: 'portrait',
-                    compress: true
-                },
-                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+            // Helper to ensure array
+            const toArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (typeof val === 'string') return val.split(',').map(s => s.trim());
+                return [];
             };
 
-            html2pdf().set(opt).from(element).save().then(() => {
-                document.body.removeChild(element);
-            });
-        } else {
-            // Fallback: open in new window for printing
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(htmlContent);
-            printWindow.document.close();
-            printWindow.print();
-        }
-    },
-
-    generateAnnualPDF(startYear, endYear, selectedEmployees = null) {
-        const allEmployees = DataManager.getActiveEmployees();
-        const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
-        const startDate = new Date(startYear, 3, 1); // April 1
-        const endDate = new Date(endYear, 2, 31); // March 31
-        const attendance = DataManager.getAttendance();
-        const filteredAttendance = attendance.filter(a => {
-            const date = new Date(a.date);
-            return date >= startDate && date <= endDate;
-        });
-        const settings = DataManager.getSettings();
-        const baseSalaries = settings.baseSalaries || {};
-        const company = DataManager.COMPANY_PROFILE;
-
-        let htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
-                    .company-name { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
-                    .company-details { font-size: 12px; line-height: 1.6; }
-                    .report-title { text-align: center; font-size: 20px; font-weight: bold; margin: 20px 0; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                    th { background-color: #f0f0f0; font-weight: bold; }
-                    .text-right { text-align: right; }
-                    .summary { margin: 20px 0; }
-                    .footer { margin-top: 30px; font-size: 10px; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div class="company-name">${company.name}</div>
-                    <div class="company-details">
-                        Registered Address: ${company.registeredAddress}<br>
-                        Work Address: ${company.workAddress}<br>
-                        Email: ${company.emails.join(', ')} | Phone: ${company.phones.join(', ')}<br>
-                        GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
-                    </div>
-                </div>
-                <div class="report-title">Annual Salary Report - Financial Year ${startYear}-${endYear}</div>
-                <div class="report-meta" style="text-align: center; font-size: 12px; margin-bottom: 20px;">
-                    ${(() => {
-                let datesHtml = '<strong>Salary Credit Dates:</strong><br>';
-                let hasDates = false;
-                for (let year = startYear; year <= endYear; year++) {
-                    for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
-                        const details = DataManager.getSalaryPayoutDetails(year, month);
-                        if (details && details.creditDate) {
-                            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                            datesHtml += `${months[month]} ${year}: ${DataManager.formatDateDisplay(details.creditDate)} | `;
-                            hasDates = true;
-                        }
-                    }
-                }
-                return hasDates ? datesHtml.slice(0, -3) : '';
-            })()}
-                </div>
-        `;
-
-        employees.forEach(emp => {
-            const empAttendance = filteredAttendance.filter(a => a.employee === emp.name);
-
-            // Calculate annual stats
-            let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0;
-            let standardOtHours = 0, hWorkingOtHours = 0;
-
-            empAttendance.forEach(record => {
-                switch (record.status) {
-                    case 'Present': present++; break;
-                    case 'Paid Leave': paidLeave++; break;
-                    case 'Unpaid Leave': unpaidLeave++; break;
-                    case 'Sick Leave': sickLeaves++; break;
-                    case 'Half Day': halfDays++; break;
-                    case 'Holiday': holidays++; break;
-                    case 'H-Working': holidays++; break;
-                }
-                const hours = parseFloat(record.otHours || 0) || 0;
-                if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                    hWorkingOtHours += hours;
-                } else {
-                    standardOtHours += hours;
-                }
-            });
-            const totalOtHours = standardOtHours + hWorkingOtHours;
-
-            // Calculate total advances
-            let totalAdvance = 0;
-            for (let year = startYear; year <= endYear; year++) {
-                for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
-                    totalAdvance += DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
-                }
-            }
-
-            // Get employee data
-            const employees = DataManager.getEmployees();
-            const employee = employees.find(e => e.name === emp.name);
-            const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[emp.name] || 0);
-            const salaryType = employee?.salaryType || 'monthly';
-
-            // Calculate per day salary
-            const avgDaysPerMonth = 30;
-            let avgPerDaySalary;
-            if (salaryType === 'daily') {
-                avgPerDaySalary = baseSalary;
-            } else {
-                avgPerDaySalary = baseSalary / avgDaysPerMonth;
-            }
-
-            const totalPaidDays = present + paidLeave + holidays + (halfDays * 0.5);
-            const totalBasePay = totalPaidDays * avgPerDaySalary;
-            const totalOtBreakdown = DataManager.calculateOTPay(
-                totalOtHours,
-                baseSalary,
-                salaryType,
-                { hWorkingOtHours, perDaySalary: avgPerDaySalary, returnBreakdown: true }
-            );
-            const totalOTPay = totalOtBreakdown.totalPay;
-            const standardOtPay = totalOtBreakdown.standardPay || 0;
-            const hOtPay = totalOtBreakdown.hWorkingPay || 0;
-            const totalSalary = totalBasePay + totalOTPay - totalAdvance;
-
-            htmlContent += `
-                <div class="summary">
-                    <h3>${emp.name}</h3>
-                    <table>
-                        <tr><th>Item</th><th>Details</th></tr>
-                        <tr><td>Total Present Days</td><td class="text-right">${present}</td></tr>
-                        <tr><td>Total Paid Leave</td><td class="text-right">${paidLeave}</td></tr>
-                        <tr><td>Total Unpaid Leave</td><td class="text-right">${unpaidLeave}</td></tr>
-                    <tr><td>Total Sick Leave</td><td class="text-right">${sickLeaves}</td></tr>
-                        <tr><td>Total Half Days</td><td class="text-right">${halfDays}</td></tr>
-                        <tr><td>Total Holidays</td><td class="text-right">${holidays}</td></tr>
-                        <tr><td>Total OT Hours</td><td class="text-right">${totalOtHours.toFixed(2)}</td></tr>
-                        <tr><td>H-OT Hours</td><td class="text-right">${hWorkingOtHours.toFixed(2)}</td></tr>
-                        <tr><td>Standard OT Pay</td><td class="text-right">₹${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td>H-OT Pay</td><td class="text-right">₹${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td><strong>Total OT Pay</strong></td><td class="text-right"><strong>₹${totalOTPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
-                        <tr><td>Total Advances</td><td class="text-right">₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                        <tr><td><strong>Total Salary Paid</strong></td><td class="text-right"><strong>₹${totalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
-                    </table>
-                </div>
-            `;
-        });
-
-        htmlContent += `
-                <div class="footer">
-                    Generated on: ${new Date().toLocaleString('en-IN')}<br>
-                    ${company.name} - ${company.registeredAddress}
-                </div>
-            </body>
-            </html>
-        `;
-
-        // Use html2pdf library if available
-        if (typeof html2pdf !== 'undefined') {
-            const element = document.createElement('div');
-            element.innerHTML = htmlContent;
-            document.body.appendChild(element);
-
-            const opt = {
-                margin: [0.5, 0.5, 0.5, 0.5],
-                filename: `Annual_Report_${startYear}-${endYear}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: {
-                    scale: 2,
-                    useCORS: true,
-                    logging: false,
-                    letterRendering: true
-                },
-                jsPDF: {
-                    unit: 'in',
-                    format: 'a4',
-                    orientation: 'portrait',
-                    compress: true
-                },
-                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+            // Use settings for company profile, fallback to default
+            const company = {
+                name: settings.companyName || DataManager.COMPANY_PROFILE.name,
+                registeredAddress: settings.registeredAddress || DataManager.COMPANY_PROFILE.registeredAddress,
+                workAddress: settings.workAddress || DataManager.COMPANY_PROFILE.workAddress,
+                gstin: settings.gstin || DataManager.COMPANY_PROFILE.gstin,
+                pan: settings.pan || DataManager.COMPANY_PROFILE.pan,
+                emails: toArray(settings.emails || DataManager.COMPANY_PROFILE.emails),
+                phones: toArray(settings.phones || DataManager.COMPANY_PROFILE.phones),
+                iec: settings.iec || DataManager.COMPANY_PROFILE.iec
             };
 
-            html2pdf().set(opt).from(element).save().then(() => {
-                document.body.removeChild(element);
-            });
-        } else {
-            // Fallback: open in new window for printing
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(htmlContent);
-            printWindow.document.close();
-            printWindow.print();
-        }
-    },
+            // Get credit date if available
+            const payoutDetails = await DataManager.getSalaryPayoutDetails(year, month);
+            const creditDate = payoutDetails ? payoutDetails.creditDate : null;
 
-    generatePayslips(year, month, selectedEmployees = null) {
-        const allEmployees = DataManager.getActiveEmployees();
-        const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
-        const attendance = DataManager.getAttendanceByMonth(year, month);
-        const daysInMonth = DataManager.getDaysInMonth(year, month);
-        const settings = DataManager.getSettings();
-        const baseSalaries = settings.baseSalaries || {};
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthName = months[month];
-        const company = DataManager.COMPANY_PROFILE;
-
-        // Get credit date if available
-        const payoutDetails = DataManager.getSalaryPayoutDetails(year, month);
-        const creditDate = payoutDetails ? payoutDetails.creditDate : null;
-        const paymentDate = creditDate ? DataManager.formatDateDisplay(creditDate) : new Date().toLocaleDateString('en-IN');
-
-        employees.forEach(emp => {
-            const empAttendance = attendance.filter(a => a.employee === emp.name);
-
-            // Calculate stats
-            let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0, hWorking = 0;
-            let standardOtHours = 0, hWorkingOtHours = 0;
-
-            empAttendance.forEach(record => {
-                switch (record.status) {
-                    case 'Present': present++; break;
-                    case 'Paid Leave': paidLeave++; break;
-                    case 'Unpaid Leave': unpaidLeave++; break;
-                    case 'Sick Leave': unpaidLeave++; break;
-                    case 'Half Day': halfDays++; break;
-                    case 'Holiday': holidays++; break;
-                    case 'H-Working':
-                        holidays++;
-                        hWorking++;
-                        break;
-                }
-                const hours = parseFloat(record.otHours || 0) || 0;
-                if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                    hWorkingOtHours += hours;
-                } else {
-                    standardOtHours += hours;
-                }
-            });
-            const totalOtHours = standardOtHours + hWorkingOtHours;
-
-            // Get employee data
-            const baseSalary = parseFloat(emp.baseSalary || baseSalaries[emp.name] || 0);
-            const salaryType = emp.salaryType || 'monthly';
-
-            // Calculate per day salary
-            let perDaySalary;
-            if (salaryType === 'daily') {
-                perDaySalary = baseSalary;
-            } else {
-                perDaySalary = baseSalary / daysInMonth;
-            }
-
-            const paidDays = present + paidLeave + holidays + (halfDays * 0.5);
-            const basePay = paidDays * perDaySalary;
-            const otPay = DataManager.calculateOTPay(
-                totalOtHours,
-                baseSalary,
-                salaryType,
-                { hWorkingOtHours, perDaySalary }
-            );
-
-            // Advance summary (financial year based)
-            const totalAdvanceFY = DataManager.getTotalAdvanceForEmployeeFY(emp.name, year, month);
-            const remainingAdvanceBalance = DataManager.getRemainingAdvanceBalance(emp.name, year, month);
-            const debitedThisMonth = DataManager.getDebitedAdvance(emp.name, year, month) || 0;
-
-            // Reconstruct outstanding before this month's debit and carry forward balance
-            const totalOutstandingBefore = remainingAdvanceBalance + debitedThisMonth;
-            const balanceAfter = remainingAdvanceBalance;
-
-            const salaryBeforeAdvance = basePay + otPay;
-            const actualDebit = debitedThisMonth;
-            const finalSalary = salaryBeforeAdvance - actualDebit;
-
+            // Create HTML content for PDF
             let htmlContent = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        .payslip { max-width: 800px; margin: 0 auto; border: 2px solid #000; padding: 20px; }
-                        .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 15px; }
-                        .company-name { font-size: 22px; font-weight: bold; margin-bottom: 8px; }
-                        .company-details { font-size: 11px; line-height: 1.5; }
-                        .payslip-title { text-align: center; font-size: 18px; font-weight: bold; margin: 15px 0; }
-                        .employee-info { margin: 15px 0; }
-                        .info-row { display: flex; justify-content: space-between; margin: 5px 0; }
-                        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                        th, td { border: 1px solid #000; padding: 8px; }
-                        th { background-color: #f0f0f0; font-weight: bold; }
-                        .text-right { text-align: right; }
-                        .text-center { text-align: center; }
-                        .total-row { font-weight: bold; background-color: #f0f0f0; }
-                        .footer { margin-top: 20px; font-size: 10px; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
-                        .signature-section { margin-top: 30px; display: flex; justify-content: space-between; }
-                        .signature-box { width: 200px; border-top: 1px solid #000; padding-top: 5px; text-align: center; }
-                    </style>
-                </head>
-                <body>
-                    <div class="payslip">
-                        <div class="header">
-                            <div class="company-name">${company.name}</div>
-                            <div class="company-details">
-                                ${company.registeredAddress}<br>
-                                ${company.workAddress}<br>
-                                GSTIN: ${company.gstin} | PAN: ${company.pan}
-                            </div>
-                        </div>
-                        <div class="payslip-title">PAYSLIP FOR THE MONTH OF ${monthName.toUpperCase()} ${year}</div>
-                        <div class="employee-info">
-                            <div class="info-row">
-                                <span><strong>Employee Name:</strong> ${emp.name}</span>
-                                <span><strong>Salary Credit Date:</strong> ${paymentDate}</span>
-                            </div>
-                            <div class="info-row">
-                                <span><strong>Employee ID:</strong> ${emp.id || 'N/A'}</span>
-                                <span><strong>Salary Type:</strong> ${salaryType === 'daily' ? 'Daily' : 'Monthly'}</span>
-                            </div>
-                        </div>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Earnings</th>
-                                    <th class="text-right">Amount (₹)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Basic Salary</td>
-                                    <td class="text-right">${baseSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td>Base Pay (${paidDays.toFixed(1)} days)</td>
-                                    <td class="text-right">${basePay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td>Standard OT Pay (${standardOtHours.toFixed(2)} hrs)</td>
-                                    <td class="text-right">${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td>H-OT Pay (${hWorkingOtHours.toFixed(2)} hrs)</td>
-                                    <td class="text-right">${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Total OT Pay</strong></td>
-                                    <td class="text-right"><strong>${otPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-                                </tr>
-                                <tr class="total-row">
-                                    <td><strong>Gross Salary</strong></td>
-                                    <td class="text-right"><strong>${salaryBeforeAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Deductions</th>
-                                    <th class="text-right">Amount (₹)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Total Advance Outstanding (before this month)</td>
-                                    <td class="text-right">${totalOutstandingBefore.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td>Advance Debited in this month</td>
-                                    <td class="text-right">${actualDebit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                    <td>Advance Balance carried forward</td>
-                                    <td class="text-right">${balanceAfter.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr class="total-row">
-                                    <td><strong>Total Deductions</strong></td>
-                                    <td class="text-right"><strong>${actualDebit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Attendance Summary</th>
-                                    <th class="text-right">Days</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td>Present Days</td><td class="text-right">${present}</td></tr>
-                                <tr><td>Paid Leave</td><td class="text-right">${paidLeave}</td></tr>
-                                <tr><td>Unpaid Leave</td><td class="text-right">${unpaidLeave}</td></tr>
-                                <tr><td>Half Days</td><td class="text-right">${halfDays}</td></tr>
-                                <tr><td>Holidays</td><td class="text-right">${holidays}</td></tr>
-                                <tr><td>Holiday Working</td><td class="text-right">${hWorking}</td></tr>
-                                <tr><td>H-OT Hours</td><td class="text-right">${hWorkingOtHours.toFixed(2)}</td></tr>
-                                <tr><td>Total OT Hours</td><td class="text-right">${totalOtHours.toFixed(2)}</td></tr>
-                            </tbody>
-                        </table>
-                        <div style="text-align: center; margin: 20px 0; font-size: 18px; font-weight: bold;">
-                            Net Salary: ₹${finalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </div>
-                        <div class="signature-section">
-                            <div class="signature-box">Employee Signature</div>
-                            <div class="signature-box">Authorized Signature</div>
-                        </div>
-                        <div class="footer">
-                            This is a computer generated payslip. No signature required.
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 0; padding: 10px; color: #000000 !important; background-color: #ffffff; font-size: 9px; -webkit-print-color-adjust: exact; box-sizing: border-box; }
+                    .container { width: 100%; max-width: 700px; margin: 0 auto; border: 1px solid #000; padding: 10px; box-sizing: border-box; }
+                    .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+                    .company-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; color: #000000 !important; }
+                    .company-details { font-size: 9px; line-height: 1.4; color: #000000 !important; }
+                    .report-title { text-align: center; font-size: 14px; font-weight: bold; margin: 15px 0; color: #000000 !important; }
+                    .report-meta { text-align: center; font-size: 10px; margin-bottom: 15px; color: #000000 !important; }
+                    table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 9px; }
+                    th, td { border: 1px solid #000; padding: 4px; text-align: left; color: #000000 !important; border-color: #000000 !important; }
+                    th { background-color: #f0f0f0; font-weight: bold; color: #000000 !important; }
+                    .text-right { text-align: right; }
+                    .summary { margin: 15px 0; color: #000000 !important; }
+                    .footer { margin-top: 20px; font-size: 8px; text-align: center; border-top: 1px solid #000; padding-top: 5px; color: #000000 !important; }
+                </style>
+            </head>
+            <body style="color: #000000 !important; background-color: #ffffff !important;">
+                <div class="container">
+                    <div class="header" style="color: #000000 !important;">
+                        <div class="company-name" style="color: #000000 !important;">${company.name}</div>
+                        <div class="company-details" style="color: #000000 !important;">
+                            Registered Address: ${company.registeredAddress}<br>
+                            Work Address: ${company.workAddress}<br>
+                            Email: ${company.emails.join(', ')} | Phone: ${company.phones.join(', ')}<br>
+                            GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
                         </div>
                     </div>
-                </body>
-                </html>
-            `;
+                    <div class="report-title" style="color: #000000 !important;">Monthly Salary Report - ${monthName} ${year}</div>
+                    ${creditDate ? `<div class="report-meta" style="color: #000000 !important;"><strong>Salary Credit Date:</strong> ${DataManager.formatDateDisplay(creditDate)}</div>` : ''}
+        `;
 
-            // Generate PDF for each employee
+            // Process employees sequentially or in parallel
+            const employeeRows = await Promise.all(employees.map(async emp => {
+                const empAttendance = attendance.filter(a => a.employee === emp.name);
+
+                // Calculate stats
+                let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0;
+                let standardOtHours = 0, hWorkingOtHours = 0;
+
+                empAttendance.forEach(record => {
+                    switch (record.status) {
+                        case 'Present': present++; break;
+                        case 'Paid Leave': paidLeave++; break;
+                        case 'Unpaid Leave': unpaidLeave++; break;
+                        case 'Sick Leave': sickLeaves++; break;
+                        case 'Half Day': halfDays++; break;
+                        case 'Holiday': holidays++; break;
+                        case 'H-Working': holidays++; break;
+                    }
+                    const hours = parseFloat(record.otHours || 0) || 0;
+                    if (record.status === 'H-Working' && record.overTime === 'H-Working') {
+                        hWorkingOtHours += hours;
+                    } else {
+                        standardOtHours += hours;
+                    }
+                });
+                const totalOtHours = standardOtHours + hWorkingOtHours;
+
+                // Get employee data
+                const allEmps = await DataManager.getEmployees();
+                const employee = allEmps.find(e => e.name === emp.name);
+                const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[emp.name] || 0);
+                const salaryType = employee?.salaryType || 'monthly';
+
+                // Calculate per day salary
+                let perDaySalary;
+                if (salaryType === 'daily') {
+                    perDaySalary = baseSalary;
+                } else {
+                    perDaySalary = baseSalary / daysInMonth;
+                }
+
+                const paidDays = present + paidLeave + holidays + (halfDays * 0.5);
+                const basePay = paidDays * perDaySalary;
+                const otBreakdown = DataManager.calculateOTPay(
+                    totalOtHours,
+                    baseSalary,
+                    salaryType,
+                    { hWorkingOtHours, perDaySalary, returnBreakdown: true, settings }
+                );
+                const otPay = otBreakdown.totalPay;
+                const standardOtPay = otBreakdown.standardPay || 0;
+                const hOtPay = otBreakdown.hWorkingPay || 0;
+                const totalAdvance = await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
+                const remainingAdvanceBalance = await DataManager.getRemainingAdvanceBalance(emp.name, year, month);
+                const finalSalary = basePay + otPay - totalAdvance;
+
+                return `
+                <div class="summary" style="color: #000000 !important;">
+                    <h3 style="color: #000000 !important;">${emp.name}</h3>
+                    <table style="color: #000000 !important; border-color: #000000 !important;">
+                        <tr><th style="color: #000000 !important;">Item</th><th style="color: #000000 !important;">Details</th></tr>
+                        <tr><td style="color: #000000 !important;">Basic Salary</td><td class="text-right" style="color: #000000 !important;">₹${baseSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                        ${present > 0 ? `<tr><td style="color: #000000 !important;">Present Days</td><td class="text-right" style="color: #000000 !important;">${present}</td></tr>` : ''}
+                        ${paidLeave > 0 ? `<tr><td style="color: #000000 !important;">Paid Leave</td><td class="text-right" style="color: #000000 !important;">${paidLeave}</td></tr>` : ''}
+                        ${unpaidLeave > 0 ? `<tr><td style="color: #000000 !important;">Unpaid Leave</td><td class="text-right" style="color: #000000 !important;">${unpaidLeave}</td></tr>` : ''}
+                        ${sickLeaves > 0 ? `<tr><td style="color: #000000 !important;">Sick Leave</td><td class="text-right" style="color: #000000 !important;">${sickLeaves}</td></tr>` : ''}
+                        ${halfDays > 0 ? `<tr><td style="color: #000000 !important;">Half Days</td><td class="text-right" style="color: #000000 !important;">${halfDays}</td></tr>` : ''}
+                        ${holidays > 0 ? `<tr><td style="color: #000000 !important;">Holidays</td><td class="text-right" style="color: #000000 !important;">${holidays}</td></tr>` : ''}
+                        <tr><td style="color: #000000 !important;">Paid Days</td><td class="text-right" style="color: #000000 !important;">${paidDays.toFixed(1)}</td></tr>
+                        <tr><td style="color: #000000 !important;">Base Pay</td><td class="text-right" style="color: #000000 !important;">₹${basePay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                        ${totalOtHours > 0 ? `<tr><td style="color: #000000 !important;">OT Hours</td><td class="text-right" style="color: #000000 !important;">${totalOtHours.toFixed(2)}</td></tr>` : ''}
+                        ${hWorkingOtHours > 0 ? `<tr><td style="color: #000000 !important;">H-OT Hours</td><td class="text-right" style="color: #000000 !important;">${hWorkingOtHours.toFixed(2)}</td></tr>` : ''}
+                        ${standardOtPay > 0 ? `<tr><td style="color: #000000 !important;">Standard OT Pay</td><td class="text-right" style="color: #000000 !important;">₹${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                        ${hOtPay > 0 ? `<tr><td style="color: #000000 !important;">H-OT Pay</td><td class="text-right" style="color: #000000 !important;">₹${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                        ${otPay > 0 ? `<tr><td style="color: #000000 !important;"><strong style="color: #000000 !important;">Total OT Pay</strong></td><td class="text-right" style="color: #000000 !important;"><strong style="color: #000000 !important;">₹${otPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>` : ''}
+                        ${totalAdvance > 0 ? `<tr><td style="color: #000000 !important;">Total Advance (This Month)</td><td class="text-right" style="color: #000000 !important;">₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                        ${remainingAdvanceBalance > 0 ? `<tr><td style="color: #000000 !important;">Pending Advance Balance</td><td class="text-right" style="color: #000000 !important;">₹${remainingAdvanceBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                        <tr><td style="color: #000000 !important;"><strong style="color: #000000 !important;">Final Salary</strong></td><td class="text-right" style="color: #000000 !important;"><strong style="color: #000000 !important;">₹${finalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
+                    </table>
+                </div>
+            `;
+            }));
+
+            htmlContent += employeeRows.join('');
+
+            htmlContent += `
+                <div class="footer">
+                    Generated on: ${new Date().toLocaleString('en-IN')}<br>
+                    ${company.name} - ${company.registeredAddress}
+                </div>
+                </div>
+            </body>
+            </html>
+        `;
+
+            // Use html2pdf library if available, otherwise use print
             if (typeof html2pdf !== 'undefined') {
                 const element = document.createElement('div');
                 element.innerHTML = htmlContent;
                 document.body.appendChild(element);
 
                 const opt = {
-                    margin: [0.3, 0.3, 0.3, 0.3],
-                    filename: `Payslip_${emp.name}_${monthName}_${year}.pdf`,
+                    margin: [0.5, 0.5, 0.5, 0.5],
+                    filename: `Monthly_Report_${monthName}_${year}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: {
                         scale: 2,
@@ -1248,24 +985,647 @@ const ReportsModule = {
                     document.body.removeChild(element);
                 });
             } else {
+                // Fallback: open in new window for printing
                 const printWindow = window.open('', '_blank');
                 printWindow.document.write(htmlContent);
                 printWindow.document.close();
                 printWindow.print();
             }
-        });
+        } catch (error) {
+            console.error('Error generating Monthly PDF:', error);
+            alert('Error generating PDF: ' + error.message);
+        }
     },
 
-    generateSalaryPayout(year, month, options = {}) {
-        const { selectedEmployees = null, payoutData = null, creditDate = null } = options || {};
+    async generateAnnualPDF(startYear, endYear, selectedEmployees = null) {
+        console.log('Starting Annual PDF generation for', startYear, '-', endYear);
+        try {
+            const allEmployees = await DataManager.getActiveEmployees();
+            const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
+            const startDate = new Date(startYear, 3, 1); // April 1
+            const endDate = new Date(endYear, 2, 31); // March 31
+            const attendance = await DataManager.getAttendance();
+            const filteredAttendance = attendance.filter(a => {
+                const date = new Date(a.date);
+                return date >= startDate && date <= endDate;
+            });
+            const settings = await DataManager.getSettings();
+            const baseSalaries = settings.baseSalaries || {};
+
+            // Helper to ensure array
+            const toArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (typeof val === 'string') return val.split(',').map(s => s.trim());
+                return [];
+            };
+
+            // Use settings for company profile, fallback to default
+            const company = {
+                name: settings.companyName || DataManager.COMPANY_PROFILE.name,
+                registeredAddress: settings.registeredAddress || DataManager.COMPANY_PROFILE.registeredAddress,
+                workAddress: settings.workAddress || DataManager.COMPANY_PROFILE.workAddress,
+                gstin: settings.gstin || DataManager.COMPANY_PROFILE.gstin,
+                pan: settings.pan || DataManager.COMPANY_PROFILE.pan,
+                emails: toArray(settings.emails || DataManager.COMPANY_PROFILE.emails),
+                phones: toArray(settings.phones || DataManager.COMPANY_PROFILE.phones),
+                iec: settings.iec || DataManager.COMPANY_PROFILE.iec
+            };
+
+            // Pre-fetch credit dates
+            let datesHtml = '<strong>Salary Credit Dates:</strong><br>';
+            let hasDates = false;
+            for (let year = startYear; year <= endYear; year++) {
+                for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
+                    const details = await DataManager.getSalaryPayoutDetails(year, month);
+                    if (details && details.creditDate) {
+                        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        datesHtml += `${months[month]} ${year}: ${DataManager.formatDateDisplay(details.creditDate)} | `;
+                        hasDates = true;
+                    }
+                }
+            }
+            const creditDatesHtml = hasDates ? datesHtml.slice(0, -3) : '';
+
+            let htmlContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 0; padding: 10px; color: #000000 !important; background-color: #ffffff; font-size: 9px; -webkit-print-color-adjust: exact; box-sizing: border-box; }
+                    .container { width: 100%; max-width: 700px; margin: 0 auto; border: 1px solid #000; padding: 10px; box-sizing: border-box; }
+                    .header { text-align: center; margin-bottom: 8px; border-bottom: 1px solid #000; padding-bottom: 6px; }
+                    .company-name { font-size: 14px; font-weight: bold; margin-bottom: 4px; color: #000000 !important; }
+                    .company-details { font-size: 8px; line-height: 1.3; color: #000000 !important; }
+                    .report-title { text-align: center; font-size: 12px; font-weight: bold; margin: 8px 0; color: #000000 !important; }
+                    table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 9px; }
+                    th, td { border: 1px solid #000; padding: 3px 4px; text-align: left; color: #000000 !important; font-size: 8px; border-color: #000000 !important; }
+                    th { background-color: #f0f0f0; font-weight: bold; color: #000000 !important; }
+                    .text-right { text-align: right; }
+                    .summary { margin: 8px 0; color: #000000 !important; font-size: 9px; }
+                    .footer { margin-top: 8px; font-size: 7px; text-align: center; border-top: 1px solid #000; padding-top: 4px; color: #000000 !important; }
+                    * { color: #000000 !important; }
+                </style>
+            </head>
+            <body style="color: #000000 !important; background-color: #ffffff !important;">
+                <div class="container">
+                    <div class="header" style="color: #000000 !important;">
+                        <div class="company-name" style="color: #000000 !important;">${company.name}</div>
+                        <div class="company-details" style="color: #000000 !important;">
+                            Registered Address: ${company.registeredAddress}<br>
+                            Work Address: ${company.workAddress}<br>
+                            Email: ${company.emails.join(', ')} | Phone: ${company.phones.join(', ')}<br>
+                            GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
+                        </div>
+                    </div>
+                    <div class="report-title" style="color: #000000 !important;">Annual Salary Report - Financial Year ${startYear}-${endYear}</div>
+                    <div class="report-meta" style="text-align: center; font-size: 12px; margin-bottom: 20px; color: #000000 !important;">
+                        ${creditDatesHtml}
+                    </div>
+            `;
+
+            const employeeRows = await Promise.all(employees.map(async emp => {
+                const empAttendance = filteredAttendance.filter(a => a.employee === emp.name);
+
+                // Calculate annual stats
+                let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0;
+                let standardOtHours = 0, hWorkingOtHours = 0;
+
+                empAttendance.forEach(record => {
+                    switch (record.status) {
+                        case 'Present': present++; break;
+                        case 'Paid Leave': paidLeave++; break;
+                        case 'Unpaid Leave': unpaidLeave++; break;
+                        case 'Sick Leave': sickLeaves++; break;
+                        case 'Half Day': halfDays++; break;
+                        case 'Holiday': holidays++; break;
+                        case 'H-Working': holidays++; break;
+                    }
+                    const hours = parseFloat(record.otHours || 0) || 0;
+                    const dateObj = new Date(record.date);
+                    const isSunday = DataManager.isSunday(dateObj);
+                    const isHoliday = DataManager.isHoliday(dateObj);
+
+                    // Logic matching salary.js
+                    if (record.status === 'H-Working' && record.overTime === 'H-Working') {
+                        hWorkingOtHours += hours;
+                    } else if (isSunday && !isHoliday && record.status === 'Present') {
+                        // S-OT is grouped with Standard OT for reports usually, or we can separate it?
+                        // For now, let's group it with Standard OT as per previous logic unless requested otherwise
+                        standardOtHours += hours;
+                    } else {
+                        standardOtHours += hours;
+                    }
+                });
+                const totalOtHours = standardOtHours + hWorkingOtHours;
+
+                // Calculate total advances
+                let totalAdvance = 0;
+                for (let year = startYear; year <= endYear; year++) {
+                    for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
+                        totalAdvance += await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
+                    }
+                }
+
+                // Get employee data
+                const employeesList = await DataManager.getEmployees();
+                const employee = employeesList.find(e => e.name === emp.name);
+                const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[emp.name] || 0);
+                const salaryType = employee?.salaryType || 'monthly';
+
+                // Calculate per day salary
+                const avgDaysPerMonth = 30;
+                let avgPerDaySalary;
+                if (salaryType === 'daily') {
+                    avgPerDaySalary = baseSalary;
+                } else {
+                    avgPerDaySalary = baseSalary / avgDaysPerMonth;
+                }
+
+                const totalPaidDays = present + paidLeave + holidays + (halfDays * 0.5);
+                const totalBasePay = totalPaidDays * avgPerDaySalary;
+                const totalOtBreakdown = DataManager.calculateOTPay(
+                    totalOtHours,
+                    baseSalary,
+                    salaryType,
+                    { hWorkingOtHours, perDaySalary: avgPerDaySalary, returnBreakdown: true, settings }
+                );
+                const totalOTPay = totalOtBreakdown.totalPay;
+                const standardOtPay = totalOtBreakdown.standardPay || 0;
+                const hOtPay = totalOtBreakdown.hWorkingPay || 0;
+                const totalSalary = totalBasePay + totalOTPay - totalAdvance;
+
+                return `
+                    <div class="summary">
+                        <h3>${emp.name}</h3>
+                        <table>
+                            <tr><th>Item</th><th>Details</th></tr>
+                            <tr><td>Total Present Days</td><td class="text-right">${present}</td></tr>
+                            <tr><td>Total Paid Leave</td><td class="text-right">${paidLeave}</td></tr>
+                            <tr><td>Total Unpaid Leave</td><td class="text-right">${unpaidLeave}</td></tr>
+                            <tr><td>Total Sick Leave</td><td class="text-right">${sickLeaves}</td></tr>
+                            <tr><td>Total Half Days</td><td class="text-right">${halfDays}</td></tr>
+                            <tr><td>Total Holidays</td><td class="text-right">${holidays}</td></tr>
+                            <tr><td>Total OT Hours</td><td class="text-right">${standardOtHours.toFixed(2)}</td></tr>
+                            <tr><td>H-OT Hours</td><td class="text-right">${hWorkingOtHours.toFixed(2)}</td></tr>
+                            <tr><td>Standard OT Pay</td><td class="text-right">₹${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                            <tr><td>H-OT Pay</td><td class="text-right">₹${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                            <tr><td><strong>Total OT Pay</strong></td><td class="text-right"><strong>₹${totalOTPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
+                            <tr><td>Total Advances</td><td class="text-right">₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                            <tr><td><strong>Total Salary Paid</strong></td><td class="text-right"><strong>₹${totalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
+                        </table>
+                    </div>
+                `;
+            }));
+
+            htmlContent += employeeRows.join('');
+
+            htmlContent += `
+                    <div class="footer">
+                        Generated on: ${new Date().toLocaleString('en-IN')}<br>
+                        ${company.name} - ${company.registeredAddress}
+                    </div>
+                </div>
+                </body>
+                </html>
+            `;
+
+            // Use html2pdf library if available
+            if (typeof html2pdf !== 'undefined') {
+                const element = document.createElement('div');
+                element.innerHTML = htmlContent;
+                document.body.appendChild(element);
+
+                const opt = {
+                    margin: [0.5, 0.5, 0.5, 0.5],
+                    filename: `Annual_Report_${startYear}-${endYear}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: {
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        letterRendering: true
+                    },
+                    jsPDF: {
+                        unit: 'in',
+                        format: 'a4',
+                        orientation: 'portrait',
+                        compress: true
+                    },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                };
+
+                html2pdf().set(opt).from(element).save().then(() => {
+                    document.body.removeChild(element);
+                });
+            } else {
+                // Fallback: open in new window for printing
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(htmlContent);
+                printWindow.document.close();
+                printWindow.print();
+            }
+        } catch (error) {
+            console.error('Error generating Annual PDF:', error);
+            alert('Error generating PDF: ' + error.message);
+        }
+    },
+
+
+    async generatePayslips(year, month, selectedEmployees = null, action = 'download') {
+        try {
+            if (typeof html2pdf === 'undefined') {
+                alert('Error: html2pdf library is not loaded. Please check your internet connection.');
+                return;
+            }
+
+            const allEmployees = await DataManager.getEmployeesActiveInMonth(year, month);
+            const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
+
+            if (employees.length === 0) {
+                alert('No employees selected for payslip generation.');
+                return;
+            }
+
+            App.showLoader();
+
+            const payoutDetails = await DataManager.getSalaryPayoutDetails(year, month);
+            const payoutData = await this.getSalaryPayoutData(year, month, employees.map(e => e.name));
+            const settings = await DataManager.getSettings();
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthName = months[month];
+            const previewHtmls = [];
+
+            // Helper to ensure array
+            const toArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (typeof val === 'string') return val.split(',').map(s => s.trim());
+                return [];
+            };
+
+            // Use settings for company profile, fallback to default
+            const company = {
+                name: settings.companyName || DataManager.COMPANY_PROFILE.name,
+                registeredAddress: settings.registeredAddress || DataManager.COMPANY_PROFILE.registeredAddress,
+                workAddress: settings.workAddress || DataManager.COMPANY_PROFILE.workAddress,
+                gstin: settings.gstin || DataManager.COMPANY_PROFILE.gstin,
+                pan: settings.pan || DataManager.COMPANY_PROFILE.pan,
+                emails: toArray(settings.emails || DataManager.COMPANY_PROFILE.emails),
+                phones: toArray(settings.phones || DataManager.COMPANY_PROFILE.phones)
+            };
+
+            const creditDate = payoutDetails ? payoutDetails.creditDate : null;
+            const paymentDate = creditDate ? DataManager.formatDateDisplay(creditDate) : new Date().toLocaleDateString('en-IN');
+
+            App.showNotification(`Generating payslips for ${employees.length} employees...`, 'info');
+
+            // Process sequentially
+            for (const data of payoutData) {
+                const emp = employees.find(e => e.name === data.name) || { name: data.name, id: 'N/A' };
+
+                const salaryType = data.salaryType;
+                const baseSalary = data.baseSalary;
+                const paidDays = data.paidDays;
+                const basePay = data.basePay;
+                const otPay = data.otPay;
+                const standardOtPay = data.standardOtPay;
+                const hOtPay = data.hWorkingOtPay;
+                const standardOtHours = data.standardOtHours;
+                const hWorkingOtHours = data.hWorkingOtHours;
+                const totalOtHours = data.otHours;
+
+                const advanceThisMonth = data.advanceThisMonth;
+                const outstandingBefore = data.outstandingBefore;
+                const carryForwardPrevious = data.carryForwardPrevious;
+                const debitedThisMonth = data.debitAmount;
+                const balanceAfter = data.carryForwardAfter;
+
+                const salaryBeforeAdvance = data.salaryBeforeAdvance;
+                const finalSalary = data.netSalary;
+
+                let htmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                    body { font-family: Arial, sans-serif; margin: 0; padding: 10px; color: #000000 !important; background-color: #ffffff; font-size: 9px; -webkit-print-color-adjust: exact; box-sizing: border-box; }
+                    .payslip { width: 100%; max-width: 700px; margin: 0 auto; border: 1px solid #000; padding: 10px; box-sizing: border-box; }
+                    .header { text-align: center; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 6px; }
+                    .company-name { font-size: 14px; font-weight: bold; margin-bottom: 3px; color: #000000 !important; }
+                    .company-details { font-size: 8px; line-height: 1.3; color: #000000 !important; }
+                    .payslip-title { text-align: center; font-size: 12px; font-weight: bold; margin: 6px 0; color: #000000 !important; }
+                    .employee-info { margin: 6px 0; color: #000000 !important; }
+                    table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 9px; }
+                    th, td { border: 1px solid #000; padding: 3px 4px; text-align: left; color: #000000 !important; font-size: 8px; border-color: #000000 !important; }
+                    th { background-color: #f0f0f0; font-weight: bold; color: #000000 !important; }
+                    .text-right { text-align: right; }
+                    .text-center { text-align: center; }
+                    .total-row { font-weight: bold; background-color: #f0f0f0; color: #000000 !important; }
+                    .footer { margin-top: 8px; font-size: 7px; text-align: center; border-top: 1px solid #000; padding-top: 4px; color: #000000 !important; }
+                    .signature-section { margin-top: 12px; display: flex; justify-content: space-between; }
+                    .signature-box { width: 150px; border-top: 1px solid #000; padding-top: 3px; text-align: center; color: #000000 !important; font-size: 8px; }
+                    * { color: #000000 !important; }
+                </style>
+                </head>
+                <body style="color: #000000 !important; background-color: #ffffff !important;">
+                    <div class="payslip" style="color: #000000 !important; border-color: #000000 !important;">
+                        <div class="header" style="color: #000000 !important;">
+                            <div class="company-name" style="color: #000000 !important;">${company.name}</div>
+                            <div class="company-details" style="color: #000000 !important;">
+                                ${company.registeredAddress}<br>
+                                ${company.workAddress}<br>
+                                GSTIN: ${company.gstin} | PAN: ${company.pan}
+                            </div>
+                        </div>
+                        <div class="payslip-title">PAYSLIP FOR THE MONTH OF ${monthName.toUpperCase()} ${year}</div>
+                        <div class="employee-info">
+                            <div class="info-row" style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span><strong>Employee Name:</strong> ${emp.name}</span>
+                                <span><strong>Salary Credit Date:</strong> ${paymentDate}</span>
+                            </div>
+                            <div class="info-row" style="display: flex; justify-content: space-between;">
+                                <span><strong>Employee ID:</strong> ${emp.id || 'N/A'}</span>
+                                <span><strong>Salary Type:</strong> ${salaryType === 'daily' ? 'Daily' : 'Monthly'}</span>
+                            </div>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Earnings</th>
+                                    <th class="text-right">Amount (₹)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Basic Salary</td>
+                                    <td class="text-right">${baseSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr>
+                                    <td>Base Pay (${paidDays.toFixed(1)} days)</td>
+                                    <td class="text-right">${basePay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                ${standardOtPay > 0 ? `
+                                <tr>
+                                    <td>Standard OT Pay (${standardOtHours.toFixed(2)} hrs)</td>
+                                    <td class="text-right">${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>` : ''}
+                                ${hOtPay > 0 ? `
+                                <tr>
+                                    <td>H-OT Pay (${hWorkingOtHours.toFixed(2)} hrs)</td>
+                                    <td class="text-right">${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>` : ''}
+                                ${otPay > 0 ? `
+                                <tr>
+                                    <td><strong>Total OT Pay</strong></td>
+                                    <td class="text-right"><strong>${otPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+                                </tr>` : ''}
+                                <tr class="total-row">
+                                    <td><strong>Gross Salary</strong></td>
+                                    <td class="text-right"><strong>${salaryBeforeAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        ${(outstandingBefore > 0 || debitedThisMonth > 0) ? `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Deductions & Advance Breakdown</th>
+                                    <th class="text-right">Amount (₹)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${carryForwardPrevious > 0 ? `
+                                <tr>
+                                    <td>Previous Advance Balance</td>
+                                    <td class="text-right">${carryForwardPrevious.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>` : ''}
+                                ${advanceThisMonth > 0 ? `
+                                <tr>
+                                    <td>Advance Taken (This Month)</td>
+                                    <td class="text-right">${advanceThisMonth.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>` : ''}
+                                <tr>
+                                    <td><strong>Total Advance Outstanding</strong></td>
+                                    <td class="text-right"><strong>${outstandingBefore.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+                                </tr>
+                                <tr style="background-color: #fff9e6;">
+                                    <td>Advance Debited in this month</td>
+                                    <td class="text-right">${debitedThisMonth.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr>
+                                    <td>Advance Balance carried forward</td>
+                                    <td class="text-right">${balanceAfter.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr class="total-row">
+                                    <td><strong>Total Deductions</strong></td>
+                                    <td class="text-right"><strong>${debitedThisMonth.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        ` : ''}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Attendance Summary</th>
+                                    <th class="text-right">Days</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Present Days</td>
+                                    <td class="text-right">${data.present}</td>
+                                </tr>
+                                ${data.paidLeave > 0 ? `
+                                <tr>
+                                    <td>Paid Leave</td>
+                                    <td class="text-right">${data.paidLeave}</td>
+                                </tr>` : ''}
+                                ${data.unpaidLeave > 0 || data.sickLeaves > 0 ? `
+                                <tr>
+                                    <td>Unpaid / Sick Leave</td>
+                                    <td class="text-right">${data.unpaidLeave + data.sickLeaves}</td>
+                                </tr>` : ''}
+                                ${data.halfDays > 0 ? `
+                                <tr>
+                                    <td>Half Days</td>
+                                    <td class="text-right">${data.halfDays}</td>
+                                </tr>` : ''}
+                                <tr>
+                                    <td>Holidays</td>
+                                    <td class="text-right">${data.holidays}</td>
+                                </tr>
+                                ${data.holidayWorking > 0 ? `
+                                <tr>
+                                    <td>Holiday Working</td>
+                                    <td class="text-right">${data.holidayWorking}</td>
+                                </tr>` : ''}
+                                <tr>
+                                    <td>Total OT Hours</td>
+                                    <td class="text-right">${totalOtHours.toFixed(2)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div style="text-align: center; margin: 15px 0; border-top: 2px solid #000; padding-top: 10px;">
+                            <span style="font-size: 16px; font-weight: bold;">Net Salary: ₹${finalSalary.toLocaleString('en-IN', { minimumFractionDigits: 3 })}</span>
+                        </div>
+                        ${emp.paymentMode === 'bank' && emp.bank ? `
+                        <div style="margin: 15px 0; border: 1px solid #000; padding: 8px;">
+                            <div style="font-size: 10px; font-weight: bold; margin-bottom: 6px; text-align: center;">Bank Account Details (Salary Credited)</div>
+                            <table style="margin: 0;">
+                                <tbody>
+                                    <tr>
+                                        <td style="width: 50%; border-right: 1px solid #000;"><strong>Beneficiary Name:</strong> ${emp.bank.beneficiaryName || 'N/A'}</td>
+                                        <td style="width: 50%;"><strong>Account Number:</strong> ${emp.bank.accountNo || 'N/A'}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="border-right: 1px solid #000;"><strong>IFSC Code:</strong> ${emp.bank.ifsc || 'N/A'}</td>
+                                        <td><strong>Branch:</strong> ${emp.bank.branchName || 'N/A'}</td>
+                                    </tr>
+                                    ${emp.bank.address ? `
+                                    <tr>
+                                        <td colspan="2"><strong>Bank Address:</strong> ${emp.bank.address}</td>
+                                    </tr>` : ''}
+                                </tbody>
+                            </table>
+                        </div>
+                        ` : ''}
+                        <div class="signature-section" style="margin-top: 15px;">
+                            ${emp.employeePhoto ? `<div style="text-align: center; width: 100px;"><img src="${emp.employeePhoto}" style="max-width: 80px; max-height: 80px; border: 1px solid #000; border-radius: 3px; object-fit: cover;"/><div style="font-size: 7px; margin-top: 2px;">Employee Photo</div></div>` : '<div class="signature-box">Employee Signature</div>'}
+                            <div class="signature-box">Authorized Signature</div>
+                        </div>
+                        <div class="footer">
+                            This is a computer generated payslip. No signature required.
+                        </div>
+                    </div>
+                </body>
+                </html>
+                `;
+
+                // Handle Actions
+                if (action === 'preview') {
+                    previewHtmls.push(htmlContent);
+                } else if (action === 'email') {
+                    if (typeof html2pdf !== 'undefined') {
+                        const element = document.createElement('div');
+                        element.innerHTML = htmlContent;
+                        document.body.appendChild(element);
+
+                        const opt = {
+                            margin: [0.3, 0.3, 0.3, 0.3],
+                            filename: `Payslip_${emp.name}_${monthName}_${year}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true, logging: false },
+                            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
+                            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                        };
+
+                        try {
+                            const pdfDataUri = await html2pdf().set(opt).from(element).output('datauristring');
+                            const base64Content = pdfDataUri.split(',')[1];
+
+                            const subject = `Payslip for ${monthName} ${year} - ${company.name}`;
+                            const emailHtml = `<p>Dear ${emp.name},</p><p>Please find attached your payslip for ${monthName} ${year}.</p>`;
+                            const attachments = [{
+                                filename: `Payslip_${emp.name}_${monthName}_${year}.pdf`,
+                                content: base64Content,
+                                encoding: 'base64'
+                            }];
+
+                            if (emp.email) {
+                                await EmailService.sendEmail(emp.email, subject, emailHtml, attachments);
+                            }
+                        } catch (err) {
+                            console.error(`Failed to email payslip to ${emp.name}:`, err);
+                        } finally {
+                            document.body.removeChild(element);
+                        }
+                    }
+                } else {
+                    // Default: Download PDF
+                    if (typeof html2pdf !== 'undefined') {
+                        const element = document.createElement('div');
+                        element.innerHTML = htmlContent;
+                        document.body.appendChild(element);
+
+                        const opt = {
+                            margin: [0.3, 0.3, 0.3, 0.3],
+                            filename: `Payslip_${emp.name}_${monthName}_${year}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true, logging: false, letterRendering: true },
+                            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
+                            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                        };
+
+                        try {
+                            await html2pdf().set(opt).from(element).save();
+                        } catch (pdfError) {
+                            console.error('PDF generation failed, falling back to print:', pdfError);
+                            const printWindow = window.open('', '_blank');
+                            printWindow.document.write(htmlContent);
+                            printWindow.document.close();
+                            printWindow.print();
+                        } finally {
+                            document.body.removeChild(element);
+                        }
+                    } else {
+                        const printWindow = window.open('', '_blank');
+                        printWindow.document.write(htmlContent);
+                        printWindow.document.close();
+                        printWindow.print();
+                    }
+                }
+            }
+
+            if (action === 'preview' && previewHtmls.length > 0) {
+                const combinedHtml = previewHtmls.join('<div style="page-break-after: always;"></div>');
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(combinedHtml);
+                printWindow.document.close();
+            }
+
+            if (action === 'email') {
+                App.showNotification('Payslips emailed successfully', 'success');
+            }
+        } catch (error) {
+            console.error('Error generating payslips:', error);
+            alert('Error generating payslips: ' + error.message);
+        } finally {
+            App.hideLoader();
+        }
+    },
+
+    async generateSalaryPayout(year, month, options = {}) {
+        const { selectedEmployees = null, payoutData = null, creditDate = null, previewOnly = false } = options || {};
+
+        if (!previewOnly) App.showLoader();
+
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthName = months[month];
-        const company = DataManager.COMPANY_PROFILE;
 
+        // Helper to ensure array
+        const toArray = (val) => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === 'string') return val.split(',').map(s => s.trim());
+            return [];
+        };
+
+        const settings = await DataManager.getSettings();
+        console.log('DEBUG: Salary Payout Settings:', settings);
+        const company = {
+            name: settings.companyName || DataManager.COMPANY_PROFILE.name,
+            registeredAddress: settings.registeredAddress || DataManager.COMPANY_PROFILE.registeredAddress,
+            workAddress: settings.workAddress || DataManager.COMPANY_PROFILE.workAddress,
+            emails: toArray(settings.emails || DataManager.COMPANY_PROFILE.emails),
+            phones: toArray(settings.phones || DataManager.COMPANY_PROFILE.phones),
+            gstin: settings.gstin || DataManager.COMPANY_PROFILE.gstin,
+            pan: settings.pan || DataManager.COMPANY_PROFILE.pan,
+            iec: settings.iec || DataManager.COMPANY_PROFILE.iec
+        };
+        console.log('DEBUG: Salary Payout Company Object:', company);
         const manualDebitsProvided = Array.isArray(payoutData) && payoutData.length;
-        let data = manualDebitsProvided ? payoutData : this.getSalaryPayoutData(year, month, selectedEmployees);
+        let data = manualDebitsProvided ? payoutData : await this.getSalaryPayoutData(year, month, selectedEmployees);
 
-        data = data.map(item => {
+        data = await Promise.all(data.map(async item => {
             const carryForwardBefore = item.carryForwardBefore ?? item.outstandingBefore ?? 0;
             const carryForwardPrev = item.carryForwardPrevious ?? Math.max(carryForwardBefore - (item.advanceThisMonth || 0), 0);
             const maxDebit = carryForwardBefore;
@@ -1274,8 +1634,8 @@ const ReportsModule = {
                 : Math.min(Math.max(Math.min(carryForwardBefore, item.salaryBeforeAdvance || carryForwardBefore), 0), maxDebit);
             const netSalary = Math.max((item.salaryBeforeAdvance || 0) - debit, 0);
             const carryForwardAfter = Math.max(carryForwardBefore - debit, 0);
-            const advanceThisMonth = item.advanceThisMonth != null ? item.advanceThisMonth : DataManager.getTotalAdvanceForEmployee(item.name, year, month);
-            const totalAdvanceFY = item.totalAdvanceFY != null ? item.totalAdvanceFY : DataManager.getTotalAdvanceForEmployeeFY(item.name, year, month);
+            const advanceThisMonth = item.advanceThisMonth != null ? item.advanceThisMonth : await DataManager.getTotalAdvanceForEmployee(item.name, year, month);
+            const totalAdvanceFY = item.totalAdvanceFY != null ? item.totalAdvanceFY : await DataManager.getTotalAdvanceForEmployeeFY(item.name, year, month);
             return {
                 ...item,
                 carryForwardPrevious: carryForwardPrev,
@@ -1287,78 +1647,99 @@ const ReportsModule = {
                 netSalary,
                 carryForwardAfter
             };
-        });
+        }));
 
-        if (!manualDebitsProvided) {
-            data.forEach(item => {
-                DataManager.saveDebitedAdvance(item.name, year, month, item.debitAmount || 0);
-            });
-        }
+        if (!previewOnly) {
+            if (!manualDebitsProvided) {
+                for (const item of data) {
+                    await DataManager.saveDebitedAdvance(item.name, year, month, item.debitAmount || 0);
+                }
+            }
 
-        //Mark salary payout done for the month, and accumulated months for daily employees
-        DataManager.markSalaryPayoutDone(year, month, creditDate);
+            // Prepare payout details
+            const employeeNames = data.map(d => d.name);
+            const totalPaid = data.reduce((sum, d) => sum + (d.netSalary || 0), 0);
+            const payoutDetails = {
+                creditDate: creditDate,
+                employees: employeeNames,
+                totalPaid: totalPaid
+            };
 
-        // For daily-paid employees, mark all accumulated unpaid months as paid
-        data.forEach(item => {
-            const employees = DataManager.getEmployees();
-            const employee = employees.find(e => e.name === item.name);
-            const salaryType = employee?.salaryType || 'monthly';
+            //Mark salary payout done for the month, and accumulated months for daily employees
+            await DataManager.markSalaryPayoutDone(year, month, payoutDetails);
 
-            if (salaryType === 'daily') {
-                // Mark all accumulated unpaid months as paid
-                let checkMonth = month;
-                let checkYear = year;
+            // For daily-paid employees, mark all accumulated unpaid months as paid
+            const allEmployees = await DataManager.getEmployees();
+            for (const item of data) {
+                const employee = allEmployees.find(e => e.name === item.name);
+                const salaryType = employee?.salaryType || 'monthly';
 
-                // Go back and mark up to 12 months or until we find a previously paid month
-                for (let i = 0; i < 12; i++) {
-                    // Check if this month was already paid before this payout
-                    const wasPaid = DataManager.isSalaryPayoutDone(checkYear, checkMonth);
+                if (salaryType === 'daily') {
+                    // Mark all accumulated unpaid months as paid
+                    let checkMonth = month;
+                    let checkYear = year;
 
-                    if (wasPaid && !(checkYear === year && checkMonth === month)) {
-                        // Found a previously paid month, stop here
-                        break;
-                    }
+                    // Go back and mark up to 12 months or until we find a previously paid month
+                    for (let i = 0; i < 12; i++) {
+                        // Check if this month was already paid before this payout
+                        const wasPaid = await DataManager.isSalaryPayoutDone(checkYear, checkMonth);
 
-                    // Mark this month as paid
-                    if (!(checkYear === year && checkMonth === month)) {
-                        DataManager.markSalaryPayoutDone(checkYear, checkMonth, creditDate); // Use same credit date
-                    }
+                        if (wasPaid && !(checkYear === year && checkMonth === month)) {
+                            // Found a previously paid month, stop here
+                            break;
+                        }
 
-                    // Move to previous month
-                    checkMonth--;
-                    if (checkMonth < 0) {
-                        checkMonth = 11;
-                        checkYear--;
-                    }
+                        // Mark this month as paid
+                        if (!(checkYear === year && checkMonth === month)) {
+                            await DataManager.markSalaryPayoutDone(checkYear, checkMonth, payoutDetails); // Use same details
+                        }
 
-                    // Prevent going too far back
-                    if (checkYear < year - 2) {
-                        break;
+                        // Move to previous month
+                        checkMonth--;
+                        if (checkMonth < 0) {
+                            checkMonth = 11;
+                            checkYear--;
+                        }
+
+                        // Prevent going too far back
+                        if (checkYear < year - 2) {
+                            break;
+                        }
                     }
                 }
             }
-        });
+        }
 
         let htmlContent = `
             <!DOCTYPE html>
             <html>
             <head>
                 <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
-                    .company-name { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
-                    .company-details { font-size: 12px; line-height: 1.6; }
-                    .report-title { text-align: center; font-size: 20px; font-weight: bold; margin: 20px 0; }
-                    .report-meta { text-align: center; font-size: 14px; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px; }
-                    th, td { border: 1px solid #000; padding: 6px; text-align: left; }
-                    th { background-color: #f0f0f0; font-weight: bold; }
+                    @page { size: A4 landscape; margin: 0.1in; }
+                    body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #000000 !important; background-color: #ffffff; -webkit-print-color-adjust: exact; }
+                    .container { width: 10.8in; margin: 0 auto; padding: 0.1in; box-sizing: border-box; }
+                    .header { text-align: center; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px; color: #000000 !important; }
+                    .company-name { font-size: 16px; font-weight: bold; margin-bottom: 2px; color: #000000 !important; }
+                    .company-details { font-size: 8px; line-height: 1.2; color: #000000 !important; }
+                    .report-title { text-align: center; font-size: 13px; font-weight: bold; margin: 8px 0; color: #000000 !important; text-transform: uppercase; }
+                    .report-meta { text-align: center; font-size: 9px; margin-bottom: 8px; color: #000000 !important; }
+                    table { width: 100%; border-collapse: collapse; margin: 5px 0; font-size: 6.5pt; color: #000000 !important; table-layout: fixed; }
+                    th, td { border: 1px solid #000; padding: 2px 1px; text-align: center; color: #000000 !important; border-color: #000000 !important; overflow: hidden; word-wrap: break-word; }
+                    th { background-color: #f0f0f0; font-weight: bold; color: #000000 !important; font-size: 6pt; }
                     .text-right { text-align: right; }
-                    .footer { margin-top: 30px; font-size: 10px; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
+                    .text-left { text-align: left; }
+                    .footer { margin-top: 10px; font-size: 6pt; text-align: center; border-top: 1px solid #000; padding-top: 4px; color: #000000 !important; }
+                    .col-emp { width: 11%; }
+                    .col-cnt { width: 4.5%; }
+                    .col-ot { width: 5%; }
+                    .col-adv { width: 6.5%; }
+                    .col-pay { width: 7.5%; }
+                    * { color: #000000 !important; }
                 </style>
             </head>
-            <body>
-                <div class="header">
+            <body style="color: #000000 !important; background-color: #ffffff !important;">
+                <div class="container">
+                    <div class="header">
                     <div class="company-name">${company.name}</div>
                     <div class="company-details">
                         Registered Address: ${company.registeredAddress}<br>
@@ -1367,33 +1748,33 @@ const ReportsModule = {
                         GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
                     </div>
                 </div>
-                <div class="report-title">SALARY PAYOUT STATEMENT - ${monthName.toUpperCase()} ${year}</div>
+                <div class="report-title">SALARY PAYOUT STATEMENT (v2-REFINED) - ${monthName} ${year}</div>
                 ${creditDate ? `<div class="report-meta"><strong>Salary Credit Date:</strong> ${DataManager.formatDateDisplay(creditDate)}</div>` : ''}
                 <table>
                     <thead>
                         <tr>
-                            <th>Employee</th>
-                            <th class="text-right">Present</th>
-                            <th class="text-right">Paid Leave</th>
-                            <th class="text-right">Unpaid / Sick</th>
-                            <th class="text-right">Half Days</th>
-                            <th class="text-right">Holiday Working</th>
-                            <th class="text-right">Holidays</th>
-                            <th class="text-right">OT Hours</th>
-                            <th class="text-right">Advance (Month)</th>
-                            <th class="text-right">Carry Fwd (Prev)</th>
-                            <th class="text-right">Outstanding Before</th>
-                            <th class="text-right">Advance Debited</th>
-                            <th class="text-right">Carry Fwd (Next)</th>
-                            <th class="text-right">Base Pay</th>
-                            <th class="text-right">OT Pay</th>
-                            <th class="text-right">Net Salary</th>
+                            <th class="col-emp text-left">Employee</th>
+                            <th class="col-cnt">Pres.</th>
+                            <th class="col-cnt">P.Lv</th>
+                            <th class="col-cnt">U/S.Lv</th>
+                            <th class="col-cnt">H-Day</th>
+                            <th class="col-cnt">H-Work</th>
+                            <th class="col-cnt">Hol.</th>
+                            <th class="col-cnt">OT Hrs</th>
+                            <th class="col-adv">Adv.Taken</th>
+                            <th class="col-adv">C/F Prev</th>
+                            <th class="col-adv">Bal.Bef.</th>
+                            <th class="col-adv">Adv.Deb</th>
+                            <th class="col-adv">C/F Next</th>
+                            <th class="col-pay">Base Pay</th>
+                            <th class="col-pay">OT Pay</th>
+                            <th class="col-pay">Net Sal.</th>
                         </tr>
                     </thead>
                     <tbody>
         `;
 
-        const currency = (value) => `₹${(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        const currency = (value) => `₹${(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         const totals = {
             present: 0,
             paidLeave: 0,
@@ -1453,14 +1834,14 @@ const ReportsModule = {
 
         htmlContent += `
                         <tr style="font-weight: bold; background-color: #f0f0f0;">
-                            <td>Total</td>
-                            <td class="text-right">${totals.present}</td>
-                            <td class="text-right">${totals.paidLeave}</td>
-                            <td class="text-right">${totals.unpaidLeave}</td>
-                            <td class="text-right">${totals.halfDays.toFixed(1)}</td>
-                            <td class="text-right">${totals.holidayWorking}</td>
-                            <td class="text-right">${totals.holidays}</td>
-                            <td class="text-right">${totals.otHours.toFixed(2)}</td>
+                            <td class="text-left">Total</td>
+                            <td>${totals.present}</td>
+                            <td>${totals.paidLeave}</td>
+                            <td>${totals.unpaidLeave}</td>
+                            <td>${totals.halfDays.toFixed(1)}</td>
+                            <td>${totals.holidayWorking}</td>
+                            <td>${totals.holidays}</td>
+                            <td>${totals.otHours.toFixed(2)}</td>
                             <td class="text-right">${currency(totals.advanceThisMonth)}</td>
                             <td class="text-right">${currency(totals.carryForwardPrev)}</td>
                             <td class="text-right">${currency(totals.carryForwardOutstanding)}</td>
@@ -1468,13 +1849,14 @@ const ReportsModule = {
                             <td class="text-right">${currency(totals.carryForwardNext)}</td>
                             <td class="text-right">${currency(totals.basePay)}</td>
                             <td class="text-right">${currency(totals.otPay)}</td>
-                            <td class="text-right">${currency(totals.netSalary)}</td>
+                            <td class="text-right"><strong>${currency(totals.netSalary)}</strong></td>
                         </tr>
                     </tbody>
                 </table>
                 <div class="footer">
                     Generated on: ${new Date().toLocaleString('en-IN')}<br>
                     ${company.name} - ${company.registeredAddress}
+                </div>
                 </div>
             </body>
             </html>
@@ -1486,7 +1868,7 @@ const ReportsModule = {
             document.body.appendChild(element);
 
             const opt = {
-                margin: [0.5, 0.5, 0.5, 0.5],
+                margin: [0.5, 0.3, 0.5, 0.3],
                 filename: `Salary_Payout_${monthName}_${year}.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: {
@@ -1504,8 +1886,13 @@ const ReportsModule = {
                 pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
             };
 
-            html2pdf().set(opt).from(element).save().then(() => {
+            html2pdf().set(opt).from(element).output('bloburl').then((pdfUrl) => {
+                window.open(pdfUrl, '_blank');
                 document.body.removeChild(element);
+                App.hideLoader();
+            }).catch(err => {
+                console.error('PDF Generation Error:', err);
+                App.hideLoader();
             });
         } else {
             const printWindow = window.open('', '_blank');
@@ -1513,6 +1900,24 @@ const ReportsModule = {
             printWindow.document.close();
             printWindow.print();
         }
+    },
+    async viewSalaryPayoutPDF(year, month) {
+        const payoutDetails = await DataManager.getSalaryPayoutDetails(year, month);
+        const creditDate = payoutDetails ? payoutDetails.creditDate : null;
+        const employees = payoutDetails ? payoutDetails.employees : null;
+
+        App.showLoader();
+        try {
+            await this.generateSalaryPayout(year, month, {
+                selectedEmployees: employees,
+                creditDate: creditDate,
+                previewOnly: true
+            });
+        } finally {
+            App.hideLoader();
+        }
     }
 };
 
+// Expose to window
+window.ReportsModule = ReportsModule;

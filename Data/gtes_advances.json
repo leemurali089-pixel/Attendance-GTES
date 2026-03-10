@@ -1,0 +1,209 @@
+[
+  {
+    "id": "adv_1763620804012_930suypyx",
+    "date": "2025-06-14",
+    "employee": "Praveen",
+    "amount": 20000
+  },
+  {
+    "id": "adv_1763848976809_sl12mij5l",
+    "date": "2025-04-09",
+    "employee": "Praveen",
+    "amount": 2500
+  },
+  {
+    "id": "adv_1763849018073_z82s4dfpt",
+    "date": "2025-04-10",
+    "employee": "Raja",
+    "amount": 500
+  },
+  {
+    "id": "adv_1763849037089_ws1smgz6g",
+    "date": "2025-04-12",
+    "employee": "Ajay",
+    "amount": 6000
+  },
+  {
+    "id": "adv_1763849069769_whfs6x6vc",
+    "date": "2025-04-25",
+    "employee": "Raja",
+    "amount": 2000
+  },
+  {
+    "id": "adv_1763849099785_u3i45mhwd",
+    "date": "2025-04-25",
+    "employee": "Victor",
+    "amount": 3000
+  },
+  {
+    "id": "adv_1763849763065_il1io0l49",
+    "date": "2025-05-05",
+    "employee": "Victor",
+    "amount": 27000
+  },
+  {
+    "id": "adv_1763849785945_ranuw92vn",
+    "date": "2025-05-09",
+    "employee": "Ajay",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763849805224_5uicsmy4i",
+    "date": "2025-05-09",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763849818657_9exbjs7y5",
+    "date": "2025-05-14",
+    "employee": "Victor",
+    "amount": 1500
+  },
+  {
+    "id": "adv_1763849842913_whi17ab0v",
+    "date": "2025-05-17",
+    "employee": "Praveen",
+    "amount": 1500
+  },
+  {
+    "id": "adv_1763849858793_vtohq9hpo",
+    "date": "2025-05-23",
+    "employee": "Praveen",
+    "amount": 500
+  },
+  {
+    "id": "adv_1763850011193_ayg1tuzrs",
+    "date": "2025-05-24",
+    "employee": "Praveen",
+    "amount": 4000
+  },
+  {
+    "id": "adv_1763850054705_ncbmj5gky",
+    "date": "2025-06-06",
+    "employee": "Praveen",
+    "amount": 500
+  },
+  {
+    "id": "adv_1763924165890_x3rxj7jc5",
+    "date": "2025-06-16",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763924211994_at095y7lx",
+    "date": "2025-06-18",
+    "employee": "Raja",
+    "amount": 4500
+  },
+  {
+    "id": "adv_1763924293521_gf0vvrfwv",
+    "date": "2025-06-27",
+    "employee": "Praveen",
+    "amount": 3100,
+    "reason": ""
+  },
+  {
+    "id": "adv_1763925420177_4axi975nb",
+    "date": "2025-07-11",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763925432152_uwnju4nad",
+    "date": "2025-07-12",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763925443912_qfx2xwi7e",
+    "date": "2025-07-18",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763925475825_sesfryu7h",
+    "date": "2025-07-31",
+    "employee": "Praveen",
+    "amount": 300
+  },
+  {
+    "id": "adv_1763927366663_n1rgryh81",
+    "date": "2025-08-31",
+    "employee": "Praveen",
+    "amount": 300
+  },
+  {
+    "id": "adv_1763929514458_mz8waaf07",
+    "date": "2025-09-13",
+    "employee": "Praveen",
+    "amount": 1000
+  },
+  {
+    "id": "adv_1763929579488_4s4385w7g",
+    "date": "2025-09-27",
+    "employee": "Praveen",
+    "amount": 500
+  },
+  {
+    "id": "adv_1763929593265_n0nmhv8a9",
+    "date": "2025-10-31",
+    "employee": "Praveen",
+    "amount": 300
+  },
+  {
+    "id": "adv_1763929613674_m12uov28j",
+    "date": "2025-10-18",
+    "employee": "Praveen",
+    "amount": 2000
+  },
+  {
+    "id": "adv_1763929835423_py1zj32fc",
+    "date": "2025-10-18",
+    "employee": "Praveen",
+    "amount": 1750,
+    "reason": "For Diwali Crackers"
+  },
+  {
+    "id": "adv_1763929870943_pr6dhza5f",
+    "date": "2025-11-12",
+    "employee": "Praveen",
+    "amount": 1000,
+    "reason": "Advance Before going to Home"
+  },
+  {
+    "id": "adv_waveoff_1763938845744_sgam56upe",
+    "date": "2025-11-24",
+    "employee": "Victor",
+    "amount": -28266.667,
+    "reason": "Can't be retrieved",
+    "type": "waveoff"
+  },
+  {
+    "id": "adv_1767623432611_blc3mq7pg",
+    "date": "2025-12-28",
+    "employee": "Praveen",
+    "amount": 1000,
+    "reason": "For going to home "
+  },
+  {
+    "id": "adv_1767623471551_0jojyvzh4",
+    "date": "2026-01-05",
+    "employee": "Mayakannan S",
+    "amount": 500,
+    "reason": ""
+  },
+  {
+    "id": "adv_1767623552777_v13yf6aht",
+    "date": "2025-12-11",
+    "employee": "Mayakannan S",
+    "amount": 2000,
+    "reason": ""
+  },
+  {
+    "id": "adv_1767623585224_90qgecs0r",
+    "date": "2025-12-30",
+    "employee": "Mayakannan S",
+    "amount": 2000,
+    "reason": ""
+  }
+]

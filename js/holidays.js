@@ -2,15 +2,15 @@
 const HolidaysModule = {
     editingHoliday: null,
 
-    load() {
-        this.renderHolidayList();
+    async load() {
+        await this.renderHolidayList();
     },
 
-    renderHolidayList() {
+    async renderHolidayList() {
         const view = document.getElementById('holidaysView');
         if (!view) return;
 
-        const holidays = DataManager.getHolidays();
+        const holidays = await DataManager.getHolidays();
         holidays.sort((a, b) => new Date(a.date) - new Date(b.date));
 
         view.innerHTML = `
@@ -42,9 +42,9 @@ const HolidaysModule = {
                                     </thead>
                                     <tbody>
                                         ${holidays.map(holiday => {
-                                            const date = new Date(holiday.date);
-                                            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                                            return `
+            const date = new Date(holiday.date);
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return `
                                                 <tr>
                                                     <td>${DataManager.formatDateDisplay(holiday.date)}</td>
                                                     <td>${days[date.getDay()]}</td>
@@ -59,7 +59,7 @@ const HolidaysModule = {
                                                     </td>
                                                 </tr>
                                             `;
-                                        }).join('')}
+        }).join('')}
                                     </tbody>
                                 </table>
                             </div>
@@ -103,13 +103,13 @@ const HolidaysModule = {
         }
     },
 
-    showHolidayForm(holidayId = null) {
+    async showHolidayForm(holidayId = null) {
         this.editingHoliday = holidayId;
         const form = document.getElementById('holidayForm');
         const title = document.getElementById('holidayFormTitle');
-        
+
         if (holidayId) {
-            const holidays = DataManager.getHolidays();
+            const holidays = await DataManager.getHolidays();
             const holiday = holidays.find(h => h.id === holidayId);
             if (holiday) {
                 document.getElementById('holidayId').value = holiday.id;
@@ -122,13 +122,13 @@ const HolidaysModule = {
             document.getElementById('holidayId').value = '';
             title.textContent = 'Add Holiday';
         }
-        
+
         if (this.modal) {
             this.modal.show();
         }
     },
 
-    saveHoliday() {
+    async saveHoliday() {
         const form = document.getElementById('holidayForm');
         if (!form.checkValidity()) {
             form.reportValidity();
@@ -149,8 +149,8 @@ const HolidaysModule = {
             App.showNotification('This date is a Sunday. Sundays are automatically marked as holidays.', 'info');
         }
 
-        const holidays = DataManager.getHolidays();
-        
+        const holidays = await DataManager.getHolidays();
+
         // Check for duplicate
         const dateStr = DataManager.formatDate(holidayDate);
         const existingIndex = holidays.findIndex(h => {
@@ -183,11 +183,45 @@ const HolidaysModule = {
             holidays.push(newHoliday);
         }
 
-        DataManager.saveHolidays(holidays);
+        await DataManager.saveHolidays(holidays);
         this.modal.hide();
-        this.renderHolidayList();
+        await this.renderHolidayList();
         App.showNotification('Holiday saved successfully', 'success');
+
+        // Update existing attendance records
+        const attendance = await DataManager.getAttendance();
+        let attendanceUpdated = false;
         
+        // Find records for this date
+        const holidayDateStr = DataManager.formatDate(holidayDate);
+        
+        attendance.forEach(record => {
+            const recordDateStr = DataManager.formatDate(new Date(record.date));
+            if (recordDateStr === holidayDateStr) {
+                // Only update if status is NOT 'H-Working' (allow manual override for working on holiday)
+                // We also check if it's not already 'Holiday' to avoid unnecessary saves
+                // We typically overwrite 'Present', 'Half Day'. 
+                // We might want to be careful about 'Paid Leave'/'Sick Leave' but usually Holiday overrides those too (user's benefit).
+                // For safety, let's update everything EXCEPT H-Working.
+                if (record.status !== 'H-Working' && (record.status !== 'Holiday' || record.holidayReason !== reason)) {
+                    record.status = 'Holiday';
+                    record.holidayReason = reason;
+                    // Reset OT/Check-in/out? 
+                    // Let's keep check-in/out times just in case, but reset OT hours since it's a holiday
+                    // actually, if they worked, it should be H-Working. If it's Holiday, they didn't work.
+                    // But maybe we should just change status and let them figure out hours transparency?
+                    // Safest is to just change status and reason.
+                    record.otHours = 0; // Reset OT hours as it is now a holiday
+                    attendanceUpdated = true;
+                }
+            }
+        });
+
+        if (attendanceUpdated) {
+            await DataManager.saveAttendance(attendance);
+            console.log('Attendance records updated to reflect new holiday');
+        }
+
         // Refresh attendance view if it's open
         if (App.currentView === 'attendance') {
             AttendanceModule.load();
@@ -198,17 +232,17 @@ const HolidaysModule = {
         this.showHolidayForm(holidayId);
     },
 
-    deleteHoliday(holidayId) {
+    async deleteHoliday(holidayId) {
         if (!App.confirmAction('Are you sure you want to delete this holiday?')) {
             return;
         }
 
-        const holidays = DataManager.getHolidays();
+        const holidays = await DataManager.getHolidays();
         const filtered = holidays.filter(h => h.id !== holidayId);
-        DataManager.saveHolidays(filtered);
-        this.renderHolidayList();
+        await DataManager.saveHolidays(filtered);
+        await this.renderHolidayList();
         App.showNotification('Holiday deleted successfully', 'success');
-        
+
         // Refresh attendance view if it's open
         if (App.currentView === 'attendance') {
             AttendanceModule.load();

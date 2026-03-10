@@ -8,10 +8,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadData: (key) => ipcRenderer.invoke('load-data', key),
     fileExists: (key) => ipcRenderer.invoke('file-exists', key),
     getDataFolder: () => ipcRenderer.invoke('get-data-folder'),
+    getFileStats: (key) => ipcRenderer.invoke('get-file-stats', key),
+    createBackup: () => ipcRenderer.invoke('create-backup'),
+    createManualBackup: () => ipcRenderer.invoke('create-manual-backup'),
+    readFileBuffer: (path) => ipcRenderer.invoke('read-file-buffer', path),
+
+    // Listeners
+    onFileChanged: (callback) => ipcRenderer.on('file-changed', (event, filename) => callback(filename)),
 
     // Backup operations
     exportBackup: (data, filename) => ipcRenderer.invoke('export-backup', data, filename),
     importBackup: () => ipcRenderer.invoke('import-backup'),
+
+    // Security operations
+    hashPassword: (password) => ipcRenderer.invoke('hash-password', password),
+    verifyPassword: (password, hash) => ipcRenderer.invoke('verify-password', password, hash),
+
+    // Email operations
+    sendEmail: (config, mailOptions) => ipcRenderer.invoke('send-email', config, mailOptions),
+
+    // PDF operations
+    savePdf: (data) => ipcRenderer.invoke('save-pdf', data),
 
     // Check if running in Electron
     isElectron: true

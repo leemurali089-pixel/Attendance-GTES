@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gas Tech Engineering Service - Attendance & Salary Management</title>
+    <title id="appTitle">Attendance & Salary Management</title>
 
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -14,73 +14,171 @@
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/dashboard-enhancements.css">
+    <link rel="stylesheet" href="css/login.css">
+    <link rel="stylesheet" href="css/landing.css">
 
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .stat-icon-wrapper {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: all 0.3s ease;
+        }
+
+        .clickable-card {
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+        }
+
+        .clickable-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3) !important;
+            border-color: var(--bs-primary) !important;
+        }
+
+        .active-filter {
+            border: 2px solid var(--bs-primary) !important;
+            background: rgba(var(--bs-primary-rgb), 0.05) !important;
+        }
+
+        .active-filter.border-success {
+            border-color: var(--bs-success) !important;
+            background: rgba(var(--bs-success-rgb), 0.05) !important;
+        }
+
+        .active-filter.border-info {
+            border-color: var(--bs-info) !important;
+            background: rgba(var(--bs-info-rgb), 0.05) !important;
+        }
+    </style>
 </head>
 
 <body>
+    <!-- Login Screen Overlay -->
+    <div id="loginOverlay" class="login-overlay">
+        <div class="login-card-outer">
+            <div class="login-card-inner">
+                <form id="loginForm" class="login-form-custom">
+                    <div class="text-center mb-3">
+                        <img src="icon.png" alt="MJS PrimeLogic Logo" class="login-logo glow-logo">
+                    </div>
+                    <h1 id="loginAppName" class="app-name-header">MJS PrimeLogic</h1>
+                    <p id="loginCompanyName"></p>
+                    <p id="heading">Login</p>
+
+                    <div class="login-field">
+                        <svg class="input-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4Zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10Z" />
+                        </svg>
+                        <input type="text" class="input-field" id="loginUsername" placeholder="Username"
+                            autocomplete="username" required>
+                    </div>
+
+                    <div class="login-field">
+                        <svg class="input-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
+                        </svg>
+                        <input type="password" class="input-field" id="loginPassword" placeholder="Password"
+                            autocomplete="current-password" required>
+                        <button type="button" class="password-toggle" id="togglePasswordBtn" tabindex="-1">
+                            <svg class="bi bi-eye" id="togglePasswordIcon" viewBox="0 0 16 16"
+                                xmlns="http://www.w3.org/2000/svg">
+                                <path
+                                    d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z" />
+                                <path
+                                    d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="login-btn-wrapper">
+                        <button class="login-btn-primary" type="submit">Login</button>
+                    </div>
+
+                    <div id="loginError" class="text-danger small text-center mt-2 d-none"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark fixed-top">
         <div class="container-fluid">
             <a class="navbar-brand" href="#">
-                <i class="bi bi-building"></i> Gas Tech Engineering Service
+                <i class="bi bi-building"></i> <span id="headerCompanyName">Gas Tech Engineering Service</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto position-relative">
-                    <div class="magic-indicator"></div>
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <!-- App Launcher (Returns to Landing Page) -->
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-view="dashboard">
-                            <span class="nav-icon"><i class="bi bi-house-door"></i></span>
-                            <span class="nav-text">Dashboard</span>
+                        <a class="nav-link fw-bold" href="#" onclick="event.preventDefault(); App.showLandingPage();"
+                            title="Back to Home">
+                            <i class="bi bi-grid-3x3-gap-fill text-warning me-1"></i> Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" data-view="dashboard">
+                            <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-view="employees">
-                            <span class="nav-icon"><i class="bi bi-people"></i></span>
-                            <span class="nav-text">Employees</span>
+                            <i class="bi bi-people"></i> Employees
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-view="attendance">
-                            <span class="nav-icon"><i class="bi bi-calendar-check"></i></span>
-                            <span class="nav-text">Attendance</span>
+                            <i class="bi bi-calendar-check"></i> Attendance
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-view="filterAttendance">
-                            <span class="nav-icon"><i class="bi bi-funnel"></i></span>
-                            <span class="nav-text">Filter</span>
+                            <i class="bi bi-funnel"></i> Filter
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-view="holidays">
-                            <span class="nav-icon"><i class="bi bi-calendar-event"></i></span>
-                            <span class="nav-text">Holidays</span>
+                            <i class="bi bi-calendar-event"></i> Holidays
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="salary">
+                            <i class="bi bi-cash-stack"></i> Salary
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-view="advances">
-                            <span class="nav-icon"><i class="bi bi-cash-coin"></i></span>
-                            <span class="nav-text">Advances</span>
+                            <i class="bi bi-wallet2"></i> Advances
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-view="salary"
-                            onclick="event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); if (App.authInProgress) return false; App.authInProgress = true; const prevView = App.currentView || 'dashboard'; AuthManager.requireAuth(() => { App.authInProgress = false; App.showView('salary'); }, { onCancel: () => { App.authInProgress = false; const backdrops = document.querySelectorAll('.modal-backdrop'); backdrops.forEach(b => b.remove()); document.body.classList.remove('modal-open'); document.body.style.overflow = ''; document.body.style.paddingRight = ''; setTimeout(() => { App.showView(prevView); }, 100); } }); return false;">
-                            <span class="nav-icon"><i class="bi bi-calculator"></i></span>
-                            <span class="nav-text">Salary</span>
+                        <a class="nav-link" href="#" data-view="bonus">
+                            <i class="bi bi-gift"></i> Bonus
                         </a>
                     </li>
                 </ul>
                 <ul class="navbar-nav">
+                    <li class="nav-item d-flex align-items-center">
+                        <div id="userInfo" class="user-info text-white me-3 d-none">
+                            <i class="bi bi-person-circle"></i>
+                            <span id="userNameDisplay">User</span>
+                        </div>
+                    </li>
                     <li class="nav-item">
                         <div class="theme-toggle-wrapper me-3">
                             <input type="checkbox" class="checkbox" id="theme-toggle" />
@@ -91,20 +189,15 @@
                             </label>
                         </div>
                     </li>
-                    <li class="nav-item">
-                        <button class="btn btn-outline-light btn-sm me-2" id="adminPanelBtn">
-                            <i class="bi bi-gear"></i> Admin Panel
-                        </button>
-                    </li>
                     <li class="nav-item dropdown">
-                        <button class="btn btn-outline-light btn-sm dropdown-toggle me-2" id="backupDropdown"
+                        <a class="nav-link dropdown-toggle" href="#" id="backupDropdown" role="button"
                             data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-hdd-stack"></i> Backup
-                        </button>
+                            <i class="bi bi-hdd-network"></i> Backup
+                        </a>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="backupDropdown">
                             <li>
                                 <a class="dropdown-item" href="#"
-                                    onclick="event.preventDefault(); AdminModule.exportBackup();">
+                                    onclick="event.preventDefault(); AdminModule.exportManualBackup();">
                                     <i class="bi bi-download me-2"></i>Export Backup
                                 </a>
                             </li>
@@ -114,33 +207,52 @@
                                     <i class="bi bi-upload me-2"></i>Import Backup
                                 </a>
                             </li>
+                            <li>
+                                <a class="dropdown-item text-primary" href="#"
+                                    onclick="event.preventDefault(); document.getElementById('bkImportFile').click();">
+                                    <i class="bi bi-arrow-repeat me-2"></i>Sync with Book Keeper
+                                </a>
+                            </li>
+                            <li>
+                                <hr class="dropdown-divider border-secondary opacity-25">
+                            </li>
+                            <li>
+                                <a class="dropdown-item text-info" href="#"
+                                    onclick="event.preventDefault(); if(confirm('Wait! This will initialize MJS PrimeLogic with the official BookKeeper seed dataset. Continue?')){ SeedData.seedSystem().then(() => { App.showNotification('System Seeded!', 'success'); setTimeout(() => location.reload(), 1500); }); }">
+                                    <i class="bi bi-rocket-takeoff me-2"></i>Seed System
+                                </a>
+                            </li>
                         </ul>
                     </li>
-                    <li class="nav-item">
-                        <button class="btn btn-outline-light btn-sm" id="logoutBtn" style="display: none;">
-                            <i class="bi bi-box-arrow-right"></i> Logout
-                        </button>
-                    </li>
+                </ul>
+                </li>
+                <li class="nav-item">
+                    <button class="btn btn-outline-light btn-sm" id="logoutBtn" style="display: none;">
+                        <i class="bi bi-box-arrow-right"></i> Logout
+                    </button>
+                </li>
                 </ul>
             </div>
         </div>
     </nav>
-    <input type="file" id="navImportFile" accept=".json,.csv" class="d-none">
+    <input type="file" id="navImportFile" accept=".json,.csv,.xml" class="d-none">
+    <input type="file" id="bkImportFile" accept=".db,.sqlite" class="d-none">
 
     <!-- Main Content -->
     <!-- Main Content -->
     <div class="container-fluid main-content-container">
         <!-- Dashboard View -->
         <div id="dashboardView" class="view-section">
-            <div class="dashboard-hero text-center">
-                <h1 class="display-4 fw-bold text-white mb-3">Welcome Back</h1>
-                <p class="lead text-light opacity-75">Gas Tech Engineering Service - Management Portal</p>
+            <div class="col-12 text-center mb-4">
+                <h1 class="display-4 fw-bold">Welcome Back</h1>
+                <p class="lead text-muted">MJS PrimeLogic - Management Portal</p>
             </div>
 
             <!-- Stats Row -->
             <div class="row g-4 mb-5">
                 <div class="col-md-4">
-                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('active')">
+                    <div id="statCardActive" class="card h-100 stat-card clickable-card"
+                        onclick="App.showEmployeeDetailsModal('active')">
                         <div class="card-body text-center">
                             <div class="stat-icon mb-3">
                                 <i class="bi bi-people-fill"></i>
@@ -151,7 +263,8 @@
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('present')">
+                    <div id="statCardPresent" class="card h-100 stat-card clickable-card"
+                        onclick="App.showEmployeeDetailsModal('present')">
                         <div class="card-body text-center">
                             <div class="stat-icon mb-3 text-success">
                                 <i class="bi bi-check-circle-fill"></i>
@@ -162,7 +275,8 @@
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card h-100 stat-card clickable-card" onclick="App.showEmployeeDetailsModal('absence')">
+                    <div id="statCardAbsent" class="card h-100 stat-card clickable-card"
+                        onclick="App.showEmployeeDetailsModal('absence')">
                         <div class="card-body text-center">
                             <div class="stat-icon mb-3 text-danger">
                                 <i class="bi bi-x-circle-fill"></i>
@@ -237,6 +351,9 @@
         <!-- Advances View -->
         <div id="advancesView" class="view-section d-none"></div>
 
+        <!-- Bonus View -->
+        <div id="bonusView" class="view-section d-none"></div>
+
         <!-- Salary View -->
         <div id="salaryView" class="view-section d-none"></div>
 
@@ -244,6 +361,604 @@
         <div id="employeeView" class="view-section d-none"></div>
 
         <div id="adminView" class="view-section d-none"></div>
+
+        <!-- LANDING PAGE VIEW -->
+        <div id="landingView" class="view-section d-none">
+            <!-- Custom Landing Header -->
+            <div class="landing-top-bar container-fluid d-flex justify-content-between align-items-center mb-5"
+                style="position: absolute; top: 0; left: 0; width: 100%; padding: 1.5rem 2rem; z-index: 10;">
+                <div class="d-flex align-items-center text-white">
+                    <i class="bi bi-building fs-3 me-2 text-primary"></i>
+                    <h5 class="mb-0 fw-bold" id="landingCompanyName">MJS PrimeLogic</h5>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <!-- Sync Status -->
+                    <div id="landingSyncStatus" class="d-flex align-items-center me-2 text-success" title="Data Synced">
+                        <i class="bi bi-cloud-check-fill me-1"></i>
+                        <span class="small fw-bold">Synced</span>
+                    </div>
+
+                    <!-- Theme Toggle -->
+                    <div class="theme-toggle-wrapper me-2">
+                        <input type="checkbox" class="checkbox" id="landing-theme-toggle"
+                            onchange="document.getElementById('theme-toggle').click()">
+                        <label for="landing-theme-toggle" class="label">
+                            <i class="bi bi-moon-stars-fill"></i>
+                            <i class="bi bi-sun-fill"></i>
+                            <div class="ball"></div>
+                        </label>
+                    </div>
+
+                    <!-- Backup -->
+                    <div class="dropdown me-2" id="landingBackupDropdown" style="display: none;">
+                        <button class="btn btn-outline-light btn-sm rounded-pill dropdown-toggle" type="button"
+                            id="landingBackupBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-hdd-network me-1"></i> Backup
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end bg-dark border-secondary"
+                            aria-labelledby="landingBackupBtn">
+                            <li><a class="dropdown-item text-white" href="#"
+                                    onclick="event.preventDefault(); AdminModule.exportManualBackup();"><i
+                                        class="bi bi-download me-2"></i>Export</a></li>
+                            <li><a class="dropdown-item text-white" href="#"
+                                    onclick="event.preventDefault(); document.getElementById('navImportFile').click();"><i
+                                        class="bi bi-upload me-2"></i>Import</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="text-white-50 clickable-element" id="landingUserInfo">
+                        <i class="bi bi-person-circle me-1"></i>
+                        <span id="landingUserName">User</span>
+                    </div>
+                    <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="App.logout()">
+                        <i class="bi bi-power me-1"></i> Logout
+                    </button>
+                </div>
+            </div>
+
+            <div class="landing-container pt-5">
+                <div class="landing-header text-center mb-5 pt-4">
+                    <h1 class="display-4 fw-bold text-white mb-2">Welcome Back</h1>
+                    <p class="lead text-white-50">Select a module to continue</p>
+                </div>
+
+                <div class="row g-4 justify-content-center">
+                    <!-- HRMS Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('hrms')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4">
+                                    <i class="bi bi-people-fill"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">HRMS</h3>
+                                <p class="card-text text-muted small mt-3">Attendance, Salary, Employees & Reports</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill text-primary" style="font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tasks Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('tasks')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4" style="color: #ffc107;">
+                                    <i class="bi bi-check-square-fill"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">Tasks</h3>
+                                <p class="card-text text-muted small mt-3">Task Management & Tracking</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill text-warning" style="font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Payment Follow up Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('payments')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4" style="color: #0dcaf0;">
+                                    <i class="bi bi-cash-coin"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">Payments</h3>
+                                <p class="card-text text-muted small mt-3">Payment Follow-ups & Records</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill text-info" style="font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Delivery Challan Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('delivery')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4" style="color: #fd7e14;">
+                                    <i class="bi bi-truck"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">Delivery</h3>
+                                <p class="card-text text-muted small mt-3">Delivery Challans & Logistics</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill" style="color: #fd7e14; font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Analytics Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('analytics')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4" style="color: #20c997;">
+                                    <i class="bi bi-graph-up"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">Analytics</h3>
+                                <p class="card-text text-muted small mt-3">GST Reports, Ledgers & Insights</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill" style="color: #20c997; font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Accounting Card -->
+                    <div class="col-md-6 col-lg-3">
+                        <div class="card module-card h-100" onclick="App.openModule('accounting')">
+                            <div class="card-body text-center p-5">
+                                <div class="module-icon mb-4" style="color: #6610f2;">
+                                    <i class="bi bi-bank"></i>
+                                </div>
+                                <h3 class="card-title fw-bold">Accounting</h3>
+                                <p class="card-text text-muted small mt-3">Trial Balance, P&L, Balance Sheet</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-0 pb-4">
+                                <i class="bi bi-arrow-right-circle-fill" style="color: #6610f2; font-size: 2rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Accounting Placeholder -->
+        <div id="accountingView" class="view-section d-none"></div>
+        <div id="invoicesView" class="view-section d-none"></div>
+        <div id="vouchersView" class="view-section d-none"></div>
+        <div id="purchasesView" class="view-section d-none"></div>
+
+        <!-- NEW MODULE PLACEHOLDERS -->
+        <div id="tasksView" class="view-section d-none">
+            <div class="container-fluid">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-check-square-fill text-warning me-2"></i> Tasks</h2>
+                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <i class="bi bi-grid-fill"></i> Back to Apps
+                    </button>
+                </div>
+                <div class="card bg-dark text-white border-secondary">
+                    <div class="card-body p-5 text-center">
+                        <i class="bi bi-cone-striped display-1 text-muted mb-3"></i>
+                        <h3>Under Construction</h3>
+                        <p class="text-muted">The Tasks module is coming soon.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="paymentsView" class="view-section d-none">
+            <div class="container-fluid">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-cash-coin text-info me-2"></i> Payment Follow Up</h2>
+                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <i class="bi bi-grid-fill"></i> Back to Apps
+                    </button>
+                </div>
+                <div class="card bg-dark text-white border-secondary">
+                    <div class="card-body p-5 text-center">
+                        <i class="bi bi-cone-striped display-1 text-muted mb-3"></i>
+                        <h3>Under Construction</h3>
+                        <p class="text-muted">The Payment Follow Up module is coming soon.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Analytics View -->
+        <div id="analyticsView" class="view-section d-none">
+            <div class="container-fluid">
+                <!-- Header -->
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-graph-up text-success me-2"></i> Business Analytics</h2>
+                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <i class="bi bi-grid-fill"></i> Back to Apps
+                    </button>
+                </div>
+
+                <!-- Analytics Navigation Tabs -->
+                <ul class="nav nav-pills mb-4" id="analyticsTabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#"
+                            onclick="AnalyticsUI.currentSection='dashboard'; AnalyticsUI.renderDashboard(); return false;">
+                            <i class="bi bi-speedometer2 me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"
+                            onclick="AnalyticsUI.currentSection='gst'; AnalyticsUI.renderGSTReports(); return false;">
+                            <i class="bi bi-file-earmark-bar-graph me-1"></i> GST Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"
+                            onclick="AnalyticsUI.currentSection='ledger'; AnalyticsUI.renderCustomerLedger(); return false;">
+                            <i class="bi bi-journal-text me-1"></i> Customer Ledger
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"
+                            onclick="AnalyticsUI.currentSection='stock'; AnalyticsUI.renderStockReports(); return false;">
+                            <i class="bi bi-box-seam me-1"></i> Stock Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"
+                            onclick="AnalyticsUI.currentSection='reminders'; AnalyticsUI.renderDueReminders(); return false;">
+                            <i class="bi bi-bell me-1"></i> Due Reminders
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"
+                            onclick="AnalyticsUI.currentSection='import'; AnalyticsUI.renderDataImport(); return false;">
+                            <i class="bi bi-cloud-upload me-1"></i> Data Import
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Analytics Content Container -->
+                <div id="analyticsContainer">
+                    <!-- Content rendered dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <div id="deliveryView" class="view-section d-none">
+            <div class="container-fluid">
+                <!-- Header -->
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-truck text-warning me-2"></i> Delivery & Service Management</h2>
+                </div>
+
+                <!-- Landing Menu (shown by default) -->
+                <div id="deliveryLandingMenu">
+                    <div class="row g-4">
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showChallanMenu()"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-file-earmark-text display-3 text-primary mb-3"></i>
+                                    <h5 class="card-title">Challan</h5>
+                                    <p class="card-text text-muted">Create or View DC & SC</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('jobcard')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-tools display-3 text-warning mb-3"></i>
+                                    <h5 class="card-title">Job Cards</h5>
+                                    <p class="card-text text-muted">Track service materials & jobs</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('history')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-clock-history display-3 text-info mb-3"></i>
+                                    <h5 class="card-title">History</h5>
+                                    <p class="card-text text-muted">View all challans</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('invoices')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-receipt display-3 text-success mb-3"></i>
+                                    <h5 class="card-title">Invoices</h5>
+                                    <p class="card-text text-muted">With Bill / Without Bill</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('customers')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-people display-3 text-purple mb-3"></i>
+                                    <h5 class="card-title">Customers</h5>
+                                    <p class="card-text text-muted">Manage customers</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('inventory')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-box-seam display-3 text-secondary mb-3"></i>
+                                    <h5 class="card-title">Inventory</h5>
+                                    <p class="card-text text-muted">Materials & services</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showVoucherMenu()"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-wallet2 display-3 text-success mb-3"></i>
+                                    <h5 class="card-title">Vouchers</h5>
+                                    <p class="card-text text-muted">Customer & Supplier Vouchers</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="DeliveryUI.showSection('services')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-gear display-3 text-warning mb-3"></i>
+                                    <h5 class="card-title">Services</h5>
+                                    <p class="card-text text-muted">Manage Labor & Service Charges</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 hover-lift" onclick="App.openModule('analytics')"
+                                style="cursor: pointer;">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-graph-up display-3 text-success mb-3"></i>
+                                    <h5 class="card-title">Analytics</h5>
+                                    <p class="card-text text-muted">Reports, Ledgers & GST</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="deliveryServicesSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('service')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="servicesContainer"></div>
+                </div>
+
+                <!-- Create Section -->
+                <div id="deliveryCreateSection" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary mb-3" onclick="DeliveryUI.showLanding()">
+                        <i class="bi bi-arrow-left me-1"></i> Back
+                    </button>
+                    <div id="challanFormContainer"></div>
+                </div>
+
+                <!-- Job Card Section -->
+                <div id="deliveryJobCardSection" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary mb-3" onclick="DeliveryUI.showLanding()">
+                        <i class="bi bi-arrow-left me-1"></i> Back
+                    </button>
+                    <div id="jobCardContainer"></div>
+                </div>
+
+                <!-- History Section -->
+                <div id="deliveryHistorySection" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary mb-3" onclick="DeliveryUI.showLanding()">
+                        <i class="bi bi-arrow-left me-1"></i> Back
+                    </button>
+                    <div id="historyContainer"></div>
+                </div>
+
+
+                <!-- Challan Sub-Menu -->
+                <div id="deliveryChallanMenu" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="DeliveryUI.showLanding()">
+                        <i class="bi bi-arrow-left me-1"></i> Back to Main
+                    </button>
+                    <div class="row g-4">
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.showSection('create')" style="cursor: pointer;">
+                                <i class="bi bi-plus-circle display-4 text-primary mb-3"></i>
+                                <h5>Create Challan</h5>
+                                <p class="small text-muted mb-0">New DC or SC</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.viewChallanType('delivery')" style="cursor: pointer;">
+                                <i class="bi bi-truck display-4 text-info mb-3"></i>
+                                <h5>View DC</h5>
+                                <p class="small text-muted mb-0">Delivery Challan History</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.viewChallanType('service')" style="cursor: pointer;">
+                                <i class="bi bi-tools display-4 text-warning mb-3"></i>
+                                <h5>View SC</h5>
+                                <p class="small text-muted mb-0">Service Challan History</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.showSection('purchases')" style="cursor: pointer;">
+                                <i class="bi bi-bag-check display-4 text-success mb-3"></i>
+                                <h5>Purchases</h5>
+                                <p class="small text-muted mb-0">Inward DC & Purchase Bills</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Voucher Sub-Menu -->
+                <div id="deliveryVoucherMenu" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="DeliveryUI.showLanding()">
+                        <i class="bi bi-arrow-left me-1"></i> Back to Main
+                    </button>
+                    <div class="row g-4">
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.viewVoucherType('customer')" style="cursor: pointer;">
+                                <i class="bi bi-person-check display-4 text-success mb-3"></i>
+                                <h5>Customer Vouchers</h5>
+                                <p class="small text-muted mb-0">Receipts & Outstanding</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel text-center p-4 hover-lift"
+                                onclick="DeliveryUI.viewVoucherType('supplier')" style="cursor: pointer;">
+                                <i class="bi bi-person-badge display-4 text-info mb-3"></i>
+                                <h5>Supplier Vouchers</h5>
+                                <p class="small text-muted mb-0">Payments to Vendors</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="deliveryInvoicesSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('sales')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="invoicesContainer"></div>
+                </div>
+
+                <div id="deliveryCustomersSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('customers')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+
+                    <!-- Registry Dashboard Cards -->
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 clickable-card active-filter border-primary"
+                                id="cardCustomerFilter" onclick="DeliveryUI.filterCustomerType('Customer')">
+                                <div class="card-body p-4 d-flex align-items-center">
+                                    <div class="stat-icon-wrapper bg-primary bg-opacity-10 me-3">
+                                        <i class="bi bi-people-fill text-primary"></i>
+                                    </div>
+                                    <div>
+                                        <h6 class="text-muted small mb-1 fw-bold">CUSTOMERS</h6>
+                                        <h3 class="mb-0 fw-bold" id="statsCustomerCount">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 clickable-card" id="cardSupplierFilter"
+                                onclick="DeliveryUI.filterCustomerType('Supplier')">
+                                <div class="card-body p-4 d-flex align-items-center">
+                                    <div class="stat-icon-wrapper bg-success bg-opacity-10 me-3">
+                                        <i class="bi bi-truck text-success"></i>
+                                    </div>
+                                    <div>
+                                        <h6 class="text-muted small mb-1 fw-bold">SUPPLIERS / VENDORS</h6>
+                                        <h3 class="mb-0 fw-bold" id="statsSupplierCount">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card glass-panel h-100 clickable-card" id="cardOtherFilter"
+                                onclick="DeliveryUI.filterCustomerType('Other')">
+                                <div class="card-body p-4 d-flex align-items-center">
+                                    <div class="stat-icon-wrapper bg-info bg-opacity-10 me-3">
+                                        <i class="bi bi-wallet2 text-info"></i>
+                                    </div>
+                                    <div>
+                                        <h6 class="text-muted small mb-1 fw-bold">OTHER ACCOUNTS</h6>
+                                        <h3 class="mb-0 fw-bold" id="statsOtherCount">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="customersContainer"></div>
+                </div>
+
+                <!-- Inventory Section -->
+                <div id="deliveryInventorySection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('inventory')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="inventoryContainer"></div>
+                </div>
+
+                <div id="deliveryVouchersSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('receipt')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="vouchersContainer"></div>
+                </div>
+
+                <!-- Services Section -->
+                <div id="deliveryServicesSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('service')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="servicesContainer"></div>
+                </div>
+
+                <div id="deliveryPurchasesSection" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.showLanding()">
+                            <i class="bi bi-arrow-left me-1"></i> Back
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary"
+                            onclick="ExportImportHelper.openImportExport('purchase')">
+                            <i class="bi bi-arrow-left-right me-1"></i> Import/Export
+                        </button>
+                    </div>
+                    <div id="purchasesContainer"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Custom Password Modal -->
@@ -277,18 +992,380 @@
         </div>
     </div>
 
+
+    <!-- Shared Datalists -->
+    <datalist id="inventoryList"></datalist>
+    <datalist id="serviceList"></datalist>
+    <datalist id="customerList"></datalist>
+
+    <!-- Customer Modal -->
+    <div class="modal fade" id="customerModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Add New Customer</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="customerForm">
+                        <div class="mb-3">
+                            <label class="form-label">GSTIN (Optional)</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="customerGSTIN"
+                                    placeholder="Enter 15-digit GSTIN" maxlength="15">
+                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.verifyGSTIN()">
+                                    <i class="bi bi-search me-1"></i> Verify
+                                </button>
+                            </div>
+                            <small class="text-muted">Leave blank for non-GST customer</small>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Customer Name *</label>
+                                <input type="text" class="form-control" id="customerName" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Phone</label>
+                                <input type="tel" class="form-control" id="customerPhone">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Address</label>
+                            <textarea class="form-control" id="customerAddress" rows="2"></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Email</label>
+                                <input type="email" class="form-control" id="customerEmail">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Customer DC Number</label>
+                                <input type="text" class="form-control" id="customerDCNumber">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="DeliveryUI.saveCustomer()">
+                        <i class="bi bi-save me-1"></i> Save Customer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory/Material Modal -->
+    <div class="modal fade" id="inventoryModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-box-seam me-2"></i>Add Inventory Item</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="inventoryForm">
+                        <!-- Item Type -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Item Type *</label>
+                                <select class="form-select" id="materialType" required>
+                                    <option value="material">Material/Product</option>
+                                    <option value="service">Service/Labor</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Category</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="materialCategory" list="categoryList"
+                                        placeholder="Select or type category">
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="DeliveryUI.addNewCategory()">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                                <datalist id="categoryList">
+                                    <option value="Cylinder Valve">
+                                    <option value="Regulators">
+                                    <option value="Pipes & Fittings">
+                                    <option value="Safety Equipment">
+                                    <option value="Electronics">
+                                    <option value="Hardware">
+                                    <option value="Consumables">
+                                </datalist>
+                            </div>
+                        </div>
+
+                        <!-- Subcategory & Brand -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Subcategory / Variant</label>
+                                <input type="text" class="form-control" id="materialSubcategory"
+                                    placeholder="e.g., Oxygen, Nitrogen">
+                                <small class="text-muted">Specific type or variant</small>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Brand</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="materialBrand" list="brandList"
+                                        placeholder="Select or type brand">
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="DeliveryUI.addNewBrand()">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                                <datalist id="brandList">
+                                    <option value="BOC">
+                                    <option value="Linde">
+                                    <option value="Air Liquide">
+                                    <option value="Generic">
+                                </datalist>
+                            </div>
+                        </div>
+
+                        <!-- Item Name & HSN -->
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <label class="form-label">Item Name *</label>
+                                <input type="text" class="form-control" id="materialName" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">HSN Code</label>
+                                <input type="text" class="form-control" id="materialHSN" maxlength="8">
+                                <small class="text-muted">For GST</small>
+                            </div>
+                        </div>
+
+                        <!-- Barcode & Unit -->
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Barcode</label>
+                                <input type="text" class="form-control" id="materialBarcode">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Unit of Measure *</label>
+                                <input type="text" class="form-control" id="materialUnit" list="unitList"
+                                    placeholder="Select or type unit" required>
+                                <datalist id="unitList">
+                                    <option value="Numbers">
+                                    <option value="Kilogram">
+                                    <option value="Liter">
+                                    <option value="Meter">
+                                    <option value="Box">
+                                    <option value="Hours">
+                                    <option value="Set">
+                                    <option value="Pcs">
+                                    <option value="Nos">
+                                    <option value="mt">
+                                </datalist>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">MRP (₹)</label>
+                                <input type="number" class="form-control" id="materialMRP" value="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="mb-3">
+                            <label class="form-label">Item Description</label>
+                            <textarea class="form-control" id="materialDescription" rows="2"></textarea>
+                        </div>
+
+                        <!-- Stock & Date (only for materials) -->
+                        <div id="stockFields">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Initial Quantity</label>
+                                    <input type="number" class="form-control" id="materialStock" value="0" step="0.01">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">As Of Date</label>
+                                    <input type="date" class="form-control" id="materialStockDate">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Min Order Qty</label>
+                                    <input type="number" class="form-control" id="materialMinQty" value="1" step="1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pricing -->
+                        <div class="card bg-secondary mb-3">
+                            <div class="card-header">
+                                <strong>Pricing & Tax</strong>
+                            </div>
+                            <div class="card-body">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Purchase Price (₹)</label>
+                                        <input type="number" class="form-control" id="materialPurchasePrice" value="0"
+                                            step="0.01">
+                                        <small class="text-muted">Cost price</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Sale Price (₹) *</label>
+                                        <input type="number" class="form-control" id="materialRate" value="0"
+                                            step="0.01" required>
+                                        <small class="text-muted">Selling price</small>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Default Discount %</label>
+                                        <input type="number" class="form-control" id="materialDiscount" value="0"
+                                            max="100" step="0.01">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Tax Type</label>
+                                        <select class="form-select" id="materialTaxType">
+                                            <option value="inclusive">Inclusive (Price includes tax)</option>
+                                            <option value="exclusive" selected>Exclusive (Tax added on price)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <label class="form-label">GST Rate %</label>
+                                        <select class="form-select" id="materialGSTRate">
+                                            <option value="0">0% (Exempted)</option>
+                                            <option value="5">5%</option>
+                                            <option value="12">12%</option>
+                                            <option value="18" selected>18%</option>
+                                            <option value="28">28%</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <label class="form-label">Tax Account</label>
+                                        <input type="text" class="form-control" id="materialTaxAccount"
+                                            placeholder="Leave blank for default">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Remarks -->
+                        <div class="mb-3">
+                            <label class="form-label">Remarks</label>
+                            <textarea class="form-control" id="materialRemarks" rows="2"></textarea>
+                            <small class="text-muted">Internal notes (won't be displayed)</small>
+                        </div>
+
+                        <!-- Additional Columns -->
+                        <div class="card bg-secondary mb-3">
+                            <div class="card-header">
+                                <strong>Additional Tracking Columns</strong>
+                                <small class="text-muted ms-2">Enable optional fields for batch tracking</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <!-- Batch -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableBatchField">
+                                            <label class="form-check-label" for="enableBatchField">
+                                                <strong>Batch Number</strong>
+                                            </label>
+                                        </div>
+                                        <input type="text" class="form-control form-control-sm" id="materialBatch"
+                                            placeholder="e.g., BATCH-2025-001" disabled>
+                                    </div>
+
+                                    <!-- Manufacturing Date -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableMfgDateField">
+                                            <label class="form-check-label" for="enableMfgDateField">
+                                                <strong>Manufacturing Date</strong>
+                                            </label>
+                                        </div>
+                                        <input type="date" class="form-control form-control-sm" id="materialMfgDate"
+                                            disabled>
+                                    </div>
+
+                                    <!-- Expiry Date -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableExpDateField">
+                                            <label class="form-check-label" for="enableExpDateField">
+                                                <strong>Expiry Date</strong>
+                                            </label>
+                                        </div>
+                                        <input type="date" class="form-control form-control-sm" id="materialExpDate"
+                                            disabled>
+                                    </div>
+
+                                    <!-- Weight -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableWeightField">
+                                            <label class="form-check-label" for="enableWeightField">
+                                                <strong>Weight (kg)</strong>
+                                            </label>
+                                        </div>
+                                        <input type="number" class="form-control form-control-sm" id="materialWeight"
+                                            placeholder="0.00" step="0.01" disabled>
+                                    </div>
+
+                                    <!-- Height -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableHeightField">
+                                            <label class="form-check-label" for="enableHeightField">
+                                                <strong>Height (cm)</strong>
+                                            </label>
+                                        </div>
+                                        <input type="number" class="form-control form-control-sm" id="materialHeight"
+                                            placeholder="0.00" step="0.01" disabled>
+                                    </div>
+
+                                    <!-- Count -->
+                                    <div class="col-md-6 mb-3">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="enableCountField">
+                                            <label class="form-check-label" for="enableCountField">
+                                                <strong>Count/Items per Unit</strong>
+                                            </label>
+                                        </div>
+                                        <input type="number" class="form-control form-control-sm" id="materialCount"
+                                            placeholder="0" step="1" disabled>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="DeliveryUI.saveMaterial()">
+                        <i class="bi bi-save me-1"></i> Save Item
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
+    <!-- Footer -->
+
     <footer class="footer-premium mt-auto">
         <div class="container-fluid">
             <div class="row g-4">
-                <!-- Brand Section -->
+                <!-- Company Details -->
                 <div class="col-lg-4 col-md-6">
                     <div class="footer-section h-100">
-                        <h5 class="footer-brand mb-3">Gas Tech Engineering Service</h5>
+                        <h5 class="footer-brand mb-3" id="footerCompanyName">Gas Tech Engineering Service</h5>
                         <p class="text-muted small mb-3">Excellence in Engineering & Service Solutions.</p>
                         <div class="footer-address small text-muted">
-                            <p class="mb-1"><i class="fas fa-map-marker-alt me-2 text-primary"></i> Registered:
-                                No.232/233, Nageshwara Road, Athipet, Chennai – 600058</p>
+                            <p class="mb-1"><i class="fas fa-map-marker-alt me-2 text-primary"></i>
+                                <strong>Registered:</strong><br>
+                                No.232/233, Nageshwara Road, Athipet, Chennai – 600058
+                            </p>
+                            <p class="mb-0 mt-2"><i class="fas fa-building me-2 text-primary"></i>
+                                <strong>Work:</strong><br>
+                                236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai – 600058
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -312,72 +1389,352 @@
                                 <i class="fas fa-phone me-2 text-primary"></i>
                                 <span class="text-muted">+91 96000 19839, +91 95662 02896</span>
                             </li>
-                            <li class="mb-2">
-                                <i class="fas fa-building me-2 text-primary"></i>
-                                <span class="text-muted">Work: 236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai
-                                    – 600058</span>
-                            </li>
                         </ul>
                     </div>
                 </div>
 
-                <!-- Legal Section -->
+                <!-- Legal Information -->
                 <div class="col-lg-4 col-md-12">
                     <div class="footer-section h-100">
                         <h6 class="footer-heading mb-3">Legal Information</h6>
                         <div class="row small text-muted">
                             <div class="col-6 mb-2">
-                                <span class="d-block fw-bold text-light">GSTIN</span>
-                                33AFXPR3235A3ZF
+                                <strong class="d-block text-primary">GSTIN</strong>
+                                <span>33AFXPR3235A3ZF</span>
                             </div>
                             <div class="col-6 mb-2">
-                                <span class="d-block fw-bold text-light">PAN</span>
-                                AFXPR3235A
+                                <strong class="d-block text-primary">PAN</strong>
+                                <span>AFXPR3235A</span>
                             </div>
                             <div class="col-6 mb-2">
-                                <span class="d-block fw-bold text-light">IEC</span>
-                                AFXPR3235A
+                                <strong class="d-block text-primary">IEC</strong>
+                                <span>AFXPR3235A</span>
                             </div>
-                        </div>
-                        <div class="social-icons mt-3">
-                            <a href="#" class="social-link me-2"><i class="fab fa-linkedin"></i></a>
-                            <a href="#" class="social-link me-2"><i class="fab fa-twitter"></i></a>
-                            <a href="#" class="social-link"><i class="fab fa-facebook"></i></a>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="footer-bottom mt-4 pt-3 text-center small text-muted">
-                <p class="mb-0">&copy; 2025 Gas Tech Engineering Service. All rights reserved.</p>
+            <div
+                class="footer-bottom mt-4 pt-3 border-top border-secondary d-flex flex-column flex-md-row justify-content-between align-items-center small text-muted">
+                <div class="mb-2 mb-md-0">
+                    &copy; <span id="copyrightYear">2025</span> <span id="copyrightCompanyName">Gas Tech Engineering
+                        Service</span>. All rights reserved.
+                </div>
+                <div class="text-center text-md-end">
+                    <span class="d-block d-md-inline me-md-3">Version 1.0.0</span>
+                    <span class="d-block d-md-inline me-md-3">Developed by Murali D</span>
+                    <span class="d-block d-md-inline">Support: leemurali089@gmail.com / +91 99529 70089</span>
+                </div>
             </div>
         </div>
     </footer>
 
+    <!-- Export/Import Modal -->
+    <div class="modal fade" id="exportImportModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-arrow-left-right me-2"></i> <span
+                            id="exportImportTitle">Export Data</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Nav Tabs -->
+                    <ul class="nav nav-pills mb-3 justify-content-center" id="exportImportTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="export-tab" data-bs-toggle="pill"
+                                href="#exportPanel">Export</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="import-tab" data-bs-toggle="pill" href="#importPanel">Import</a>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Export Panel -->
+                        <div class="tab-pane fade show active" id="exportPanel">
+                            <div class="mb-4">
+                                <label class="form-label small text-muted">Format</label>
+                                <div class="d-flex gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="exportFormat"
+                                            id="formatExcel" value="xlsx" checked>
+                                        <label class="form-check-label" for="formatExcel">Excel (.xlsx)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="exportFormat" id="formatCSV"
+                                            value="csv">
+                                        <label class="form-check-label" for="formatCSV">CSV (.csv)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="exportFormat" id="formatXML"
+                                            value="xml">
+                                        <label class="form-check-label" for="formatXML">XML (.xml)</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label small text-muted">Range</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="exportRange"
+                                    onchange="ExportImportHelper.toggleRangeFields()">
+                                    <option value="all">Full Data (All Time)</option>
+                                    <option value="date">Specific Date Range</option>
+                                    <option value="fy">Financial Year</option>
+                                </select>
+                            </div>
+
+                            <!-- Date Range Fields -->
+                            <div id="exportDateFields" class="row g-2 mb-4 d-none">
+                                <div class="col-6">
+                                    <label class="form-label small text-muted">From</label>
+                                    <input type="date" class="form-control bg-dark text-white border-secondary"
+                                        id="exportStartDate">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small text-muted">To</label>
+                                    <input type="date" class="form-control bg-dark text-white border-secondary"
+                                        id="exportEndDate">
+                                </div>
+                            </div>
+
+                            <!-- FY Selector -->
+                            <div id="exportFYFields" class="mb-4 d-none">
+                                <label class="form-label small text-muted">Select Financial Year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="exportFY">
+                                    <option value="2025-26">2025-26</option>
+                                    <option value="2024-25">2024-25</option>
+                                    <option value="2023-24">2023-24</option>
+                                </select>
+                            </div>
+
+                            <div class="d-grid mt-4">
+                                <button type="button" class="btn btn-primary" onclick="ExportImportHelper.runExport()">
+                                    <i class="bi bi-download me-2"></i>Download File
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Import Panel -->
+                        <div class="tab-pane fade" id="importPanel">
+                            <div class="alert alert-info py-2 small">
+                                <i class="bi bi-info-circle me-1"></i> Use the template for correct column names.
+                            </div>
+
+                            <div class="mb-4">
+                                <button type="button" class="btn btn-link btn-sm p-0 text-info text-decoration-none"
+                                    onclick="ExportImportHelper.downloadTemplate()">
+                                    <i class="bi bi-file-earmark-arrow-down me-1"></i>Download Sample Template
+                                </button>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label small text-muted">Select Module Type</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="importModuleSelect">
+                                    <option value="inventory">Inventory Items</option>
+                                    <option value="sales">Sales Invoices</option>
+                                    <option value="purchase">Purchase Invoices</option>
+                                    <option value="service">Services (Non-Inventory)</option>
+                                    <option value="receipt">Receipt Vouchers</option>
+                                    <option value="payment">Payment Vouchers</option>
+                                    <option value="customers">Customers</option>
+                                    <option value="suppliers">Suppliers / Vendors</option>
+                                    <option value="accounts">Other Accounts</option>
+                                    <option value="all_in_one" class="text-info fw-bold">All-in-One Data (XML)</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label small text-muted">Schema Action (Required)</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="schemaAction"
+                                        id="actionCreateNew" value="create">
+                                    <label class="form-check-label text-white" for="actionCreateNew">Create New Module
+                                        (Fresh Schema)</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="schemaAction"
+                                        id="actionUpdateExisting" value="update">
+                                    <label class="form-check-label text-white" for="actionUpdateExisting">Update
+                                        Existing Module (Overwrite Schema)</label>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label small text-muted">Select File (.xlsx or .csv)</label>
+                                <input type="file" class="form-control bg-dark text-white border-secondary"
+                                    id="importFileInput" accept=".xlsx, .csv">
+                            </div>
+
+                            <div class="d-grid mt-4">
+                                <button type="button" class="btn btn-success" onclick="ExportImportHelper.runImport()">
+                                    <i class="bi bi-upload me-2"></i>Upload & Process
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5 JS -->
+    <!-- Global Loader -->
+    <div id="globalLoader" class="global-loader d-none">
+        <div class="loader-content">
+            <div class="loader-circle"></div>
+            <div class="loader-logo">
+                <i class="bi bi-building"></i>
+            </div>
+            <div class="loader-text">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Update Notification Modal -->
+    <div class="modal fade" id="updateModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-cloud-arrow-down"></i> Update Available</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-gift text-primary" style="font-size: 3rem;"></i>
+                        <h4>New Version Available!</h4>
+                        <p class="lead">Version <span id="latestVersion" class="fw-bold"></span> is ready.</p>
+                        <p class="text-muted small">Current Version: <span id="currentVersion"></span></p>
+                    </div>
+                    <div class="card bg-light mb-3">
+                        <div class="card-body">
+                            <h6>What's New:</h6>
+                            <p id="releaseNotes" class="mb-0 small"></p>
+                        </div>
+                    </div>
+                    <div class="alert alert-info small">
+                        <i class="bi bi-info-circle"></i> Your data will be preserved during the update.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Later</button>
+                    <a href="#" id="downloadUpdateBtn" class="btn btn-primary" target="_blank">
+                        <i class="bi bi-download"></i> Download Update
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Preview Modal -->
+    <div class="modal fade" id="pdfPreviewModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="pdfPreviewTitle">Document Preview</h5>
+                    <div class="ms-auto">
+                        <button class="btn btn-sm btn-primary me-2" id="pdfDownloadBtn">
+                            <i class="bi bi-download me-1"></i> Download PDF
+                        </button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                    </div>
+                </div>
+                <div class="modal-body p-0"
+                    style="background: #525659; min-height: 600px; display: flex; justify-content: center; align-items: flex-start; overflow-y: auto;">
+                    <div id="pdfPreviewContainer" class="p-4 shadow-lg"
+                        style="background: white; transform-origin: top center; margin: 20px 0;">
+                        <!-- PDF content will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Up to Date Modal -->
+    <div class="modal fade" id="upToDateModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-body text-center py-4">
+                    <i class="bi bi-check-circle text-success mb-3" style="font-size: 3rem;"></i>
+                    <h5>You're Up to Date!</h5>
+                    <p class="text-muted mb-0">Version <span id="upToDateVersion"></span> is the latest version.</p>
+                </div>
+                <div class="modal-footer justify-content-center">
+                    <button type="button" class="btn btn-primary btn-sm px-4" data-bs-dismiss="modal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sync Report Modal -->
+    <div class="modal fade" id="syncReportModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Sync Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="syncReportBody">
+                    <!-- Report content will be injected here -->
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-primary w-100" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <!-- html2pdf library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <!-- SheetJS for Excel Import/Export -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
     <!-- File Storage Module (must load before data.js) -->
     <script src="js/fileStorage.js"></script>
 
     <!-- Application Scripts -->
+    <script src="js/syncManager.js"></script>
+    <script src="js/bookKeeperSync.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/userManager.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/updateChecker.js"></script>
+    <script src="js/audit.js"></script>
+    <script src="js/bankTemplates.js"></script>
     <script src="js/employees.js"></script>
     <script src="js/holidays.js"></script>
     <script src="js/attendance.js"></script>
     <script src="js/filterAttendance.js"></script>
     <script src="js/advances.js"></script>
+    <script src="js/bonus.js"></script>
+    <script src="js/emailService.js"></script>
     <script src="js/salary.js"></script>
     <script src="js/employeeView.js"></script>
+    <script src="js/customers.js"></script>
+    <script src="js/inventory.js"></script>
+    <script src="js/delivery.js"></script>
+    <script src="js/jobcard.js"></script>
+    <script src="js/invoices.js"></script>
+    <script src="js/vouchers.js"></script>
+    <script src="js/vouchersUI.js"></script>
+    <script src="js/invoicesUI.js"></script>
+    <script src="js/deliveryUI.js"></script>
+    <script src="js/accountingUI.js"></script>
+    <script src="js/additionalFieldsToggle.js"></script>
     <script src="js/admin.js"></script>
     <script src="js/reports.js"></script>
+    <script src="js/businessAnalytics.js"></script>
+    <script src="js/analyticsUI.js"></script>
+    <script src="js/bankImportHelper.js"></script>
+    <script src="js/exportImportHelper.js"></script>
+    <script src="js/bookKeeperImport.js"></script>
+    <script src="js/seedData.js"></script>
     <script src="js/app.js"></script>
 
     <!-- Employee Details Modal -->
@@ -399,19 +1756,7 @@
         </div>
     </div>
 
-    <!-- Application Scripts -->
-    <script src="js/data.js"></script>
-    <script src="js/auth.js"></script>
-    <script src="js/app.js"></script>
-    <script src="js/employees.js"></script>
-    <script src="js/holidays.js"></script>
-    <script src="js/attendance.js"></script>
-    <script src="js/filterAttendance.js"></script>
-    <script src="js/advances.js"></script>
-    <script src="js/salary.js"></script>
-    <script src="js/employeeView.js"></script>
-    <script src="js/admin.js"></script>
-    <script src="js/reports.js"></script>
+
 
     <!-- Error Handling -->
     <script>
@@ -437,6 +1782,125 @@
                     const file = event.target.files[0];
                     if (file) {
                         AdminModule.importBackup(file);
+                        event.target.value = '';
+                    }
+                });
+            }
+
+            const bkImportInput = document.getElementById('bkImportFile');
+            if (bkImportInput) {
+                bkImportInput.addEventListener('change', async function (event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        try {
+                            App.showNotification('Syncing with Book Keeper...', 'info');
+                            const stats = await BookKeeperImport.runFullImport(file);
+                            const summary = BookKeeperImport.getSummary(stats);
+                            await BookKeeperImport.cleanupImportedData();
+
+                            // Show detailed report modal
+                            const modalBody = document.getElementById('syncReportBody');
+                            if (modalBody) {
+                                let html = `
+                                    <div class="text-center mb-4">
+                                        <div class="display-1 text-success mb-2"><i class="bi bi-check-circle"></i></div>
+                                        <h4>Sync Completed!</h4>
+                                        <p class="text-muted">Process took ${summary.duration.toFixed(2)}s</p>
+                                    </div>
+                                    <div class="list-group mb-4">
+                                `;
+
+                                summary.sections.forEach(s => {
+                                    if (s.status === 'success') {
+                                        html += `
+                                            <div class="list-group-item d-flex justify-content-between align-items-center bg-dark text-white border-secondary">
+                                                <div>
+                                                    <i class="bi bi-check-circle-fill text-success me-2"></i> ${s.name}
+                                                </div>
+                                                <span class="badge bg-primary rounded-pill">${s.imported || 0}</span>
+                                            </div>
+                                        `;
+                                    } else {
+                                        html += `
+                                            <div class="list-group-item list-group-item-danger d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <i class="bi bi-exclamation-triangle-fill me-2"></i> ${s.name}
+                                                </div>
+                                                <small>${s.message}</small>
+                                            </div>
+                                        `;
+                                    }
+                                });
+
+                                html += `</div>`;
+
+                                if (stats.errors && stats.errors.length > 0) {
+                                    html += `
+                                        <div class="alert alert-warning small">
+                                            <h6 class="alert-heading"><i class="bi bi-exclamation-circle"></i> Warnings/Errors:</h6>
+                                            <ul class="mb-0 ps-3">
+                                                ${stats.errors.map(e => `<li>${e.section}: ${e.error}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    `;
+                                }
+
+                                // DEBUG INFO
+                                if (summary.foundTables && summary.foundTables.length > 0) {
+                                    html += `
+                                        <div class="accordion" id="debugAccordion">
+                                            <div class="accordion-item bg-dark border-secondary">
+                                                <h2 class="accordion-header" id="headingDebug">
+                                                    <button class="accordion-button collapsed bg-dark text-white" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDebug" aria-expanded="false" aria-controls="collapseDebug">
+                                                        <i class="bi bi-bug me-2"></i> Debug Info (Tables Found)
+                                                    </button>
+                                                </h2>
+                                                <div id="collapseDebug" class="accordion-collapse collapse" aria-labelledby="headingDebug" data-bs-parent="#debugAccordion">
+                                                    <div class="accordion-body small text-muted font-monospace" style="max-height: 200px; overflow-y: auto;">
+                                                        <p class="mb-1"><strong>Found Tables:</strong> ${summary.foundTables.join(', ')}</p>
+                                                        ${stats.debugColumns ? `
+                                                            <hr class="my-1 border-secondary">
+                                                            <p class="mb-1 text-warning"><strong>📊 Use these names for support:</strong></p>
+                                                            ${Object.entries(stats.debugColumns).map(([table, cols]) => `
+                                                                <div class="mb-2">
+                                                                    <span class="text-info">${table}:</span> 
+                                                                    <span class="text-white small">
+                                                                        ${Array.isArray(cols)
+                                            ? cols.join(', ')
+                                            : typeof cols === 'object'
+                                                ? JSON.stringify(cols, null, 2).replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')
+                                                : cols}
+                                                                    </span>
+                                                                </div>
+                                                            `).join('')}
+                                                        ` : ''}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                     `;
+                                }
+
+                                modalBody.innerHTML = html;
+                                const modal = new bootstrap.Modal(document.getElementById('syncReportModal'));
+                                modal.show();
+                            } else {
+                                App.showNotification(`Sync Complete! ${summary.totalImported} items updated.`, 'success');
+                            }
+
+                            // Refresh current view if needed
+                            if (window.AccountingUI && typeof window.AccountingUI.renderDashboard === 'function') {
+                                window.AccountingUI.renderDashboard();
+                            }
+                            // Also refresh inventory/delivery views if open
+                            if (window.DeliveryUI && document.getElementById('inventoryView') && !document.getElementById('inventoryView').classList.contains('d-none')) {
+                                DeliveryUI.loadInventory();
+                            }
+
+                        } catch (e) {
+                            console.error('BookKeeper Sync Error:', e);
+                            App.showNotification('Sync Failed: ' + e.message, 'error');
+                        }
                         event.target.value = '';
                     }
                 });

@@ -3,13 +3,19 @@ const DataManager = {
     // Company Profile Constants
     COMPANY_PROFILE: {
         name: "Gas Tech Engineering Service",
-        registeredAddress: "No.232/233, Nageshwara Road, Athipet, Chennai – 600058",
-        workAddress: "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai – 600058",
+        registeredAddress: "No.232/233, Nageshwara Road, Athipet, Chennai - 600058",
+        workAddress: "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058",
         emails: ["gastechengservice@gmail.com", "rajmohan67raj@gmail.com"],
         phones: ["+91 96000 19839", "+91 95662 02896"],
         gstin: "33AFXPR3235A3ZF",
         pan: "AFXPR3235A",
-        iec: "AFXPR3235A"
+        iec: "AFXPR3235A",
+        bankDetails: {
+            bankName: "Indian Overseas Bank",
+            branch: "Nolambur",
+            accountNo: "213902000002759",
+            ifsc: "IOBA0002139"
+        }
     },
 
     // Storage Keys
@@ -18,16 +24,37 @@ const DataManager = {
         ATTENDANCE: 'gtes_attendance',
         HOLIDAYS: 'gtes_holidays',
         ADVANCES: 'gtes_advances',
+        BONUS_PAYOUTS: 'gtes_bonus_payouts',
+        EMAIL_LOGS: 'gtes_email_logs',
         SETTINGS: 'gtes_settings',
-        ADMIN_PASSWORD: 'gtes_admin_password'
+        ADMIN_PASSWORD: 'gtes_admin_password',
+        VOUCHERS: 'vouchers',
+        EXPENSES: 'purchases',
+        INVOICES: 'invoices',
+        EXPENSE_CATEGORIES: 'gtes_expense_categories',
+        ESTIMATES: 'gtes_estimates',
+        PURCHASE_ORDERS: 'gtes_purchase_orders',
+        RECURRING_INVOICES: 'gtes_recurring_invoices',
+        // Book Keeper Integration Keys
+        TAX_SCHEMES: 'gtes_tax_schemes',
+        CHALLANS: 'gtes_challans',
+        WAREHOUSES: 'gtes_warehouses',
+        INVENTORY_ITEMS: 'gtes_inventory_items',
+        ACCOUNTS: 'gtes_accounts',
+        JOURNAL_ENTRIES: 'gtes_journal_entries',
+
+        INVENTORY: 'inventory',
+        // Raw Data Storage (Bookkeeper Import)
+        IMPORT_COLUMNS: 'gtes_import_columns',
+        IMPORT_RAW: 'gtes_import_raw'
     },
 
     // Default Settings
     DEFAULT_SETTINGS: {
         otRate: 200, // OT rate per hour (for fixed rate method)
         otCalculationMethod: 'salaryBased', // 'salaryBased' or 'fixedRate'
-        sOtCalculationMethod: 'salaryBased8', // Standard OT: salary / 30 / 8
-        hOtCalculationMethod: 'salaryBased8', // Holiday OT: salary / 30 / 8
+        sOtCalculationMethod: 'salaryBased8', // Standard OT: salary / 30 / 8 (fixed 30 days)
+        hOtCalculationMethod: 'salaryBased8', // Holiday OT: salary / 30 / 8 (fixed 30 days)
         financialYearStart: 4, // April (month index 3, but we use 4 for April)
         defaultAdminPassword: 'admin123',
         // Track salary payout status per month (key: "year_monthIndex")
@@ -112,8 +139,37 @@ const DataManager = {
         if (!(await this.loadData(this.KEYS.ADVANCES))) {
             await this.saveData(this.KEYS.ADVANCES, []);
         }
+        if (!(await this.loadData(this.KEYS.BONUS_PAYOUTS))) {
+            await this.saveData(this.KEYS.BONUS_PAYOUTS, []);
+        }
+        if (!(await this.loadData(this.KEYS.EMAIL_LOGS))) {
+            await this.saveData(this.KEYS.EMAIL_LOGS, []);
+        }
         if (!(await this.loadData(this.KEYS.SETTINGS))) {
             await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
+        }
+        if (!(await this.loadData(this.KEYS.EXPENSES))) {
+            await this.saveData(this.KEYS.EXPENSES, []);
+        }
+        if (!(await this.loadData(this.KEYS.EXPENSE_CATEGORIES))) {
+            const defaultCategories = [
+                { id: 'cat_rent', name: 'Rent', type: 'indirect' },
+                { id: 'cat_salaries', name: 'Salaries', type: 'indirect' },
+                { id: 'cat_utilities', name: 'Utilities/Bills', type: 'indirect' },
+                { id: 'cat_purchase', name: 'Inventory Purchase', type: 'direct' },
+                { id: 'cat_transport', name: 'Transportation', type: 'direct' },
+                { id: 'cat_misc', name: 'Miscellaneous', type: 'indirect' }
+            ];
+            await this.saveData(this.KEYS.EXPENSE_CATEGORIES, defaultCategories);
+        }
+        if (!(await this.loadData(this.KEYS.ESTIMATES))) {
+            await this.saveData(this.KEYS.ESTIMATES, []);
+        }
+        if (!(await this.loadData(this.KEYS.PURCHASE_ORDERS))) {
+            await this.saveData(this.KEYS.PURCHASE_ORDERS, []);
+        }
+        if (!(await this.loadData(this.KEYS.RECURRING_INVOICES))) {
+            await this.saveData(this.KEYS.RECURRING_INVOICES, []);
         }
 
         // Phase 2: Migrate employees to new schema
@@ -121,10 +177,113 @@ const DataManager = {
 
         // Version 2.0: Migrate employees to add salary revisions
         await this.migrateToSalaryRevisions();
+
+        // Auto-mark Sundays as Holiday for all active employees
+        await this.autoMarkSundayHolidays();
+
+        // Schedule auto-marking for midnight each day
+        this.scheduleSundayHolidayCheck();
+    },
+
+    /**
+     * Auto-mark all Sundays with "Holiday" status for active employees
+     * This runs on app startup and at midnight
+     */
+    async autoMarkSundayHolidays() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Only mark if today is Sunday (day 0)
+        if (today.getDay() !== 0) {
+            console.log('Today is not Sunday, skipping auto-mark');
+            return;
+        }
+
+        const todayStr = this.formatDate(today);
+        console.log(`Today is Sunday (${todayStr}), checking for auto-mark...`);
+
+        // Get all active employees
+        const employees = await this.getActiveEmployees();
+        if (!employees || employees.length === 0) {
+            console.log('No active employees found');
+            return;
+        }
+
+        // Get existing attendance
+        const attendance = await this.getAttendance();
+        let markedCount = 0;
+
+        for (const employee of employees) {
+            // Check if this employee already has an attendance record for today
+            const existingRecord = attendance.find(a =>
+                a.employee === employee.name &&
+                this.formatDate(new Date(a.date)) === todayStr
+            );
+
+            if (existingRecord) {
+                // Already marked, skip
+                continue;
+            }
+
+            // Create a new "Holiday" attendance record
+            const newRecord = {
+                id: `ATT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                employee: employee.name,
+                date: today.toISOString(),
+                status: 'Holiday',
+                checkIn: '',
+                checkOut: '',
+                overTime: 'No',
+                otHours: 0,
+                holidayReason: 'Sunday',
+                autoMarked: true, // Flag to indicate this was auto-marked
+                ...this.addTimestamp({})
+            };
+
+            attendance.push(newRecord);
+            markedCount++;
+        }
+
+        if (markedCount > 0) {
+            await this.saveAttendance(attendance);
+            console.log(`Auto-marked ${markedCount} employees as Holiday for Sunday (${todayStr})`);
+        } else {
+            console.log('All employees already have attendance records for today');
+        }
+    },
+
+    /**
+     * Schedule the Sunday holiday check to run at midnight each day
+     */
+    scheduleSundayHolidayCheck() {
+        const now = new Date();
+        const midnight = new Date(now);
+        midnight.setDate(midnight.getDate() + 1); // Next day
+        midnight.setHours(0, 0, 0, 0); // Midnight
+
+        const msUntilMidnight = midnight.getTime() - now.getTime();
+
+        console.log(`Scheduling Sunday holiday check for midnight (in ${Math.round(msUntilMidnight / 1000 / 60)} minutes)`);
+
+        // Schedule for midnight
+        setTimeout(async () => {
+            console.log('Midnight reached, checking for Sunday auto-mark...');
+            await this.autoMarkSundayHolidays();
+
+            // Reschedule for next midnight
+            this.scheduleSundayHolidayCheck();
+        }, msUntilMidnight);
     },
 
     // Helper methods for storage operations
     async saveData(key, data) {
+        // Update local cache first
+        try {
+            localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+            console.error('Error updating localStorage cache:', e);
+        }
+
         // Phase 5: Check for conflicts before saving
         if (window.SyncManager) {
             const canProceed = await window.SyncManager.checkConflict(key);
@@ -134,7 +293,86 @@ const DataManager = {
     },
 
     async loadData(key) {
-        return await FileStorage.loadData(key);
+        const data = await FileStorage.loadData(key);
+        if (data) {
+            try {
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch (e) {
+                console.error('Error updating localStorage cache during load:', e);
+            }
+        }
+        return data;
+    },
+
+    // Alias for loadData (used by delivery modules)
+    getData(key) {
+        // Note: This is synchronous wrapper - data should be cached already
+        const data = localStorage.getItem(key);
+        if (!data) return null;
+        try {
+            return JSON.parse(data);
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // Synchronous saveData wrapper for delivery modules  
+    saveDataSync(key, value) {
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+            // Also trigger async save for file storage
+            this.saveData(key, value).catch(err => console.error('Async save error:', err));
+            return true;
+        } catch (e) {
+            console.error('Save error:', e);
+            return false;
+        }
+    },
+
+    /**
+     * Merge external data from Book Keeper Import
+     * @param {string} key - DataManager KEY
+     * @param {Array} newData - Array of new records
+     * @param {string} idField - Field to identify uniqueness (default 'id')
+     */
+    async mergeBookKeeperData(key, newData, idField = 'id') {
+        if (!newData || newData.length === 0) return;
+
+        const currentData = (await this.loadData(key)) || [];
+        let added = 0;
+        let updated = 0;
+
+        // Create a map of current data for faster lookup
+        const currentMap = new Map(currentData.map(item => [item[idField], item]));
+
+        for (const item of newData) {
+            const existing = currentMap.get(item[idField]);
+
+            if (existing) {
+                // Update if changed (simplistic check, or just overwrite)
+                // For now, we overwrite as Book Keeper is the source of truth for these
+                Object.assign(existing, item, {
+                    updatedAt: new Date().toISOString(),
+                    syncSource: 'bookkeeper'
+                });
+                updated++;
+            } else {
+                // Add new
+                const newItem = {
+                    ...item,
+                    createdAt: new Date().toISOString(),
+                    syncSource: 'bookkeeper'
+                };
+                currentData.push(newItem);
+                currentMap.set(item[idField], newItem);
+                added++;
+            }
+        }
+
+        if (added > 0 || updated > 0) {
+            await this.saveData(key, currentData);
+            console.log(`Merge complete for ${key}: ${added} added, ${updated} updated`);
+        }
     },
 
     // Employee Operations
@@ -379,6 +617,50 @@ const DataManager = {
         return null;
     },
 
+    /**
+     * Get Financial Year (April to March) from a date string
+     * @param {string} dateStr 
+     * @returns {string} Format: "2023-24"
+     */
+    getFinancialYear(dateInput, returnObject = false) {
+        // If called without arguments, return current financial year object
+        if (arguments.length === 0) {
+            dateInput = new Date();
+            returnObject = true;
+        }
+
+        let date = this.parseDate(dateInput);
+
+        // If date is invalid or null, return empty string or null based on input
+        if (!date || isNaN(date.getTime())) return dateInput ? '' : null;
+
+        const year = date.getFullYear();
+        const month = date.getMonth(); // 0-indexed, April is 3
+
+        let startYear, endYear;
+        if (month >= 3) {
+            // April to Dec: current year - next year
+            startYear = year;
+            endYear = year + 1;
+        } else {
+            // Jan to March: prev year - current year
+            startYear = year - 1;
+            endYear = year;
+        }
+
+        const label = `${startYear}-${endYear.toString().slice(-2)}`;
+
+        if (returnObject) {
+            return {
+                startYear,
+                endYear,
+                label
+            };
+        }
+
+        return label;
+    },
+
     // Get employees who were active during a specific month
     async getEmployeesActiveInMonth(year, month) {
         const employees = await this.getEmployees();
@@ -520,7 +802,7 @@ const DataManager = {
     // Attendance Operations
     async getAttendance() {
         const data = await this.loadData(this.KEYS.ATTENDANCE);
-        return data || [];
+        return Array.isArray(data) ? data : [];
     },
 
     async saveAttendance(attendance) {
@@ -613,7 +895,7 @@ const DataManager = {
 
     // Get total advance for employee in financial year
     async getTotalAdvanceForEmployeeFY(employeeName, year, month) {
-        const fy = this.getFinancialYearForDate(new Date(year, month, 1));
+        const fy = this.getFinancialYear(new Date(year, month, 1), true);
         const fyStartDate = new Date(fy.startYear, 3, 1); // April 1
         const fyEndDate = new Date(fy.endYear, 2, 31); // March 31
 
@@ -753,7 +1035,7 @@ const DataManager = {
         // If we're in a new financial year, check for carry forward from previous FY
         if (year > fyEndYear || (year === fyEndYear && month > 2)) {
             // We're in a new FY, need to check previous FY balance
-            const prevFy = this.getFinancialYearForDate(new Date(year, month, 1));
+            const prevFy = this.getFinancialYear(new Date(year, month, 1), true);
             const prevFyStartYear = prevFy.startYear;
             const prevFyEndYear = prevFy.endYear;
 
@@ -784,17 +1066,7 @@ const DataManager = {
         return remainingFyBalance;
     },
 
-    // Get financial year for a specific date
-    getFinancialYearForDate(date) {
-        const year = date.getFullYear();
-        const month = date.getMonth();
 
-        if (month >= 3) { // April to December
-            return { startYear: year, endYear: year + 1 };
-        } else { // January to March
-            return { startYear: year - 1, endYear: year };
-        }
-    },
 
     // Settings Operations
     async getSettings() {
@@ -812,30 +1084,19 @@ const DataManager = {
     },
 
     // Mark salary payout as completed for a specific month (year, monthIndex 0-11)
-    async markSalaryPayoutDone(year, month, creditDate = null) {
-        const settings = await this.getSettings();
-        if (!settings.salaryPayouts) {
-            settings.salaryPayouts = {};
-        }
-        const key = `${year}_${month}`;
-        settings.salaryPayouts[key] = {
-            done: true,
-            timestamp: new Date().toISOString(),
-            creditDate: creditDate
-        };
-        await this.saveSettings(settings);
-    },
+
 
     // Cancel salary payout for a specific month for selected employees
     async cancelSalaryPayout(year, month, employeeNames) {
         const settings = await this.getSettings();
+        const key = `${year}_${month}`;
 
         // 1. Remove debited advances for selected employees
         if (settings.debitedAdvances) {
             employeeNames.forEach(empName => {
-                const key = `${empName}_${year}_${month}`;
-                if (settings.debitedAdvances[key]) {
-                    delete settings.debitedAdvances[key];
+                const k = `${empName}_${year}_${month}`;
+                if (settings.debitedAdvances[k]) {
+                    delete settings.debitedAdvances[k];
                 }
             });
         }
@@ -843,47 +1104,52 @@ const DataManager = {
         // 2. Remove waived advances for selected employees
         if (settings.waivedAdvances) {
             employeeNames.forEach(empName => {
-                const key = `${empName}_${year}_${month}`;
-                if (settings.waivedAdvances[key]) {
-                    delete settings.waivedAdvances[key];
+                const k = `${empName}_${year}_${month}`;
+                if (settings.waivedAdvances[k]) {
+                    delete settings.waivedAdvances[k];
                 }
             });
         }
 
-        // 3. For daily-paid employees, we need to handle accumulated months
-        // Get all employees to check their salary types
-        const allEmployees = await this.getEmployees();
-        const canceledDailyEmployees = employeeNames.filter(empName => {
-            const emp = allEmployees.find(e => e.name === empName);
-            return emp && emp.salaryType === 'daily';
-        });
+        // 3. Update Payout record
+        if (settings.salaryPayouts && settings.salaryPayouts[key]) {
+            const payout = settings.salaryPayouts[key];
 
-        // 4. Check if ANY data remains for this month (from other employees)
-        let hasData = false;
+            // Remove from employee list
+            if (Array.isArray(payout.employees)) {
+                payout.employees = payout.employees.filter(name => !employeeNames.includes(name));
+            }
 
-        if (settings.debitedAdvances) {
-            const hasDebits = Object.keys(settings.debitedAdvances).some(key => key.endsWith(`_${year}_${month}`));
-            if (hasDebits) hasData = true;
-        }
+            // Remove from individualPayouts
+            if (payout.individualPayouts) {
+                employeeNames.forEach(name => {
+                    delete payout.individualPayouts[name];
+                });
+            }
 
-        if (!hasData && settings.waivedAdvances) {
-            const hasWaivers = Object.keys(settings.waivedAdvances).some(key => key.endsWith(`_${year}_${month}`));
-            if (hasWaivers) hasData = true;
-        }
+            // Re-calculate totalPaid
+            if (payout.individualPayouts) {
+                payout.totalPaid = Object.values(payout.individualPayouts).reduce((sum, val) => sum + val, 0);
+            } else {
+                // Fallback for legacy records
+                payout.totalPaid = 0;
+            }
 
-        // 5. If canceling daily employees OR no data remains, remove payout status
-        if (settings.salaryPayouts) {
-            const key = `${year}_${month}`;
+            // Re-calculate 'done' status
+            const activeEmployees = await this.getEmployeesActiveInMonth(year, month);
+            const monthlyEmployees = activeEmployees.filter(emp => (emp.salaryType || 'monthly') === 'monthly');
+            const allMonthlyPaid = monthlyEmployees.length > 0 && monthlyEmployees.every(emp => payout.employees.includes(emp.name));
 
-            // Remove if:
-            // a) No advance data remains for ANY employee, OR
-            // b) Only daily employees were canceled (their accumulated months need to be freed)
-            if (!hasData || canceledDailyEmployees.length > 0) {
+            payout.done = allMonthlyPaid;
+
+            // If NO employees left, just remove the whole record
+            if (payout.employees.length === 0) {
                 delete settings.salaryPayouts[key];
             }
         }
 
         await this.saveSettings(settings);
+        console.log(`Canceled salary payout for ${employeeNames.length} employees in ${year}-${month}`);
     },
 
     // Check if salary payout is completed for a specific month
@@ -1057,15 +1323,7 @@ const DataManager = {
         return { year, month };
     },
 
-    getFinancialYear(date = new Date()) {
-        const year = date.getFullYear();
-        const month = date.getMonth() + 1; // 1-12
-        if (month >= 4) {
-            return { startYear: year, endYear: year + 1 };
-        } else {
-            return { startYear: year - 1, endYear: year };
-        }
-    },
+
 
     getDaysInMonth(year, month) {
         return new Date(year, month + 1, 0).getDate();
@@ -1205,13 +1463,14 @@ const DataManager = {
     },
 
     // Calculate Per Hour Salary for OT Pay calculation
+    // Always uses fixed 30 days for OT rate calculation
     calculatePerHourSalary(baseSalary, salaryType = 'monthly') {
         let perDaySalary;
 
         if (salaryType === 'daily') {
             perDaySalary = baseSalary;
         } else {
-            // Monthly salary divided by 30 days
+            // Monthly salary divided by fixed 30 days for OT calculation
             perDaySalary = baseSalary / 30;
         }
 
@@ -1225,11 +1484,11 @@ const DataManager = {
     },
 
     // Calculate OT Pay based on selected method
+    // OT rate always uses fixed 30 days for monthly employees
     calculateOTPay(otHours, baseSalary, salaryType = 'monthly', options = {}) {
         const {
             hWorkingOtHours = 0,
             sOtHours = 0,
-            perDaySalary = null,
             returnBreakdown = false
         } = options;
 
@@ -1253,10 +1512,8 @@ const DataManager = {
         const settings = options.settings || this.DEFAULT_SETTINGS;
         const sOtMethod = settings.otCalculationMethod || 'salaryBased8'; // Use S-OT method for standard OT too
 
-        let daySalary = perDaySalary;
-        if (daySalary == null) {
-            daySalary = salaryType === 'daily' ? baseSalary : baseSalary / 30;
-        }
+        // OT rate ALWAYS uses fixed 30 days, not actual days in month
+        const daySalary = salaryType === 'daily' ? baseSalary : baseSalary / 30;
 
         // Standard OT uses S-OT calculation method
         let standardRate = 0;
@@ -1409,16 +1666,63 @@ const DataManager = {
         }
 
         const key = `${year}_${month}`;
+        const existing = settings.salaryPayouts[key] || {
+            done: false,
+            employees: [],
+            individualPayouts: {},
+            totalPaid: 0
+        };
+
+        // Merge employees (avoid duplicates)
+        const newEmployees = details.employees || [];
+        const mergedEmployees = [...new Set([...(existing.employees || []), ...newEmployees])];
+
+        // Store individual payouts for accurate total tracking
+        if (!existing.individualPayouts) existing.individualPayouts = {};
+
+        // We can't easily know individual amounts from the old 'totalPaid' if 'individualPayouts' was missing
+        // So we update what we have.
+        if (details.payoutData && Array.isArray(details.payoutData)) {
+            // If full payout data provided, use it to update individual mapping
+            details.payoutData.forEach(item => {
+                existing.individualPayouts[item.name] = item.netSalary || 0;
+            });
+        } else if (details.employees && details.totalPaid != null && details.employees.length === 1) {
+            // If only one employee provided, we can map it
+            existing.individualPayouts[details.employees[0]] = details.totalPaid;
+        }
+
+        // Re-calculate totalPaid from individual mapping if possible
+        const totalPaid = Object.values(existing.individualPayouts).reduce((sum, val) => sum + val, 0) || details.totalPaid || existing.totalPaid;
+
+        // Check if all Monthly employees are paid
+        const activeEmployees = await this.getEmployeesActiveInMonth(year, month);
+        const monthlyEmployees = activeEmployees.filter(emp => (emp.salaryType || 'monthly') === 'monthly');
+        const allMonthlyPaid = monthlyEmployees.length > 0 && monthlyEmployees.every(emp => mergedEmployees.includes(emp.name));
+
         settings.salaryPayouts[key] = {
-            done: true,
-            creditDate: details.creditDate || null,
+            done: allMonthlyPaid,
+            creditDate: details.creditDate || existing.creditDate || null,
             generatedAt: new Date().toISOString(),
-            employees: details.employees || [],
-            totalPaid: details.totalPaid || 0
+            employees: mergedEmployees,
+            individualPayouts: existing.individualPayouts,
+            totalPaid: totalPaid
         };
 
         await this.saveSettings(settings);
-        console.log(`Marked salary payout as done for ${year}-${month}`);
+        console.log(`Updated salary payout for ${year}-${month}. Done: ${allMonthlyPaid}`);
+    },
+
+    /**
+     * Check if a specific employee has been paid in a month
+     */
+    async isEmployeePaidInMonth(employeeName, year, month) {
+        const details = await this.getSalaryPayoutDetails(year, month);
+        if (!details) return false;
+        if (Array.isArray(details.employees)) {
+            return details.employees.includes(employeeName);
+        }
+        return details.done === true;
     },
 
     /**
@@ -1445,8 +1749,243 @@ const DataManager = {
             valid: errors.length === 0,
             errors: errors
         };
+    },
+
+    // Bonus Payout Operations
+    async getBonusPayouts() {
+        const data = await this.loadData(this.KEYS.BONUS_PAYOUTS);
+        return data || [];
+    },
+
+    async saveBonusPayouts(payouts) {
+        await this.saveData(this.KEYS.BONUS_PAYOUTS, payouts);
+    },
+
+    // Email Log Operations
+    async getEmailLogs() {
+        const data = await this.loadData(this.KEYS.EMAIL_LOGS);
+        return data || [];
+    },
+
+    async saveEmailLog(log) {
+        const logs = await this.getEmailLogs();
+        logs.push(this.addTimestamp(log));
+        await this.saveData(this.KEYS.EMAIL_LOGS, logs);
     }
 
+};
+
+// --- New Managers for BookKeeper Integration ---
+
+const ExpenseManager = {
+    getAllExpenses() {
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+        const allVouchers = DataManager.getData(DataManager.KEYS.VOUCHERS) || [];
+        return expenses;
+    },
+
+    getAllCategories() {
+        return DataManager.getData(DataManager.KEYS.EXPENSE_CATEGORIES) || [];
+    },
+
+    saveExpense(expense) {
+        const expenses = this.getAllExpenses();
+        if (expense.id) {
+            const index = expenses.findIndex(e => e.id === expense.id);
+            if (index !== -1) {
+                expenses[index] = { ...expenses[index], ...expense, updatedAt: new Date().toISOString() };
+            }
+        } else {
+            expense.id = 'exp_' + Date.now();
+            expense.createdAt = new Date().toISOString();
+            expenses.push(expense);
+        }
+        return DataManager.saveDataSync(DataManager.KEYS.EXPENSES, expenses);
+    },
+
+    deleteExpense(id) {
+        const expenses = this.getAllExpenses().filter(e => e.id !== id);
+        return DataManager.saveDataSync(DataManager.KEYS.EXPENSES, expenses);
+    },
+
+    addCategory(name, type = 'indirect') {
+        const categories = this.getAllCategories();
+        const newCat = {
+            id: 'cat_' + Date.now(),
+            name,
+            type
+        };
+        categories.push(newCat);
+        return DataManager.saveDataSync(DataManager.KEYS.EXPENSE_CATEGORIES, categories);
+    },
+
+    // Get total expenses between dates
+    getTotalExpenses(startDate, endDate) {
+        const expenses = this.getAllExpenses();
+        return expenses
+            .filter(e => {
+                const d = new Date(e.date);
+                return d >= startDate && d <= endDate;
+            })
+            .reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    },
+
+    // Get expenses by category for a period
+    getExpensesByCategory(startDate, endDate) {
+        const expenses = this.getAllExpenses();
+        const categoryMap = {};
+
+        expenses.forEach(e => {
+            const d = new Date(e.date);
+            if (d >= startDate && d <= endDate) {
+                const cat = e.category || 'Uncategorized';
+                categoryMap[cat] = (categoryMap[cat] || 0) + (parseFloat(e.amount) || 0);
+            }
+        });
+
+        return categoryMap;
+    }
+};
+
+const EstimateManager = {
+    getAllEstimates() {
+        return DataManager.getData(DataManager.KEYS.ESTIMATES) || [];
+    },
+
+    getEstimate(id) {
+        return this.getAllEstimates().find(e => e.id === id);
+    },
+
+    saveEstimate(estimate) {
+        const estimates = this.getAllEstimates();
+        if (estimate.id) {
+            const index = estimates.findIndex(e => e.id === estimate.id);
+            if (index !== -1) {
+                estimates[index] = { ...estimates[index], ...estimate, updatedAt: new Date().toISOString() };
+            }
+        } else {
+            estimate.id = this.generateEstimateNumber();
+            estimate.createdAt = new Date().toISOString();
+            estimate.status = 'pending'; // pending, accepted, rejected, converted
+            estimates.push(estimate);
+        }
+        return DataManager.saveDataSync(DataManager.KEYS.ESTIMATES, estimates);
+    },
+
+    deleteEstimate(id) {
+        const estimates = this.getAllEstimates().filter(e => e.id !== id);
+        return DataManager.saveDataSync(DataManager.KEYS.ESTIMATES, estimates);
+    },
+
+    generateEstimateNumber() {
+        const estimates = this.getAllEstimates();
+        const currentYear = new Date().getFullYear();
+        const count = estimates.filter(e => e.id.startsWith(`EST-${currentYear}`)).length + 1;
+        return `EST-${currentYear}-${String(count).padStart(3, '0')}`;
+    },
+
+    updateStatus(id, status) {
+        const estimates = this.getAllEstimates();
+        const index = estimates.findIndex(e => e.id === id);
+        if (index !== -1) {
+            estimates[index].status = status;
+            return DataManager.saveDataSync(DataManager.KEYS.ESTIMATES, estimates);
+        }
+        return false;
+    }
+};
+
+const RecurringInvoiceManager = {
+    getAll() {
+        return DataManager.getData(DataManager.KEYS.RECURRING_INVOICES) || [];
+    },
+
+    save(recurring) {
+        const list = this.getAll();
+        if (recurring.id) {
+            const index = list.findIndex(r => r.id === recurring.id);
+            if (index !== -1) list[index] = { ...list[index], ...recurring, updatedAt: new Date().toISOString() };
+        } else {
+            recurring.id = 'rec_' + Date.now();
+            recurring.createdAt = new Date().toISOString();
+            recurring.lastGenerated = null;
+            list.push(recurring);
+        }
+        return DataManager.saveDataSync(DataManager.KEYS.RECURRING_INVOICES, list);
+    },
+
+    delete(id) {
+        const list = this.getAll().filter(r => r.id !== id);
+        return DataManager.saveDataSync(DataManager.KEYS.RECURRING_INVOICES, list);
+    },
+
+    // Check and generate due invoices
+    async checkAndGenerate() {
+        const list = this.getAll();
+        const today = new Date();
+        const generated = [];
+
+        for (const rec of list) {
+            if (rec.status !== 'active') return;
+
+            let shouldGenerate = false;
+            const lastRun = rec.lastGenerated ? new Date(rec.lastGenerated) : null;
+            const nextRun = lastRun ? new Date(lastRun) : new Date(rec.startDate);
+
+            // Simple logic: if nextRun <= today
+            if (rec.frequency === 'monthly') {
+                if (!lastRun || (today.getMonth() !== lastRun.getMonth())) {
+                    // Check if today is past the day-of-month
+                    if (today.getDate() >= new Date(rec.startDate).getDate()) {
+                        shouldGenerate = true;
+                    }
+                }
+            }
+
+            if (shouldGenerate) {
+                console.log('Generating recurring invoice for:', rec.customerName);
+
+                if (typeof window.InvoiceManager !== 'undefined') {
+                    try {
+                        const newInv = {
+                            type: 'without-bill',
+                            customerName: rec.customerName,
+                            date: today.toISOString().split('T')[0],
+                            items: [{
+                                description: 'Recurring Service - ' + rec.frequency,
+                                quantity: 1,
+                                unit: 'service',
+                                rate: rec.amount,
+                                amount: rec.amount
+                            }],
+                            subtotal: rec.amount,
+                            total: rec.amount,
+                            status: 'pending'
+                        };
+
+                        await window.InvoiceManager.createInvoice(newInv);
+                        console.log('Invoice created successfully');
+
+                        rec.lastGenerated = today.toISOString();
+                        generated.push(rec);
+                    } catch (err) {
+                        console.error('Error generating recurring invoice:', err);
+                    }
+                } else {
+                    console.warn('InvoiceManager not available');
+                }
+            }
+        }
+
+        if (generated.length > 0) {
+            this.saveAll(list);
+        }
+        return generated;
+    },
+
+    saveAll(list) {
+        return DataManager.saveDataSync(DataManager.KEYS.RECURRING_INVOICES, list);
+    }
 };
 
 // Initialize on load

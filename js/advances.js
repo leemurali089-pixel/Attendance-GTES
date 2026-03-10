@@ -2,26 +2,27 @@
 const AdvancesModule = {
     editingAdvance: null,
 
-    load() {
-        this.renderAdvanceList();
+    async load() {
+        await this.renderAdvanceList();
     },
 
-    renderAdvanceList() {
+    async renderAdvanceList() {
         const view = document.getElementById('advancesView');
         if (!view) return;
 
-        const advances = DataManager.getAdvances();
-        const employees = DataManager.getEmployees();
+        const advances = await DataManager.getAdvances();
+        const employees = await DataManager.getEmployees();
         advances.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         const totalAmount = advances.reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
 
         // Calculate remaining balance per employee
         const employeeBalances = {};
-        employees.forEach(emp => {
-            const totalAdvance = DataManager.getTotalAdvanceBalance(emp.name);
+
+        await Promise.all(employees.map(async emp => {
+            const totalAdvance = await DataManager.getTotalAdvanceBalance(emp.name);
             const today = new Date();
-            const remaining = DataManager.getRemainingAdvanceBalance(emp.name, today.getFullYear(), today.getMonth());
+            const remaining = await DataManager.getRemainingAdvanceBalance(emp.name, today.getFullYear(), today.getMonth());
             if (totalAdvance > 0) {
                 employeeBalances[emp.name] = {
                     total: totalAdvance,
@@ -29,7 +30,7 @@ const AdvancesModule = {
                     debited: totalAdvance - remaining
                 };
             }
-        });
+        }));
 
         const totalRemainingBalance = Object.keys(employeeBalances).reduce((sum, empName) => {
             return sum + employeeBalances[empName].remaining;
@@ -232,13 +233,13 @@ const AdvancesModule = {
         }
     },
 
-    showAdvanceForm(advanceId = null) {
+    async showAdvanceForm(advanceId = null) {
         this.editingAdvance = advanceId;
         const form = document.getElementById('advanceForm');
         const title = document.getElementById('advanceFormTitle');
 
         if (advanceId) {
-            const advances = DataManager.getAdvances();
+            const advances = await DataManager.getAdvances();
             const advance = advances.find(a => a.id === advanceId);
             if (advance) {
                 document.getElementById('advanceId').value = advance.id;
@@ -260,7 +261,7 @@ const AdvancesModule = {
         }
     },
 
-    saveAdvance() {
+    async saveAdvance() {
         const form = document.getElementById('advanceForm');
         if (!form.checkValidity()) {
             form.reportValidity();
@@ -278,7 +279,13 @@ const AdvancesModule = {
             return;
         }
 
-        const advances = DataManager.getAdvances();
+        const year = new Date(date).getFullYear();
+        if (year < 2000) {
+            App.showNotification('Please enter a valid year (YYYY)', 'error');
+            return;
+        }
+
+        const advances = await DataManager.getAdvances();
 
         if (advanceId) {
             // Update existing
@@ -304,9 +311,9 @@ const AdvancesModule = {
             advances.push(newAdvance);
         }
 
-        DataManager.saveAdvances(advances);
+        await DataManager.saveAdvances(advances);
         this.modal.hide();
-        this.renderAdvanceList();
+        await this.renderAdvanceList();
         App.showNotification('Advance saved successfully', 'success');
     },
 
@@ -314,8 +321,8 @@ const AdvancesModule = {
         this.showAdvanceForm(advanceId);
     },
 
-    showEmployeeDetails(employeeName) {
-        const allAdvances = DataManager.getAdvancesByEmployee(employeeName, -1, -1); // Get all advances
+    async showEmployeeDetails(employeeName) {
+        const allAdvances = await DataManager.getAdvancesByEmployee(employeeName, -1, -1); // Get all advances
 
         // Separate regular advances and wave-offs
         const regularAdvances = allAdvances.filter(a => !a.type || a.type !== 'waveoff');
@@ -325,18 +332,18 @@ const AdvancesModule = {
         regularAdvances.sort((a, b) => new Date(b.date) - new Date(a.date));
         waveOffs.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        const settings = DataManager.getSettings();
+        const settings = await DataManager.getSettings();
         const debitedAdvances = settings.debitedAdvances || {};
         const deductions = [];
 
-        Object.keys(debitedAdvances).forEach(key => {
+        for (const key of Object.keys(debitedAdvances)) {
             if (key.startsWith(`${employeeName}_`)) {
                 const [_, year, month] = key.split('_');
                 const yearNum = parseInt(year);
                 const monthNum = parseInt(month);
 
                 // Only show deductions for months where payout is actually done
-                if (DataManager.isSalaryPayoutDone(yearNum, monthNum)) {
+                if (await DataManager.isSalaryPayoutDone(yearNum, monthNum)) {
                     deductions.push({
                         year: yearNum,
                         month: monthNum,
@@ -344,7 +351,7 @@ const AdvancesModule = {
                     });
                 }
             }
-        });
+        }
 
         // Sort deductions by date descending
         deductions.sort((a, b) => {
@@ -367,13 +374,13 @@ const AdvancesModule = {
         });
 
         // Add legacy waivers
-        Object.keys(legacyWaivedAdvances).forEach(key => {
+        for (const key of Object.keys(legacyWaivedAdvances)) {
             if (key.startsWith(`${employeeName}_`)) {
                 const [_, year, month] = key.split('_');
                 const yearNum = parseInt(year);
                 const monthNum = parseInt(month);
 
-                if (DataManager.isSalaryPayoutDone(yearNum, monthNum)) {
+                if (await DataManager.isSalaryPayoutDone(yearNum, monthNum)) {
                     waivers.push({
                         date: new Date(yearNum, monthNum - 1, 1), // Approximate date
                         amount: legacyWaivedAdvances[key],
@@ -384,7 +391,7 @@ const AdvancesModule = {
                     });
                 }
             }
-        });
+        }
 
         // Sort waivers by date descending
         waivers.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -530,15 +537,15 @@ const AdvancesModule = {
         }
     },
 
-    deleteAdvance(advanceId) {
+    async deleteAdvance(advanceId) {
         if (!App.confirmAction('Are you sure you want to delete this advance record?')) {
             return;
         }
 
-        const advances = DataManager.getAdvances();
+        const advances = await DataManager.getAdvances();
         const filtered = advances.filter(a => a.id !== advanceId);
-        DataManager.saveAdvances(filtered);
-        this.renderAdvanceList();
+        await DataManager.saveAdvances(filtered);
+        await this.renderAdvanceList();
         App.showNotification('Advance deleted successfully', 'success');
     },
 
@@ -563,7 +570,7 @@ const AdvancesModule = {
         });
     },
 
-    showWaveOffModal() {
+    async showWaveOffModal() {
         // Create modal if it doesn't exist
         let modal = document.getElementById('waveOffModal');
         if (!modal) {
@@ -613,17 +620,19 @@ const AdvancesModule = {
         }
 
         // Populate employee dropdown with only employees who have pending advances
-        const employees = DataManager.getEmployees();
+        const employees = await DataManager.getEmployees();
         const employeeSelect = document.getElementById('waveOffEmployee');
         const today = new Date();
 
         let options = '<option value="">-- Select Employee --</option>';
-        employees.forEach(emp => {
-            const remaining = DataManager.getRemainingAdvanceBalance(emp.name, today.getFullYear(), today.getMonth());
+
+        await Promise.all(employees.map(async emp => {
+            const remaining = await DataManager.getRemainingAdvanceBalance(emp.name, today.getFullYear(), today.getMonth());
             if (remaining > 0) {
                 options += `<option value="${emp.name}">${emp.name} (₹${remaining.toLocaleString('en-IN', { minimumFractionDigits: 2 })} pending)</option>`;
             }
-        });
+        }));
+
         employeeSelect.innerHTML = options;
 
         // Reset form
@@ -636,7 +645,7 @@ const AdvancesModule = {
         bsModal.show();
     },
 
-    onWaveOffEmployeeSelect() {
+    async onWaveOffEmployeeSelect() {
         const employeeName = document.getElementById('waveOffEmployee').value;
         const balanceInfo = document.getElementById('waveOffBalanceInfo');
         const balanceSpan = document.getElementById('waveOffPendingBalance');
@@ -644,7 +653,7 @@ const AdvancesModule = {
 
         if (employeeName) {
             const today = new Date();
-            const remaining = DataManager.getRemainingAdvanceBalance(employeeName, today.getFullYear(), today.getMonth());
+            const remaining = await DataManager.getRemainingAdvanceBalance(employeeName, today.getFullYear(), today.getMonth());
 
             balanceSpan.textContent = `₹${remaining.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
             balanceInfo.classList.remove('d-none');
@@ -657,7 +666,7 @@ const AdvancesModule = {
         }
     },
 
-    processWaveOff() {
+    async processWaveOff() {
         const employeeName = document.getElementById('waveOffEmployee').value;
         const amount = parseFloat(document.getElementById('waveOffAmount').value);
         const reason = document.getElementById('waveOffReason').value.trim();
@@ -673,7 +682,7 @@ const AdvancesModule = {
         }
 
         const today = new Date();
-        const remaining = DataManager.getRemainingAdvanceBalance(employeeName, today.getFullYear(), today.getMonth());
+        const remaining = await DataManager.getRemainingAdvanceBalance(employeeName, today.getFullYear(), today.getMonth());
 
         if (amount > remaining) {
             App.showNotification(`Amount cannot exceed pending balance of ₹${remaining.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 'error');
@@ -681,7 +690,7 @@ const AdvancesModule = {
         }
 
         // Create a debit entry for the waived-off amount
-        const advances = DataManager.getAdvances();
+        const advances = await DataManager.getAdvances();
         const waveOffEntry = {
             id: 'adv_waveoff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             date: DataManager.formatDate(new Date()),
@@ -692,14 +701,14 @@ const AdvancesModule = {
         };
 
         advances.push(waveOffEntry);
-        DataManager.saveAdvances(advances);
+        await DataManager.saveAdvances(advances);
 
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('waveOffModal'));
         modal.hide();
 
         // Reload the view
-        this.renderAdvanceList();
+        await this.renderAdvanceList();
 
         App.showNotification(`Successfully waived off ₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} for ${employeeName}`, 'success');
     }

@@ -4,8 +4,8 @@ const AttendanceModule = {
     bulkTimeSlots: [],
     currentBulkDate: null,
 
-    load() {
-        this.renderAttendanceView();
+    async load() {
+        await this.renderAttendanceView();
     },
 
     getColorLegendHTML() {
@@ -76,14 +76,16 @@ const AttendanceModule = {
         `;
     },
 
-    renderAttendanceView() {
+    async renderAttendanceView() {
         const view = document.getElementById('attendanceView');
         if (!view) return;
 
-        const employees = DataManager.getActiveEmployees();
+        const employees = await DataManager.getActiveEmployees();
         const timeSlots = DataManager.generateTimeSlots();
         const today = new Date();
         const todayStr = DataManager.formatDate(today);
+
+        const rowsHtml = await this.renderAttendanceRows(todayStr);
 
         view.innerHTML = `
             <div class="row mb-4">
@@ -97,6 +99,9 @@ const AttendanceModule = {
                         </button>
                         <button class="btn btn-success" onclick="AttendanceModule.addBulkAttendance()">
                             <i class="bi bi-people"></i> Bulk Mark Attendance
+                        </button>
+                        <button class="btn btn-outline-success" onclick="AttendanceModule.exportSampleFile()">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Export Sample
                         </button>
                     </div>
                 </div>
@@ -124,7 +129,7 @@ const AttendanceModule = {
                                         </tr>
                                     </thead>
                                     <tbody id="attendanceTableBody">
-                                        ${this.renderAttendanceRows(todayStr)}
+                                        ${rowsHtml}
                                     </tbody>
                                 </table>
                             </div>
@@ -153,14 +158,14 @@ const AttendanceModule = {
                                     <div class="row">
                                     <div class="col-md-6 mb-3">
                                         <label for="attendanceCheckIn" class="form-label">Check-in Time</label>
-                                        <select class="form-select" id="attendanceCheckIn">
+                                        <select class="form-select" id="attendanceCheckIn" onchange="AttendanceModule.calculateOTHours()">
                                             <option value="">Select Time</option>
                                             ${timeSlots.map(slot => `<option value="${slot.value}">${slot.display}</option>`).join('')}
                                         </select>
                                     </div>
                                     <div class="col-md-6 mb-3">
                                         <label for="attendanceCheckOut" class="form-label">Check-out Time</label>
-                                        <select class="form-select" id="attendanceCheckOut">
+                                        <select class="form-select" id="attendanceCheckOut" onchange="AttendanceModule.calculateOTHours()">
                                             <option value="">Select Time</option>
                                             ${timeSlots.map(slot => `<option value="${slot.value}">${slot.display}</option>`).join('')}
                                         </select>
@@ -214,17 +219,17 @@ const AttendanceModule = {
         }
     },
 
-    renderAttendanceRows(dateStr) {
-        const attendance = DataManager.getAttendance();
+    async renderAttendanceRows(dateStr) {
+        const attendance = await DataManager.getAttendance();
         const dateRecords = attendance.filter(a => DataManager.formatDate(new Date(a.date)) === dateStr);
 
         if (dateRecords.length === 0) {
             return '<tr><td colspan="8" class="text-center text-muted">No attendance records for this date</td></tr>';
         }
 
-        return dateRecords.map(record => {
+        return Promise.all(dateRecords.map(async record => {
             const date = new Date(record.date);
-            const isHoliday = DataManager.isHoliday(date) || DataManager.isSunday(date);
+            const isHoliday = await DataManager.isHoliday(date) || DataManager.isSunday(date);
             const isHWorking = record.status === 'H-Working' || record.overTime === 'H-Working' || record.overTime === 'Holiday working';
             let rowClass = '';
             // Apply status-based row classes
@@ -241,7 +246,7 @@ const AttendanceModule = {
             } else if (record.status === 'Half Day') {
                 rowClass = 'table-half-day';
             }
-            const holidayReason = record.holidayReason || DataManager.getHolidayReason(date) || '';
+            const holidayReason = record.holidayReason || await DataManager.getHolidayReason(date) || '';
 
             return `
                 <tr class="${rowClass}" data-id="${record.id}">
@@ -262,7 +267,7 @@ const AttendanceModule = {
                     </td>
                 </tr>
             `;
-        }).join('');
+        })).then(rows => rows.join(''));
     },
 
     getStatusBadgeColor(status) {
@@ -277,16 +282,16 @@ const AttendanceModule = {
         return colors[status] || 'secondary';
     },
 
-    loadAttendanceForDate() {
+    async loadAttendanceForDate() {
         const dateInput = document.getElementById('attendanceDate');
         const dateStr = dateInput.value;
         const tbody = document.getElementById('attendanceTableBody');
         if (tbody) {
-            tbody.innerHTML = this.renderAttendanceRows(dateStr);
+            tbody.innerHTML = await this.renderAttendanceRows(dateStr);
         }
     },
 
-    addAttendanceRecord() {
+    async addAttendanceRecord() {
         const dateInput = document.getElementById('attendanceDate');
         const dateStr = dateInput ? dateInput.value : DataManager.formatDate(new Date());
 
@@ -299,14 +304,15 @@ const AttendanceModule = {
 
             // Auto-detect holiday
             const date = new Date(dateStr);
-            if (DataManager.isHoliday(date) || DataManager.isSunday(date)) {
+            const isHoliday = await DataManager.isHoliday(date);
+            if (isHoliday || DataManager.isSunday(date)) {
                 document.getElementById('attendanceStatus').value = 'Holiday';
-                document.getElementById('attendanceHolidayReason').value = DataManager.getHolidayReason(date);
+                document.getElementById('attendanceHolidayReason').value = isHoliday ? await DataManager.getHolidayReason(date) : '';
                 this.handleStatusChange();
             }
 
             // Update employee dropdown based on date
-            const employees = DataManager.getEmployeesActiveInMonth(date.getFullYear(), date.getMonth());
+            const employees = await DataManager.getEmployeesActiveInMonth(date.getFullYear(), date.getMonth());
             const employeeSelect = document.getElementById('attendanceEmployee');
             if (employeeSelect) {
                 employeeSelect.innerHTML = '<option value="">Select Employee</option>' +
@@ -319,17 +325,18 @@ const AttendanceModule = {
         }
     },
 
-    addBulkAttendance() {
+    async addBulkAttendance() {
         const dateInput = document.getElementById('attendanceDate');
         const dateStr = dateInput ? dateInput.value : DataManager.formatDate(new Date());
         const date = new Date(dateStr);
         this.currentBulkDate = dateStr;
         this.bulkTimeSlots = DataManager.generateTimeSlots();
         const timeSlots = this.bulkTimeSlots;
-        const isHoliday = DataManager.isHoliday(date) || DataManager.isSunday(date);
-        const defaultStatus = isHoliday ? 'Holiday' : 'Present';
-        const holidayReason = isHoliday ? DataManager.getHolidayReason(date) : '';
-        const tableRows = this.renderBulkEmployeeRows(dateStr);
+        const isHoliday = await DataManager.isHoliday(date);
+        const isSunday = DataManager.isSunday(date);
+        const defaultStatus = (isHoliday || isSunday) ? 'Holiday' : 'Present';
+        const holidayReason = isHoliday ? await DataManager.getHolidayReason(date) : '';
+        const tableRows = await this.renderBulkEmployeeRows(dateStr);
 
         const bulkModal = document.createElement('div');
         bulkModal.className = 'modal fade';
@@ -358,14 +365,14 @@ const AttendanceModule = {
                         <div class="row mb-3">
                             <div class="col-md-4">
                                 <label class="form-label">Default Check-in Time</label>
-                                <select class="form-select" id="bulkCheckIn">
+                                <select class="form-select" id="bulkCheckIn" onchange="AttendanceModule.updateBulkDefaults()">
                                     <option value="">Select Time</option>
                                     ${timeSlots.map(slot => `<option value="${slot.value}">${slot.display}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Default Check-out Time</label>
-                                <select class="form-select" id="bulkCheckOut">
+                                <select class="form-select" id="bulkCheckOut" onchange="AttendanceModule.updateBulkDefaults()">
                                     <option value="">Select Time</option>
                                     ${timeSlots.map(slot => `<option value="${slot.value}">${slot.display}</option>`).join('')}
                                 </select>
@@ -423,12 +430,12 @@ const AttendanceModule = {
         this.attachBulkCheckboxListeners();
     },
 
-    renderBulkEmployeeRows(dateStr) {
+    async renderBulkEmployeeRows(dateStr) {
         const date = new Date(dateStr);
-        const isHoliday = DataManager.isHoliday(date) || DataManager.isSunday(date);
+        const isHoliday = await DataManager.isHoliday(date) || DataManager.isSunday(date);
         const defaultStatus = isHoliday ? 'Holiday' : 'Present';
-        const employees = DataManager.getEmployeesActiveOnDate(date);
-        const attendance = DataManager.getAttendance();
+        const employees = await DataManager.getEmployeesActiveOnDate(date);
+        const attendance = await DataManager.getAttendance();
         if (!this.bulkTimeSlots || this.bulkTimeSlots.length === 0) {
             this.bulkTimeSlots = DataManager.generateTimeSlots();
         }
@@ -452,7 +459,7 @@ const AttendanceModule = {
 
         const buildOvertimeOptions = (selectedValue) => {
             const options = ['No', 'Yes', 'H-Working'];
-            return options.map(opt => `<option value="${opt}" ${ (selectedValue || 'No') === opt ? 'selected' : '' }>${opt}</option>`).join('');
+            return options.map(opt => `<option value="${opt}" ${(selectedValue || 'No') === opt ? 'selected' : ''}>${opt}</option>`).join('');
         };
 
         return employees.map(emp => {
@@ -583,10 +590,41 @@ const AttendanceModule = {
     },
 
     updateBulkDefaults() {
-        // This will be called when default status changes
+        // Automatically apply defaults to all checked employees when defaults change
+        const defaultCheckIn = document.getElementById('bulkCheckIn')?.value;
+        const defaultCheckOut = document.getElementById('bulkCheckOut')?.value;
+        const defaultStatus = document.getElementById('bulkStatus')?.value;
+
+        document.querySelectorAll('.employee-checkbox:checked:not(:disabled)').forEach(checkbox => {
+            const row = checkbox.closest('tr');
+            const employee = row.dataset.employee;
+
+            const checkInSelect = row.querySelector(`.bulk-checkin[data-employee="${employee}"]`);
+            const checkOutSelect = row.querySelector(`.bulk-checkout[data-employee="${employee}"]`);
+            const statusSelect = row.querySelector(`.bulk-status[data-employee="${employee}"]`);
+
+            const leaveStatuses = ['Paid Leave', 'Unpaid Leave', 'Sick Leave'];
+
+            // Update status first
+            if (defaultStatus && statusSelect) {
+                statusSelect.value = defaultStatus;
+                this.handleBulkStatusChange(statusSelect, true);
+            }
+
+            // Then update times (only if not a leave status)
+            const currentStatus = statusSelect?.value;
+            if (!leaveStatuses.includes(currentStatus)) {
+                if (defaultCheckIn && checkInSelect) {
+                    checkInSelect.value = defaultCheckIn;
+                }
+                if (defaultCheckOut && checkOutSelect) {
+                    checkOutSelect.value = defaultCheckOut;
+                }
+            }
+        });
     },
 
-    updateBulkDate() {
+    async updateBulkDate() {
         const dateInput = document.getElementById('bulkAttendanceDate');
         if (!dateInput) return;
 
@@ -601,7 +639,7 @@ const AttendanceModule = {
 
         const tableBody = document.getElementById('bulkAttendanceTableBody');
         if (tableBody) {
-            tableBody.innerHTML = this.renderBulkEmployeeRows(dateStr);
+            tableBody.innerHTML = await this.renderBulkEmployeeRows(dateStr);
             this.initializeBulkStatusControls();
             this.setupBulkDefaultHandlers();
             this.attachBulkCheckboxListeners();
@@ -845,7 +883,7 @@ const AttendanceModule = {
         App.showNotification(`Selected ${this.selectedDates.length} date(s)`, 'success');
     },
 
-    saveBulkAttendance() {
+    async saveBulkAttendance() {
         // Use selected dates if available, otherwise use single date input
         let datesToProcess = [];
 
@@ -890,16 +928,16 @@ const AttendanceModule = {
             return;
         }
 
-        const attendance = DataManager.getAttendance();
+        const attendance = await DataManager.getAttendance();
         let totalSavedCount = 0;
 
         // Process each selected date
-        datesToProcess.forEach(dateStr => {
+        for (const dateStr of datesToProcess) {
             const date = new Date(dateStr);
-            const isHoliday = DataManager.isHoliday(date);
+            const isHoliday = await DataManager.isHoliday(date);
             const isSunday = DataManager.isSunday(date);
 
-            selectedEmployees.forEach(empData => {
+            for (const empData of selectedEmployees) {
                 const existingIndex = attendance.findIndex(a =>
                     a.employee === empData.employee && DataManager.formatDate(new Date(a.date)) === dateStr
                 );
@@ -914,7 +952,7 @@ const AttendanceModule = {
                     DataManager.calculateHours(empData.checkIn, empData.checkOut) : 0;
                 const otHours = DataManager.calculateOTHours(workedHours, finalStatus, empData.overTime, isHoliday, isSunday);
                 const holidayReason = (finalStatus === 'Holiday' || finalStatus === 'H-Working') ?
-                    DataManager.getHolidayReason(date) : null;
+                    await DataManager.getHolidayReason(date) : null;
 
                 let recordId = empData.recordId;
                 if (!recordId && existingIndex !== -1) {
@@ -924,7 +962,7 @@ const AttendanceModule = {
                     recordId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                 }
 
-                const record = {
+                const record = DataManager.addTimestamp({
                     id: recordId,
                     date: date.toISOString(),
                     employee: empData.employee,
@@ -934,7 +972,7 @@ const AttendanceModule = {
                     overTime: empData.overTime || 'No',
                     otHours: otHours,
                     holidayReason: holidayReason
-                };
+                });
 
                 if (existingIndex !== -1) {
                     attendance[existingIndex] = record;
@@ -942,10 +980,10 @@ const AttendanceModule = {
                     attendance.push(record);
                 }
                 totalSavedCount++;
-            });
-        });
+            }
+        }
 
-        DataManager.saveAttendance(attendance);
+        await DataManager.saveAttendance(attendance);
 
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('bulkAttendanceModal'));
@@ -957,20 +995,20 @@ const AttendanceModule = {
         // Reload attendance view
         const dateInput = document.getElementById('attendanceDate');
         if (dateInput) {
-            this.loadAttendanceForDate();
+            await this.loadAttendanceForDate();
         }
 
         App.showNotification(`Successfully marked attendance for ${totalSavedCount} record(s) across ${datesToProcess.length} date(s)`, 'success');
     },
 
-    handleStatusChange() {
+    async handleStatusChange() {
         const status = document.getElementById('attendanceStatus').value;
         const dateInput = document.getElementById('attendanceRecordDate');
         const dateStr = dateInput ? dateInput.value : DataManager.formatDate(new Date());
         const date = new Date(dateStr);
 
         if (status === 'Holiday' || status === 'H-Working') {
-            const reason = DataManager.getHolidayReason(date) || '';
+            const reason = await DataManager.getHolidayReason(date) || '';
             document.getElementById('attendanceHolidayReason').value = reason;
         } else {
             document.getElementById('attendanceHolidayReason').value = '';
@@ -1017,7 +1055,7 @@ const AttendanceModule = {
         document.getElementById('attendanceOTHours').value = otHours.toFixed(2);
     },
 
-    saveAttendanceRecord() {
+    async saveAttendanceRecord() {
         const form = document.getElementById('attendanceForm');
         if (!form.checkValidity()) {
             form.reportValidity();
@@ -1041,7 +1079,7 @@ const AttendanceModule = {
 
         const date = new Date(dateStr);
         const workedHours = checkIn && checkOut ? DataManager.calculateHours(checkIn, checkOut) : 0;
-        const isHoliday = DataManager.isHoliday(date);
+        const isHoliday = await DataManager.isHoliday(date);
         const isSunday = DataManager.isSunday(date);
 
         // If Over Time is H-Working, automatically set Status to H-Working
@@ -1055,12 +1093,12 @@ const AttendanceModule = {
         // Update holiday reason if status is H-Working
         let finalHolidayReason = holidayReason;
         if (finalStatus === 'H-Working') {
-            finalHolidayReason = DataManager.getHolidayReason(date) || holidayReason || null;
+            finalHolidayReason = await DataManager.getHolidayReason(date) || holidayReason || null;
         } else if (finalStatus === 'Holiday') {
-            finalHolidayReason = DataManager.getHolidayReason(date) || holidayReason || null;
+            finalHolidayReason = await DataManager.getHolidayReason(date) || holidayReason || null;
         }
 
-        const attendance = DataManager.getAttendance();
+        const attendance = await DataManager.getAttendance();
 
         // Check for duplicate employee on same date
         const existingIndex = attendance.findIndex(a => {
@@ -1073,7 +1111,7 @@ const AttendanceModule = {
             return;
         }
 
-        const record = {
+        const record = DataManager.addTimestamp({
             id: recordId || 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             date: date.toISOString(),
             employee,
@@ -1083,7 +1121,7 @@ const AttendanceModule = {
             overTime: overTime || 'No',
             otHours: calculatedOTHours,
             holidayReason: finalHolidayReason
-        };
+        });
 
         if (recordId) {
             // Update existing
@@ -1096,14 +1134,14 @@ const AttendanceModule = {
             attendance.push(record);
         }
 
-        DataManager.saveAttendance(attendance);
+        await DataManager.saveAttendance(attendance);
         this.modal.hide();
-        this.loadAttendanceForDate();
+        await this.loadAttendanceForDate();
         App.showNotification('Attendance record saved successfully', 'success');
     },
 
-    editAttendanceRecord(recordId) {
-        const attendance = DataManager.getAttendance();
+    async editAttendanceRecord(recordId) {
+        const attendance = await DataManager.getAttendance();
         const record = attendance.find(a => a.id === recordId);
 
         if (!record) {
@@ -1135,16 +1173,36 @@ const AttendanceModule = {
         }
     },
 
-    deleteAttendanceRecord(recordId) {
+    async deleteAttendanceRecord(recordId) {
         if (!App.confirmAction('Are you sure you want to delete this attendance record?')) {
             return;
         }
 
-        const attendance = DataManager.getAttendance();
+        const attendance = await DataManager.getAttendance();
         const filtered = attendance.filter(a => a.id !== recordId);
-        DataManager.saveAttendance(filtered);
-        this.loadAttendanceForDate();
+        await DataManager.saveAttendance(filtered);
+        await this.loadAttendanceForDate();
         App.showNotification('Attendance record deleted successfully', 'success');
+    },
+
+    exportSampleFile() {
+        const headers = ['Employee Name', 'Date (YYYY-MM-DD)', 'Status', 'Check-in (HH:MM)', 'Check-out (HH:MM)', 'Overtime (Yes/No/H-Working)'];
+        const sampleData = ['John Doe', '2023-10-25', 'Present', '09:00', '18:00', 'No'];
+
+        const csvContent = [
+            headers.join(','),
+            sampleData.join(',')
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'attendance_bulk_import_sample.csv';
+        a.click();
+        window.URL.revokeObjectURL(url);
     }
 };
 
+// Expose to window
+window.AttendanceModule = AttendanceModule;

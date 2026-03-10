@@ -4,7 +4,7 @@ const EmployeeViewModule = {
     viewType: 'monthly', // 'monthly' or 'annual'
     showSensitiveData: false,
 
-    load(employeeName) {
+    async load(employeeName) {
         console.log('EmployeeViewModule.load called with:', employeeName);
         this.currentEmployee = employeeName;
 
@@ -15,7 +15,7 @@ const EmployeeViewModule = {
             view.style.display = '';
         }
 
-        this.renderEmployeeView();
+        await this.renderEmployeeView();
     },
 
     formatCurrency(value) {
@@ -23,6 +23,12 @@ const EmployeeViewModule = {
             return '****';
         }
         return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    },
+
+    maskId(value) {
+        if (!value) return 'Not provided';
+        if (value.length < 4) return '****';
+        return 'X'.repeat(value.length - 4) + value.slice(-4);
     },
 
     toggleSensitiveData() {
@@ -34,10 +40,10 @@ const EmployeeViewModule = {
         AuthManager.requireAuth(() => {
             this.showSensitiveData = true;
             this.renderEmployeeView();
-        }); // Removed forcePrompt so it respects existing authentication
+        });
     },
 
-    renderEmployeeView() {
+    async renderEmployeeView() {
         const view = document.getElementById('employeeView');
         if (!view) return;
 
@@ -46,7 +52,7 @@ const EmployeeViewModule = {
             return;
         }
 
-        const employees = DataManager.getEmployees();
+        const employees = await DataManager.getEmployees();
         const employee = employees.find(e => e.name === this.currentEmployee);
 
         if (!employee) {
@@ -55,6 +61,17 @@ const EmployeeViewModule = {
         }
 
         console.log('Rendering view for employee:', employee);
+
+        const fySummaryHtml = await this.renderFinancialYearSummary(employee);
+
+        let viewContentHtml = '';
+        if (this.viewType === 'monthly') {
+            viewContentHtml = await this.renderMonthlyView();
+        } else if (this.viewType === 'annual') {
+            viewContentHtml = await this.renderAnnualView();
+        } else if (this.viewType === 'payslips') {
+            viewContentHtml = await this.renderPayslipsView();
+        }
 
         view.innerHTML = `
             <div class="row mb-4">
@@ -69,21 +86,27 @@ const EmployeeViewModule = {
                                 onclick="EmployeeViewModule.setViewType('annual')">
                             Annual View
                         </button>
+                        <button class="btn btn-${this.viewType === 'payslips' ? 'primary' : 'secondary'}" 
+                                onclick="EmployeeViewModule.setViewType('payslips')">
+                            Payslips History
+                        </button>
                         <button class="btn btn-outline-dark ms-auto" onclick="EmployeeViewModule.toggleSensitiveData()">
                             <i class="bi ${this.showSensitiveData ? 'bi-eye-slash' : 'bi-eye'}"></i>
-                            ${this.showSensitiveData ? 'Hide Salary Details' : 'Show Salary Details'}
+                            ${this.showSensitiveData ? 'Hide Sensitive Data' : 'Show Sensitive Data'}
                         </button>
                     </div>
                 </div>
             </div>
+            
+            <!-- Personal Info Row -->
             <div class="row mb-3">
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <div class="card">
                         <div class="card-body">
-                            <h5>Employee Information</h5>
-                            ${employee.photo ? `<div class="mb-3"><img src="${employee.photo}" alt="Employee Photo" style="max-width: 200px; max-height: 200px; border-radius: 5px; border: 2px solid #dee2e6;"></div>` : ''}
+                            <h5>Personal Information</h5>
+                            ${employee.employeePhoto ? `<div class="mb-3"><img src="${employee.employeePhoto}" alt="Employee Photo" style="max-width: 100%; max-height: 200px; border-radius: 5px; object-fit: cover;"></div>` : ''}
                             <p><strong>Name:</strong> ${employee.name}</p>
-                            <p><strong>Employee ID:</strong> ${employee.id}</p>
+                            <p><strong>Employee ID:</strong> ${employee.id || 'N/A'}</p>
                             <p><strong>Date of Joining:</strong> <span style="color: var(--primary-color); font-weight: 600;">${DataManager.formatDateDisplay(employee.dateOfJoining)}</span></p>
                             <p><strong>Date of Resign:</strong> ${employee.dateOfRelieving ? DataManager.formatDateDisplay(employee.dateOfRelieving) : 'Active'}</p>
                             <p><strong>Salary Type:</strong> ${employee.salaryType === 'daily' ? 'Daily Pay' : 'Monthly Pay'}</p>
@@ -91,54 +114,131 @@ const EmployeeViewModule = {
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <div class="card">
                         <div class="card-body">
-                            <h5>ID Proof Details</h5>
-                            <p><strong>ID Proof Type:</strong> ${employee.idProofType || 'Not provided'}</p>
-                            <p><strong>ID Proof Number:</strong> ${employee.idProofNumber || 'Not provided'}</p>
+                            <h5>Contact Information</h5>
+                            <p><strong>Phone:</strong> ${employee.phone || 'Not provided'}</p>
+                            <p><strong>Email:</strong> ${employee.email || 'Not provided'}</p>
+                            <hr>
+                            <h6>Payment Details</h6>
+                            <p><strong>Payment Mode:</strong> <span class="badge bg-${employee.paymentMode === 'bank' ? 'success' : 'info'}">${(employee.paymentMode || 'bank').toUpperCase()}</span></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>KYC Information</h5>
+                            <p><strong>PAN:</strong> ${this.showSensitiveData ? (employee.pan || 'Not provided') : this.maskId(employee.pan)}</p>
+                            <p><strong>Aadhaar:</strong> ${this.showSensitiveData ? (employee.aadhaar || 'Not provided') : this.maskId(employee.aadhaar)}</p>
+                            ${employee.aadhaarPhoto ? `<div class="mt-2"><small class="text-muted">Aadhaar Document:</small><br><img src="${employee.aadhaarPhoto}" alt="Aadhaar" style="max-width: 100%; max-height: 150px; border-radius: 5px; object-fit: cover; margin-top: 5px; filter: ${this.showSensitiveData ? 'none' : 'blur(5px)'}; transition: filter 0.3s;"></div>` : ''}
                         </div>
                     </div>
                 </div>
             </div>
+            
+            <!-- Bank & Address Row -->
+            ${employee.paymentMode === 'bank' && employee.bank ? `
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>Bank Details </h5>
+                            <p><strong>Beneficiary Name:</strong> ${employee.bank.beneficiaryName || 'Not provided'}</p>
+                            <p><strong>Account Number:</strong> ${employee.bank.accountNo || 'Not provided'}</p>
+                            <p><strong>IFSC Code:</strong> ${employee.bank.ifsc || 'Not provided'}</p>
+                            <p><strong>Branch Name:</strong> ${employee.bank.branchName || 'Not provided'}</p>
+                            <p><strong>Branch Address:</strong> ${employee.bank.address || 'Not provided'}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>Address Information</h5>
+                            <p><strong>Permanent Address:</strong><br>${(employee.address?.permanent || 'Not provided').replace(/\n/g, '<br>')}</p>
+                            <hr>
+                            <p><strong>Present Address:</strong><br>${(employee.address?.present || 'Not provided').replace(/\n/g, '<br>')}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            ` : employee.address ? `
+            <div class="row mb-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>Address Information</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Permanent Address:</strong><br>${(employee.address?.permanent || 'Not provided').replace(/\n/g, '<br>')}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p><strong>Present Address:</strong><br>${(employee.address?.present || 'Not provided').replace(/\n/g, '<br>')}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+            
             <div class="row mb-3">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-body">
                             <h5>Financial Year Summary</h5>
-                            ${this.renderFinancialYearSummary(employee)}
+                            ${fySummaryHtml}
                         </div>
                     </div>
                 </div>
             </div>
             <div id="employeeViewContent">
-                ${this.viewType === 'monthly' ? this.renderMonthlyView() : this.renderAnnualView()}
+                ${viewContentHtml}
             </div>
         `;
     },
 
-    renderMonthlyView() {
+    async renderMonthlyView() {
         const today = new Date();
         const currentMonth = today.getMonth();
         const currentYear = today.getFullYear();
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+        // Default to table if not set
+        if (!this.monthlyViewMode) this.monthlyViewMode = 'table';
+
+        const monthlyDataHtml = await this.renderMonthlyData(currentYear, currentMonth);
+
         return `
             <div class="row">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header">
+                        <div class="card-header d-flex justify-content-between align-items-center">
                             <h5>Monthly View</h5>
-                            <div class="d-flex gap-2 align-items-center mt-2">
-                                <label for="employeeMonthYear" class="form-label mb-0">Select Month-Year:</label>
-                                <input type="month" class="form-control" id="employeeMonthYear" 
-                                       value="${currentYear}-${String(currentMonth + 1).padStart(2, '0')}" 
-                                       style="width: auto;" 
-                                       onchange="EmployeeViewModule.loadMonthlyData()">
+                            <div class="d-flex gap-3 align-items-center">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-sm btn-outline-primary ${this.monthlyViewMode === 'table' ? 'active' : ''}" 
+                                            onclick="EmployeeViewModule.setMonthlyViewMode('table')">
+                                        <i class="bi bi-table"></i> Table
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary ${this.monthlyViewMode === 'calendar' ? 'active' : ''}" 
+                                            onclick="EmployeeViewModule.setMonthlyViewMode('calendar')">
+                                        <i class="bi bi-calendar3"></i> Calendar
+                                    </button>
+                                </div>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <label for="employeeMonthYear" class="form-label mb-0">Select Month:</label>
+                                    <input type="month" class="form-control form-control-sm" id="employeeMonthYear" 
+                                           value="${currentYear}-${String(currentMonth + 1).padStart(2, '0')}" 
+                                           style="width: auto;" 
+                                           onchange="EmployeeViewModule.loadMonthlyData()">
+                                </div>
                             </div>
                         </div>
                         <div class="card-body" id="monthlyViewContent">
-                            ${this.renderMonthlyData(currentYear, currentMonth)}
+                            ${monthlyDataHtml}
                         </div>
                     </div>
                 </div>
@@ -146,18 +246,32 @@ const EmployeeViewModule = {
         `;
     },
 
-    renderMonthlyData(year, month) {
-        const attendance = DataManager.getAttendanceByEmployee(this.currentEmployee,
+    setMonthlyViewMode(mode) {
+        this.monthlyViewMode = mode;
+        this.renderEmployeeView(); // Re-render to update UI
+    },
+
+    async renderMonthlyData(year, month) {
+        const attendance = await DataManager.getAttendanceByEmployee(this.currentEmployee,
             new Date(year, month, 1),
             new Date(year, month + 1, 0));
+
+        // Sort attendance by date
+        attendance.sort((a, b) => new Date(a.date) - new Date(b.date));
 
         const daysInMonth = DataManager.getDaysInMonth(year, month);
 
         // Calculate stats
-        let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0;
+        let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0, hWorking = 0;
         let standardOtHours = 0, hWorkingOtHours = 0;
 
+        // Map for quick lookup
+        const attendanceMap = {};
+
         attendance.forEach(record => {
+            const dateStr = new Date(record.date).toISOString().split('T')[0];
+            attendanceMap[dateStr] = record;
+
             switch (record.status) {
                 case 'Present':
                     present++;
@@ -178,7 +292,7 @@ const EmployeeViewModule = {
                     holidays++;
                     break;
                 case 'H-Working':
-                    holidays++;
+                    hWorking++;
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
@@ -191,12 +305,12 @@ const EmployeeViewModule = {
         const totalOtHours = standardOtHours + hWorkingOtHours;
 
         // Get employee data
-        const employees = DataManager.getEmployees();
+        const employees = await DataManager.getEmployees();
         const employee = employees.find(e => e.name === this.currentEmployee);
-        const settings = DataManager.getSettings();
+        const settings = await DataManager.getSettings();
         const baseSalaries = settings.baseSalaries || {};
 
-        // Get base salary from employee record or settings (backward compatibility)
+        // Get base salary from employee record or settings
         const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[this.currentEmployee] || 0);
         const salaryType = employee?.salaryType || 'monthly';
 
@@ -208,19 +322,24 @@ const EmployeeViewModule = {
             perDaySalary = baseSalary / daysInMonth;
         }
 
-        const paidDays = present + paidLeave + holidays + (halfDays * 0.5);
-        const basePay = paidDays * perDaySalary;
+        // Calculate H-Working Pay (double pay for working on holidays)
+        // H-Working days get 2x pay: 1 day already in paidDays + 1 extra day
+        const hWorkingDaysPay = hWorking * perDaySalary; // Extra day pay for H-Working (the second day of double pay)
 
-        // Calculate OT Pay using new formula (special rate for H-Working OT)
+        const paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5);
+        const basePay = paidDays * perDaySalary + hWorkingDaysPay; // Include H-Working extra pay in base pay
+
+        // Calculate OT Pay
         const otBreakdown = DataManager.calculateOTPay(
             totalOtHours,
             baseSalary,
             salaryType,
-            { hWorkingOtHours, perDaySalary, returnBreakdown: true }
+            { hWorkingOtHours, returnBreakdown: true, settings: settings }
         );
         const otPay = otBreakdown.totalPay;
         const standardOtPay = otBreakdown.standardPay || 0;
         const hWorkingOtPay = otBreakdown.hWorkingPay || 0;
+        // OT rate always uses fixed 30 days
         const standardPerHour = salaryType === 'daily'
             ? baseSalary / 8
             : (baseSalary / 30) / 8;
@@ -229,41 +348,89 @@ const EmployeeViewModule = {
             ? `${this.formatCurrency(standardPerHour)} (Std) / ${this.formatCurrency(hWorkingPerHour)} (H-Working)`
             : this.formatCurrency(standardPerHour);
 
-        const totalAdvance = DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
+        const totalAdvance = await DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
         const finalSalary = basePay + otPay - totalAdvance;
 
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-        return `
-            <h6>Summary for ${months[month]} ${year}</h6>
-            <div class="row mb-3">
-                <div class="col-md-6">
-                    <table class="table table-bordered">
-                        <tr><th>Present Days</th><td>${present}</td></tr>
-                        <tr><th>Paid Leave</th><td>${paidLeave}</td></tr>
-                        <tr><th>Unpaid Leave</th><td>${unpaidLeave}</td></tr>
-                        <tr><th>Half Days</th><td>${halfDays}</td></tr>
-                        <tr><th>Holidays</th><td>${holidays}</td></tr>
-                        <tr><th>Standard OT Hours</th><td>${standardOtHours.toFixed(2)}</td></tr>
-                        <tr><th>H-OT Hours</th><td>${hWorkingOtHours.toFixed(2)}</td></tr>
-                        <tr><th>Total OT Hours</th><td>${totalOtHours.toFixed(2)}</td></tr>
-                    </table>
-                </div>
-                <div class="col-md-6">
-                    <table class="table table-bordered">
-                        <tr><th>Basic Salary</th><td>${this.formatCurrency(baseSalary)}</td></tr>
-                        <tr><th>Per Day Salary</th><td>${this.formatCurrency(perDaySalary)}</td></tr>
-                        <tr><th>Paid Days</th><td>${paidDays.toFixed(1)}</td></tr>
-                        <tr><th>OT Per Hour Pay</th><td>${otPerHourDisplay}</td></tr>
-                        <tr><th>Standard OT Pay</th><td>${this.formatCurrency(standardOtPay)}</td></tr>
-                        <tr><th>H-OT Pay</th><td>${this.formatCurrency(hWorkingOtPay)}</td></tr>
-                        <tr><th>Total OT Pay</th><td>${this.formatCurrency(otPay)}</td></tr>
-                        <tr><th>Total Advance</th><td>${this.formatCurrency(totalAdvance)}</td></tr>
-                        <tr><th class="table-primary">Final Salary</th><td class="table-primary"><strong>${this.formatCurrency(finalSalary)}</strong></td></tr>
-                    </table>
-                </div>
-            </div>
-            <h6>Attendance Details</h6>
+        let detailsHtml = '';
+
+        if (this.monthlyViewMode === 'calendar') {
+            // CALENDAR VIEW
+            const firstDay = new Date(year, month, 1).getDay(); // 0 (Sun) to 6 (Sat)
+
+            // Build calendar grid
+            let calendarHtml = '<div class="calendar-grid">';
+
+            // Header
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            calendarHtml += days.map(d => `<div class="calendar-header fw-bold text-center py-2">${d}</div>`).join('');
+
+            // Empty cells for days before the 1st
+            for (let i = 0; i < firstDay; i++) {
+                calendarHtml += '<div class="calendar-day empty"></div>';
+            }
+
+            // Days
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateObj = new Date(year, month, day);
+                // Simple date matching since we are iterating exactly
+
+                // Let's safe match
+                const record = attendance.find(r => new Date(r.date).getDate() === day);
+
+                let statusClass = 'bg-light';
+                let statusText = '';
+                let otText = '';
+
+                if (record) {
+                    if (record.status === 'Present') statusClass = 'bg-success text-white';
+                    else if (record.status === 'Paid Leave') statusClass = 'bg-info text-white';
+                    else if (record.status === 'Unpaid Leave' || record.status === 'Sick Leave') statusClass = 'bg-danger text-white';
+                    else if (record.status === 'Half Day') statusClass = 'bg-warning text-dark';
+                    else if (record.status === 'Holiday') statusClass = 'bg-secondary text-white';
+                    else if (record.status === 'H-Working') statusClass = 'bg-primary text-white';
+
+                    statusText = record.status;
+                    if (record.otHours > 0) otText = `<small class="d-block mt-1" style="font-size: 0.7rem;">OT: ${record.otHours}</small>`;
+                }
+
+                calendarHtml += `
+                    <div class="calendar-day border p-2" style="min-height: 80px; position: relative;">
+                        <div class="fw-bold small mb-1">${day}</div>
+                        ${record ? `
+                            <div class="badge ${statusClass} w-100 text-wrap text-start p-1" style="font-size: 0.7rem;">
+                                ${statusText}
+                            </div>
+                            ${otText}
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            calendarHtml += '</div>'; // End grid
+
+            // Add some styles specifically here or ensure they exist
+            // Using inline styles for grid to be safe
+            detailsHtml = `
+                <style>
+                    .calendar-grid {
+                        display: grid;
+                        grid-template-columns: repeat(7, 1fr);
+                        gap: 5px;
+                    }
+                    .calendar-day {
+                        background: var(--bg-card);
+                    }
+                </style>
+                <h6 class="mt-4">Attendance Calendar</h6>
+                ${calendarHtml}
+            `;
+
+        } else {
+            // TABLE VIEW (Existing)
+            detailsHtml = `
+            <h6 class="mt-4">Attendance Details</h6>
             <div class="table-responsive">
                 <table class="table table-sm table-striped">
                     <thead>
@@ -276,25 +443,67 @@ const EmployeeViewModule = {
                         </tr>
                     </thead>
                     <tbody>
-                        ${attendance.map(record => `
-                            <tr>
+                        ${attendance.map(record => {
+                // Highlight H-Working
+                const rowClass = record.status === 'H-Working' ? 'table-primary' : '';
+                return `
+                            <tr class="${rowClass}">
                                 <td>${DataManager.formatDateDisplay(record.date)}</td>
                                 <td>${record.checkIn || '-'}</td>
                                 <td>${record.checkOut || '-'}</td>
-                                <td>${record.status}</td>
+                                <td>
+                                    ${record.status}
+                                    ${record.status === 'H-Working' ? '<i class="bi bi-hammer ms-1" title="H-Working"></i>' : ''}
+                                </td>
                                 <td>${record.otHours || 0}</td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </tbody>
                 </table>
+            </div>`;
+        }
+
+        return `
+            <h6>Summary for ${months[month]} ${year}</h6>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <table class="table table-bordered">
+                        <tr><th>Present Days</th><td>${present}</td></tr>
+                        <tr><th>Paid Leave</th><td>${paidLeave}</td></tr>
+                        <tr><th>Unpaid Leave</th><td>${unpaidLeave}</td></tr>
+                        <tr><th>Half Days</th><td>${halfDays}</td></tr>
+                        <tr><th>Holidays</th><td>${holidays}</td></tr>
+                        <tr><th>H-Working Days</th><td>${hWorking}</td></tr>
+                        <tr><th>Standard OT Hours</th><td>${standardOtHours.toFixed(2)}</td></tr>
+                        <tr><th>H-OT Hours</th><td>${hWorkingOtHours.toFixed(2)}</td></tr>
+                        <tr><th>Total OT Hours</th><td>${totalOtHours.toFixed(2)}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <table class="table table-bordered">
+                        <tr><th>Basic Salary</th><td>${this.formatCurrency(baseSalary)}</td></tr>
+                        <tr><th>Per Day Salary</th><td>${this.formatCurrency(perDaySalary)}</td></tr>
+                        <tr><th>Paid Days</th><td>${paidDays.toFixed(1)}</td></tr>
+                        <tr><th>H-Working Days Pay</th><td>${this.formatCurrency(hWorkingDaysPay)}</td></tr>
+                        <tr><th>OT Per Hour Pay</th><td>${otPerHourDisplay}</td></tr>
+                        <tr><th>Standard OT Pay</th><td>${this.formatCurrency(standardOtPay)}</td></tr>
+                        <tr><th>H-OT Pay</th><td>${this.formatCurrency(hWorkingOtPay)}</td></tr>
+                        <tr><th>Total OT Pay</th><td>${this.formatCurrency(otPay)}</td></tr>
+                        <tr><th>Total Advance</th><td>${this.formatCurrency(totalAdvance)}</td></tr>
+                        <tr><th class="table-primary">Final Salary</th><td class="table-primary"><strong>${this.formatCurrency(finalSalary)}</strong></td></tr>
+                    </table>
+                </div>
             </div>
+            ${detailsHtml}
         `;
     },
 
-    renderAnnualView() {
+    async renderAnnualView() {
         const fy = DataManager.getFinancialYear();
         const startDate = new Date(fy.startYear, 3, 1); // April 1
         const endDate = new Date(fy.endYear, 2, 31); // March 31
+
+        const annualDataHtml = await this.renderAnnualData(fy.startYear, fy.endYear);
 
         return `
             <div class="row">
@@ -304,7 +513,7 @@ const EmployeeViewModule = {
                             <h5>Annual View - Financial Year ${fy.startYear}-${fy.endYear}</h5>
                         </div>
                         <div class="card-body">
-                            ${this.renderAnnualData(fy.startYear, fy.endYear)}
+                            ${annualDataHtml}
                         </div>
                     </div>
                 </div>
@@ -312,14 +521,14 @@ const EmployeeViewModule = {
         `;
     },
 
-    renderAnnualData(startYear, endYear) {
+    async renderAnnualData(startYear, endYear) {
         const startDate = new Date(startYear, 3, 1); // April 1
         const endDate = new Date(endYear, 2, 31); // March 31
 
-        const attendance = DataManager.getAttendanceByEmployee(this.currentEmployee, startDate, endDate);
+        const attendance = await DataManager.getAttendanceByEmployee(this.currentEmployee, startDate, endDate);
 
         // Calculate annual stats
-        let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0;
+        let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0, hWorking = 0;
         let standardOtHours = 0, hWorkingOtHours = 0;
         let totalSalary = 0;
 
@@ -362,8 +571,7 @@ const EmployeeViewModule = {
                     monthlyData[monthKey].holidays++;
                     break;
                 case 'H-Working':
-                    holidays++;
-                    monthlyData[monthKey].holidays++;
+                    hWorking++;
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
@@ -379,14 +587,14 @@ const EmployeeViewModule = {
         let totalAdvance = 0;
         for (let year = startYear; year <= endYear; year++) {
             for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
-                totalAdvance += DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
+                totalAdvance += await DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
             }
         }
 
         // Get employee data
-        const employees = DataManager.getEmployees();
+        const employees = await DataManager.getEmployees();
         const employee = employees.find(e => e.name === this.currentEmployee);
-        const settings = DataManager.getSettings();
+        const settings = await DataManager.getSettings();
         const baseSalaries = settings.baseSalaries || {};
 
         // Get base salary from employee record or settings
@@ -409,7 +617,7 @@ const EmployeeViewModule = {
             totalOtHours,
             baseSalary,
             salaryType,
-            { hWorkingOtHours, perDaySalary: avgPerDaySalary, returnBreakdown: true }
+            { hWorkingOtHours, perDaySalary: avgPerDaySalary, returnBreakdown: true, settings: settings }
         );
         const totalOTPay = annualOtBreakdown.totalPay;
         const annualStandardOtPay = annualOtBreakdown.standardPay || 0;
@@ -484,7 +692,7 @@ const EmployeeViewModule = {
         this.renderEmployeeView();
     },
 
-    loadMonthlyData() {
+    async loadMonthlyData() {
         const monthInput = document.getElementById('employeeMonthYear');
         if (!monthInput) return;
 
@@ -494,35 +702,35 @@ const EmployeeViewModule = {
         const [year, month] = value.split('-').map(Number);
         const content = document.getElementById('monthlyViewContent');
         if (content) {
-            content.innerHTML = this.renderMonthlyData(year, month - 1);
+            content.innerHTML = await this.renderMonthlyData(year, month - 1);
         }
     },
 
     calculateExperience(employee) {
         const doj = new Date(employee.dateOfJoining);
         const dor = employee.dateOfRelieving ? new Date(employee.dateOfRelieving) : new Date();
-        
+
         // Set time to start of day for accurate calculation
         doj.setHours(0, 0, 0, 0);
         dor.setHours(0, 0, 0, 0);
-        
+
         let years = dor.getFullYear() - doj.getFullYear();
         let months = dor.getMonth() - doj.getMonth();
         let days = dor.getDate() - doj.getDate();
-        
+
         // Adjust for negative days
         if (days < 0) {
             months--;
             const lastDayOfPrevMonth = new Date(dor.getFullYear(), dor.getMonth(), 0).getDate();
             days += lastDayOfPrevMonth;
         }
-        
+
         // Adjust for negative months
         if (months < 0) {
             years--;
             months += 12;
         }
-        
+
         // Build the formatted string
         const parts = [];
         if (years > 0) {
@@ -534,18 +742,18 @@ const EmployeeViewModule = {
         if (days > 0 || parts.length === 0) {
             parts.push(`${days} ${days === 1 ? 'Day' : 'Days'}`);
         }
-        
+
         return parts.join(' ');
     },
 
-    renderFinancialYearSummary(employee) {
+    async renderFinancialYearSummary(employee) {
         const fy = DataManager.getFinancialYear();
         const startDate = new Date(fy.startYear, 3, 1); // April 1
         const endDate = new Date(fy.endYear, 2, 31); // March 31
 
-        const attendance = DataManager.getAttendanceByEmployee(employee.name, startDate, endDate);
+        const attendance = await DataManager.getAttendanceByEmployee(employee.name, startDate, endDate);
 
-        let totalLeaves = 0, sickLeaves = 0, present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0;
+        let totalLeaves = 0, sickLeaves = 0, present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, hWorking = 0;
 
         attendance.forEach(record => {
             switch (record.status) {
@@ -566,6 +774,9 @@ const EmployeeViewModule = {
                 case 'Half Day':
                     halfDays++;
                     totalLeaves += 0.5;
+                    break;
+                case 'H-Working':
+                    hWorking++;
                     break;
             }
         });
@@ -609,8 +820,104 @@ const EmployeeViewModule = {
                                 <td>Half Days</td>
                                 <td>${halfDays}</td>
                             </tr>
+                            <tr>
+                                <td><strong>H-Working Days</strong></td>
+                                <td><strong>${hWorking}</strong></td>
+                            </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        `;
+    },
+
+    async renderPayslipsView() {
+        const salaryPayouts = (await DataManager.getSettings()).salaryPayouts || {};
+        const bonusPayouts = await DataManager.getBonusPayouts();
+        const employeeName = this.currentEmployee;
+
+        const history = [];
+
+        // Process Salary Payouts
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        Object.entries(salaryPayouts).forEach(([key, data]) => {
+            if (data.done && data.employees && data.employees.includes(employeeName)) {
+                const [year, month] = key.split('_').map(Number);
+                history.push({
+                    type: 'Salary',
+                    date: new Date(year, month, 1),
+                    label: `Salary - ${months[month]} ${year}`,
+                    displayDate: data.creditDate ? DataManager.formatDateDisplay(data.creditDate) : '-',
+                    amount: '-', // Net salary calculation requires heavy fetching, skipping for list view
+                    details: { year, month }
+                });
+            }
+        });
+
+        // Process Bonus Payouts
+        bonusPayouts.forEach(batch => {
+            const empBonus = batch.payouts.find(p => p.employeeName === employeeName);
+            if (empBonus) {
+                history.push({
+                    type: 'Bonus',
+                    date: new Date(batch.financialYear, 3, 1), // Approx April
+                    label: `Bonus - FY ${batch.financialYear}-${batch.financialYear + 1}`,
+                    displayDate: '-',
+                    amount: `₹${empBonus.finalBonus.toLocaleString('en-IN')}`,
+                    details: { batchId: batch.id }
+                });
+            }
+        });
+
+        // Sort by date desc
+        history.sort((a, b) => b.date - a.date);
+
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h5>Payslips History</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Period / Label</th>
+                                    <th>Payout Date</th>
+                                    <th>Amount</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${history.length > 0 ? history.map(item => `
+                                    <tr>
+                                        <td><span class="badge bg-${item.type === 'Salary' ? 'success' : 'warning text-dark'}">${item.type}</span></td>
+                                        <td>${item.label}</td>
+                                        <td>${item.displayDate}</td>
+                                        <td>${item.amount}</td>
+                                        <td>
+                                            ${item.type === 'Salary' ? `
+                                                <button class="btn btn-sm btn-outline-primary" onclick="ReportsModule.generatePayslips(${item.details.year}, ${item.details.month}, ['${employeeName.replace(/'/g, "\\'")}'], 'preview')" title="View Payslip">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-success" onclick="ReportsModule.generatePayslips(${item.details.year}, ${item.details.month}, ['${employeeName.replace(/'/g, "\\'")}'], 'email')" title="Email Payslip">
+                                                    <i class="bi bi-envelope"></i> Email
+                                                </button>
+                                            ` : `
+                                                <button class="btn btn-sm btn-outline-primary" onclick="BonusModule.viewBonusPayslip('${item.details.batchId}', '${employeeName.replace(/'/g, "\\'")}')" title="View Payslip">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-success" onclick="BonusModule.emailBonusPayslip('${item.details.batchId}', '${employeeName.replace(/'/g, "\\'")}')" title="Email Payslip">
+                                                    <i class="bi bi-envelope"></i> Email
+                                                </button>
+                                            `}
+                                        </td>
+                                    </tr>
+                                `).join('') : '<tr><td colspan="5" class="text-center">No payment history found to view.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         `;

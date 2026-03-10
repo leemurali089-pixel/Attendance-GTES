@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
@@ -76,7 +77,7 @@ function createWindow() {
 
     // Open DevTools in development (uncomment to debug)
     // Open DevTools in development (uncomment to debug)
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
 
     // Start file watcher
     setupFileWatcher(mainWindow);
@@ -192,6 +193,17 @@ ipcMain.handle('file-exists', async (event, key) => {
 // Get data folder path
 ipcMain.handle('get-data-folder', async () => {
     return DATA_FOLDER;
+});
+
+// Read file buffer (for Book Keeper .db file)
+ipcMain.handle('read-file-buffer', async (event, filePath) => {
+    try {
+        const buffer = await fs.readFile(filePath);
+        return { success: true, buffer: buffer };
+    } catch (error) {
+        console.error('Error reading file buffer:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 // Automatic backup (to default Backups folder)
@@ -326,6 +338,45 @@ ipcMain.handle('import-backup', async () => {
         }
         return { success: false, cancelled: true };
     } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+// Save PDF to specific folder (PRD Requirement)
+ipcMain.handle('save-pdf', async (event, { blobBase64, filename, subfolder }) => {
+    try {
+        let basePath;
+        if (app.isPackaged) {
+            const appPath = app.getAppPath();
+            const resourcesPath = path.dirname(appPath);
+            basePath = path.dirname(resourcesPath);
+        } else {
+            basePath = __dirname;
+        }
+
+        const outputDir = path.join(basePath, 'ChallanOutput', subfolder);
+        await fs.mkdir(outputDir, { recursive: true });
+
+        const filePath = path.join(outputDir, filename);
+        const buffer = Buffer.from(blobBase64, 'base64');
+        await fs.writeFile(filePath, buffer);
+
+        console.log(`PDF saved to: ${filePath}`);
+        return { success: true, path: filePath };
+    } catch (error) {
+        console.error('Error saving PDF:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Email sending
+ipcMain.handle('send-email', async (event, config, mailOptions) => {
+    try {
+        const transporter = nodemailer.createTransport(config);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Email sent:', info.messageId);
+        return { success: true, info };
+    } catch (error) {
+        console.error('Email error:', error);
         return { success: false, error: error.message };
     }
 });

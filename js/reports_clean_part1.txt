@@ -1,0 +1,15 @@
+﻿// PDF Report Generation Module
+const ReportsModule = {
+    selectedEmployeesForPDF: [],
+    pendingSalaryPayout: null,
+    currentSelectionCallback: null,
+    salaryPayoutModalFullscreen: false,
+
+    showEmployeeSelectionModal(callback, title = 'Select Employees for PDF', confirmLabel = 'Generate PDF', year = null, month = null) {
+        // Get employees - filter by month if year and month are provided
+        let employees;
+        if (year !== null && month !== null) {
+            employees = DataManager.getEmployeesActiveInMonth(year, month);
+        } else {
+            employees = DataManager.getActiveEmployees();
+        }

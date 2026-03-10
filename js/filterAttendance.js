@@ -98,14 +98,14 @@ const FilterAttendanceModule = {
         `;
     },
 
-    renderFilterView() {
+    async renderFilterView() {
         const view = document.getElementById('filterAttendanceView');
         if (!view) return;
 
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const currentMonthYear = `${months[this.currentMonth]}-${this.currentYear}`;
 
-        const employees = DataManager.getEmployeesActiveInMonth(this.currentYear, this.currentMonth);
+        const employees = await DataManager.getEmployeesActiveInMonth(this.currentYear, this.currentMonth);
         const viewType = this.viewType || 'table';
 
         view.innerHTML = `
@@ -147,7 +147,7 @@ const FilterAttendanceModule = {
                             <small style="color: var(--text-secondary); font-size: 0.9rem;">${viewType === 'table' ? 'Edit fields below and changes will sync to main attendance' : 'Click on dates to view/edit attendance'}</small>
                         </div>
                         <div class="card-body filter-attendance-scrollable" id="filterAttendanceContent">
-                            ${viewType === 'table' ? this.renderTableView() : this.renderCalendarView()}
+                            ${viewType === 'table' ? await this.renderTableView() : await this.renderCalendarView()}
                         </div>
                     </div>
                 </div>
@@ -155,7 +155,7 @@ const FilterAttendanceModule = {
         `;
     },
 
-    renderTableView() {
+    async renderTableView() {
         return `
             <div class="table-responsive">
                 <table class="table table-striped table-hover">
@@ -172,17 +172,17 @@ const FilterAttendanceModule = {
                         </tr>
                     </thead>
                     <tbody id="filterAttendanceTableBody">
-                        ${this.renderFilterRows()}
+                        ${await this.renderFilterRows()}
                     </tbody>
                 </table>
             </div>
         `;
     },
 
-    renderCalendarView() {
+    async renderCalendarView() {
         const daysInMonth = DataManager.getDaysInMonth(this.currentYear, this.currentMonth);
         const firstDay = new Date(this.currentYear, this.currentMonth, 1).getDay();
-        const attendance = this.getFilteredAttendance();
+        const attendance = await this.getFilteredAttendance();
 
         // Create attendance map by date
         const attendanceMap = {};
@@ -218,7 +218,7 @@ const FilterAttendanceModule = {
             }
 
             const date = new Date(this.currentYear, this.currentMonth, day);
-            const isHoliday = DataManager.isHoliday(date) || DataManager.isSunday(date);
+            const isHoliday = await DataManager.isHoliday(date) || DataManager.isSunday(date);
             const dayRecords = attendanceMap[day] || [];
             const totalOT = dayRecords.reduce((sum, r) => sum + parseFloat(r.otHours || 0), 0);
 
@@ -250,8 +250,8 @@ const FilterAttendanceModule = {
         return calendarHTML;
     },
 
-    getFilteredAttendance() {
-        let attendance = DataManager.getAttendanceByMonth(this.currentYear, this.currentMonth);
+    async getFilteredAttendance() {
+        let attendance = await DataManager.getAttendanceByMonth(this.currentYear, this.currentMonth);
 
         // Filter by employee if selected
         if (this.currentEmployee) {
@@ -261,8 +261,8 @@ const FilterAttendanceModule = {
         return attendance;
     },
 
-    renderFilterRows() {
-        const attendance = this.getFilteredAttendance();
+    async renderFilterRows() {
+        const attendance = await this.getFilteredAttendance();
 
         if (attendance.length === 0) {
             return '<tr><td colspan="8" class="text-center text-muted">No attendance records for this month' + (this.currentEmployee ? ` for ${this.currentEmployee}` : '') + '</td></tr>';
@@ -279,9 +279,9 @@ const FilterAttendanceModule = {
         const timeSlotOptions = this.getTimeSlotOptionsHTML();
 
         // Build rows efficiently using array join
-        const rows = attendance.map(record => {
+        const rows = await Promise.all(attendance.map(async record => {
             const date = new Date(record.date);
-            const isHoliday = DataManager.isHoliday(date) || DataManager.isSunday(date);
+            const isHoliday = await DataManager.isHoliday(date) || DataManager.isSunday(date);
             const isHWorking = record.status === 'H-Working' || record.overTime === 'H-Working' || record.overTime === 'Holiday working';
 
             let rowClass = '';
@@ -369,12 +369,12 @@ const FilterAttendanceModule = {
                     </td>
                 </tr>
             `;
-        });
+        }));
 
         return rows.join('');
     },
 
-    loadMonthAttendance() {
+    async loadMonthAttendance() {
         const monthInput = document.getElementById('filterMonthYear');
         const employeeInput = document.getElementById('filterEmployee');
 
@@ -393,7 +393,7 @@ const FilterAttendanceModule = {
 
         const content = document.getElementById('filterAttendanceContent');
         if (content) {
-            content.innerHTML = this.viewType === 'table' ? this.renderTableView() : this.renderCalendarView();
+            content.innerHTML = this.viewType === 'table' ? await this.renderTableView() : await this.renderCalendarView();
         }
 
         // Update header
@@ -404,10 +404,10 @@ const FilterAttendanceModule = {
         }
     },
 
-    showDayDetails(day) {
+    async showDayDetails(day) {
         const date = new Date(this.currentYear, this.currentMonth, day);
         const dateStr = DataManager.formatDate(date);
-        const attendance = this.getFilteredAttendance();
+        const attendance = await this.getFilteredAttendance();
         const dayRecords = attendance.filter(r => {
             const rDate = new Date(r.date);
             return rDate.getDate() === day;
@@ -460,8 +460,8 @@ const FilterAttendanceModule = {
         modal.addEventListener('hidden.bs.modal', () => modal.remove());
     },
 
-    updateField(recordId, field, value) {
-        const attendance = DataManager.getAttendance();
+    async updateField(recordId, field, value) {
+        const attendance = await DataManager.getAttendance();
         const record = attendance.find(a => a.id === recordId);
 
         if (!record) {
@@ -496,7 +496,7 @@ const FilterAttendanceModule = {
             if (checkIn && checkOut) {
                 const date = new Date(record.date);
                 const workedHours = DataManager.calculateHours(checkIn, checkOut);
-                const isHoliday = DataManager.isHoliday(date);
+                const isHoliday = await DataManager.isHoliday(date);
                 const isSunday = DataManager.isSunday(date);
                 record.otHours = DataManager.calculateOTHours(workedHours, statusForCalculation, record.overTime, isHoliday, isSunday);
             } else {
@@ -506,14 +506,14 @@ const FilterAttendanceModule = {
             // Update holiday reason if status is H-Working or Holiday
             const date = new Date(record.date);
             if (statusForCalculation === 'Holiday' || statusForCalculation === 'H-Working') {
-                record.holidayReason = DataManager.getHolidayReason(date) || '';
+                record.holidayReason = await DataManager.getHolidayReason(date) || '';
             } else if (field === 'status' && record.status !== 'Holiday' && record.status !== 'H-Working') {
                 record.holidayReason = null;
             }
         }
 
         // Save updated attendance
-        DataManager.saveAttendance(attendance);
+        await DataManager.saveAttendance(attendance);
 
         // Update the OT Hours field in the UI
         const row = document.querySelector(`tr[data-id="${recordId}"]`);
@@ -527,18 +527,18 @@ const FilterAttendanceModule = {
         App.showNotification('Attendance updated successfully', 'success');
     },
 
-    deleteRecord(recordId) {
+    async deleteRecord(recordId) {
         if (!App.confirmAction('Are you sure you want to delete this attendance record?')) {
             return;
         }
 
-        const attendance = DataManager.getAttendance();
+        const attendance = await DataManager.getAttendance();
         const filtered = attendance.filter(a => a.id !== recordId);
-        DataManager.saveAttendance(filtered);
+        await DataManager.saveAttendance(filtered);
 
         const tbody = document.getElementById('filterAttendanceTableBody');
         if (tbody) {
-            tbody.innerHTML = this.renderFilterRows();
+            tbody.innerHTML = await this.renderFilterRows();
         }
 
         App.showNotification('Attendance record deleted successfully', 'success');

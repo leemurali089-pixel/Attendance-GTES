@@ -154,17 +154,32 @@ const FileStorage = {
                         // File doesn't exist, check localStorage as fallback
                         console.log(`No file for ${key}, checking localStorage`);
                         const localData = localStorage.getItem(key);
-                        return localData ? JSON.parse(localData) : null;
+                        try {
+                            return localData ? JSON.parse(localData) : null;
+                        } catch (e) {
+                            console.error(`Error parsing localStorage for ${key}:`, e);
+                            return null;
+                        }
                     }
                 } else {
                     console.error(`Error loading ${key}:`, result.error);
                     const localData = localStorage.getItem(key);
-                    return localData ? JSON.parse(localData) : null;
+                    try {
+                        return localData ? JSON.parse(localData) : null;
+                    } catch (e) {
+                        console.error(`Error parsing localStorage for ${key}:`, e);
+                        return null;
+                    }
                 }
             } catch (error) {
                 console.error(`Electron load error for ${key}:`, error);
                 const localData = localStorage.getItem(key);
-                return localData ? JSON.parse(localData) : null;
+                try {
+                    return localData ? JSON.parse(localData) : null;
+                } catch (e) {
+                    console.error(`Error parsing localStorage for ${key}:`, e);
+                    return null;
+                }
             }
         }
 

@@ -25,6 +25,13 @@ desktop.ini
 *.log
 npm-debug.log*
 
-# Dependencies (if you add any in future)
+# Dependencies
 node_modules/
 package-lock.json
+
+# Build output
+dist/
+
+# Backup folders
+Backups/
+Backup/

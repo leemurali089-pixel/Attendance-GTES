@@ -1,6 +1,7 @@
 // Employee Management Module (CRUD)
 const EmployeesModule = {
     editingEmployee: null,
+    filterState: 'active', // Default filter state
 
     async load() {
         await this.renderEmployeeList();
@@ -17,9 +18,19 @@ const EmployeesModule = {
         view.classList.remove('d-none');
         view.style.display = '';
 
-        const employees = await DataManager.getEmployees();
+        const allEmployees = await DataManager.getEmployees();
         const activeEmployees = await DataManager.getActiveEmployees();
         const canManage = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_EMPLOYEES);
+
+        // Filter Logic
+        let displayedEmployees = [];
+        if (this.filterState === 'active') {
+            displayedEmployees = activeEmployees;
+        } else if (this.filterState === 'inactive') {
+            displayedEmployees = allEmployees.filter(e => e.dateOfRelieving && new Date(e.dateOfRelieving) < new Date());
+        } else {
+            displayedEmployees = allEmployees;
+        }
 
         view.innerHTML = `
             <div class="row mb-4">
@@ -40,8 +51,16 @@ const EmployeesModule = {
             <div class="row">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header">
-                            <h5>Employees List (${activeEmployees.length} Active / ${employees.length} Total)</h5>
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5>Employees List (${displayedEmployees.length} Shown)</h5>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary ${this.filterState === 'active' ? 'active' : ''}" 
+                                        onclick="EmployeesModule.setFilter('active')">Active</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary ${this.filterState === 'inactive' ? 'active' : ''}" 
+                                        onclick="EmployeesModule.setFilter('inactive')">Inactive</button>
+                                <button type="button" class="btn btn-sm btn-outline-info ${this.filterState === 'all' ? 'active' : ''}" 
+                                        onclick="EmployeesModule.setFilter('all')">All</button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
@@ -56,7 +75,7 @@ const EmployeesModule = {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${employees.map(emp => `
+                                        ${displayedEmployees.length > 0 ? displayedEmployees.map(emp => `
                                             <tr>
                                                 <td>${emp.name}</td>
                                                 <td>${DataManager.formatDateDisplay(emp.dateOfJoining)}</td>
@@ -83,7 +102,7 @@ const EmployeesModule = {
                                                     ` : ''}
                                                 </td>
                                             </tr>
-                                        `).join('')}
+                                        `).join('') : '<tr><td colspan="5" class="text-center">No employees found</td></tr>'}
                                     </tbody>
                                 </table>
                             </div>
@@ -95,6 +114,11 @@ const EmployeesModule = {
         `;
 
         this.initializeModal();
+    },
+
+    setFilter(state) {
+        this.filterState = state;
+        this.renderEmployeeList();
     },
 
     async getAdminTableHTML() {
@@ -196,27 +220,34 @@ const EmployeesModule = {
                                                 <input type="text" class="form-control" id="employeeName" required>
                                             </div>
                                             <div class="col-md-6 mb-3">
+                                                <label for="employeeIdInput" class="form-label">Employee ID *</label>
+                                                <input type="text" class="form-control" id="employeeIdInput" placeholder="Auto-generated if empty">
+                                                <small class="form-text text-muted">Leave empty to auto-generate</small>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
                                                 <label for="phone" class="form-label">Phone</label>
                                                 <input type="tel" class="form-control" id="phone" pattern="[0-9]{10}">
                                                 <small class="form-text text-muted">10 digits</small>
                                             </div>
-                                        </div>
-                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="email" class="form-label">Email</label>
                                                 <input type="email" class="form-control" id="email">
                                             </div>
+                                        </div>
+                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="dateOfJoining" class="form-label">Date of Joining *</label>
                                                 <input type="date" class="form-control" id="dateOfJoining" required>
                                             </div>
-                                        </div>
-                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="dateOfRelieving" class="form-label">Date of Relieving</label>
                                                 <input type="date" class="form-control" id="dateOfRelieving">
                                                 <small class="form-text text-muted">Leave empty if currently active</small>
                                             </div>
+                                        </div>
+                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="salaryType" class="form-label">Salary Type *</label>
                                                 <select class="form-select" id="salaryType" required>
@@ -224,13 +255,13 @@ const EmployeesModule = {
                                                     <option value="daily">Daily Salary</option>
                                                 </select>
                                             </div>
-                                        </div>
-                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="baseSalary" class="form-label">Basic Salary (₹) *</label>
                                                 <input type="number" class="form-control" id="baseSalary" step="0.01" min="0" required>
                                                 <small class="form-text text-muted">Monthly or daily rate</small>
                                             </div>
+                                        </div>
+                                        <div class="row">
                                             <div class="col-md-6 mb-3">
                                                 <label for="paymentMode" class="form-label">Payment Mode *</label>
                                                 <select class="form-select" id="paymentMode" required onchange="EmployeesModule.handlePaymentModeChange()">
@@ -448,6 +479,7 @@ const EmployeesModule = {
                 // Personal Tab
                 document.getElementById('employeeId').value = employee.id || '';
                 document.getElementById('employeeName').value = employee.name || '';
+                if (document.getElementById('employeeIdInput')) document.getElementById('employeeIdInput').value = employee.id || '';
                 if (document.getElementById('phone')) document.getElementById('phone').value = employee.phone || '';
                 if (document.getElementById('email')) document.getElementById('email').value = employee.email || '';
                 document.getElementById('dateOfJoining').value = DataManager.formatDate(employee.dateOfJoining);
@@ -642,6 +674,16 @@ const EmployeesModule = {
 
             const employees = await DataManager.getEmployees();
 
+            // Validate unique ID if manually entered or changed
+            const manualId = document.getElementById('employeeIdInput')?.value?.trim();
+            if (manualId) {
+                const existing = employees.find(e => e.id === manualId);
+                if (existing && existing.id !== employeeId) {
+                    App.showNotification('Employee ID already exists. Please choose a unique ID.', 'error');
+                    return;
+                }
+            }
+
             if (employeeId) {
                 // Update existing
                 console.log('Updating employee:', employeeId);
@@ -664,17 +706,39 @@ const EmployeesModule = {
                         );
                     }
 
+                    // Handle ID Change if needed
+                    let finalId = employeeId;
+                    if (manualId && manualId !== employeeId) {
+                        finalId = manualId;
+                        // We are changing the ID. 
+                        // WARN: This might break links if other records link by ID. 
+                        // Currently most links are by Name (legacy), but new features might use ID.
+                        // Ideally we should warn user, but for now we proceed.
+                    }
+
                     employees[index] = DataManager.addTimestamp({
                         ...employees[index],
+                        id: finalId, // Update ID if changed
                         ...employeeData,
                         employeePhoto: this.employeePhotoData || employees[index].employeePhoto || null,
                         aadhaarPhoto: this.aadhaarPhotoData || employees[index].aadhaarPhoto || null
                     });
                 }
             } else {
-                // Add new - generate ID
+                // Add new
                 console.log('Adding new employee');
-                const newId = await DataManager.generateEmployeeId();
+                let newId = manualId;
+                if (!newId) {
+                    newId = await DataManager.generateEmployeeId();
+                }
+
+                // Double check generated ID uniqueness just in case
+                if (employees.find(e => e.id === newId)) {
+                    // Should rarely happen with timestamp based generation but manual input might conflict
+                    App.showNotification('Generated ID conflict. Please try again or provide manual ID', 'error');
+                    return;
+                }
+
                 const newEmployee = DataManager.addTimestamp({
                     id: newId,
                     ...employeeData

@@ -1,0 +1,194 @@
+/* Landing Page Styles */
+
+#landingView {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    width: 100%;
+    padding: 2rem;
+    position: relative;
+}
+
+.landing-container {
+    width: 100%;
+    max-width: 1400px;
+}
+
+.module-card {
+    background: rgba(255, 255, 255, 0.05);
+    /* Glass effect */
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.module-card:hover {
+    transform: translateY(-10px) scale(1.02);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(255, 255, 255, 0.05);
+}
+
+.module-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.03), transparent);
+    transform: translateX(-100%);
+    transition: 0.6s;
+}
+
+.module-card:hover::before {
+    transform: translateX(100%);
+}
+
+.module-icon {
+    font-size: 3.5rem;
+    color: #4361ee;
+    /* Default brand color */
+    transition: transform 0.3s ease;
+}
+
+.module-card:hover .module-icon {
+    transform: scale(1.1) rotate(5deg);
+}
+
+.card-title {
+    color: #ffffff;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.card-text {
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+/* Animations */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.module-card {
+    animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.col-md-6:nth-child(1) .module-card {
+    animation-delay: 0.1s;
+}
+
+.col-md-6:nth-child(2) .module-card {
+    animation-delay: 0.2s;
+}
+
+.col-md-6:nth-child(3) .module-card {
+    animation-delay: 0.3s;
+}
+
+.col-md-6:nth-child(4) .module-card {
+    animation-delay: 0.4s;
+}
+
+/* --- Added Fixes --- */
+
+.clickable-element {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+
+.clickable-element:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff !important;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+/* Subtitle and Heading Colors - Default (Dark Mode) */
+.landing-header h1 {
+    color: #ffffff !important;
+}
+
+.landing-header p.lead {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Card Description - Default (Dark Mode) should be light grey */
+.module-card .card-text,
+.module-card p {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* --- Light Mode Overrides --- */
+
+[data-theme="light"] #landingCompanyName,
+[data-theme="light"] .landing-top-bar .text-white {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .landing-top-bar .text-white-50 {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .landing-header h1 {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .landing-header p.lead {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .module-card h4,
+[data-theme="light"] .module-card .card-title {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .module-card p,
+[data-theme="light"] .module-card .card-text {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .module-card {
+    background: rgba(255, 255, 255, 0.85);
+    /* More opaque in light mode */
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .module-card:hover {
+    background: rgba(255, 255, 255, 0.95);
+}
+
+/* Fix User Name in Light Mode */
+[data-theme="light"] #landingUserName {
+    color: #0f172a !important;
+    /* Dark Slate */
+    font-weight: 600;
+}
+
+[data-theme="light"] .clickable-element:hover {
+    background: rgba(0, 0, 0, 0.05);
+    /* Darken slightly on hover in light mode */
+    color: #000 !important;
+    text-shadow: none;
+}
