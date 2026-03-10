@@ -15,6 +15,14 @@
         "directories": {
             "output": "dist"
         },
+        "files": [
+            "**/*",
+            "!dist/**/*",
+            "!.git/**/*",
+            "!*.md",
+            "!test*.html",
+            "!test*.csv"
+        ],
         "win": {
             "target": [
                 {
