@@ -284,11 +284,13 @@ const UserManager = {
             throw new Error('Current password is incorrect');
         }
 
-        // Hash new password
+        // Hash new password for desktop, store plain for web
         if (window.electronAPI) {
             user.password = await window.electronAPI.hashPassword(newPassword);
+            user.webPassword = newPassword; // Keep web access in sync
         } else {
             user.password = newPassword;
+            user.webPassword = newPassword;
         }
 
         await this.saveUsers(users);
@@ -301,11 +303,13 @@ const UserManager = {
         const user = users.find(u => u.id === userId);
         if (!user) throw new Error('User not found');
 
-        // Hash new password
+        // Hash new password for desktop, store plain for web
         if (window.electronAPI) {
             user.password = await window.electronAPI.hashPassword(newPassword);
+            user.webPassword = newPassword; // Keep web access in sync
         } else {
             user.password = newPassword;
+            user.webPassword = newPassword;
         }
 
         await this.saveUsers(users);
