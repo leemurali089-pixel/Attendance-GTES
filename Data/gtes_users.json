@@ -3,13 +3,22 @@
     "id": "1764094981663",
     "username": "GTES67",
     "password": "72345675a2559b416af8a7f8ff9f0380:ed0d4a1bb615c101dcaf7815c979f2a30555aaeb561c1b51824ecb1593072f3f8ca417e1d7bc28e5db735c02947fc1075b628134d41a86e58820dd9b8194d24d",
+    "webPassword": "admin123",
     "role": "admin",
     "fullName": "Administrator",
     "createdAt": "2025-11-25T18:23:01.661Z",
     "isActive": true,
     "permissions": [
       "view_dashboard",
-      "VIEW_DASHBOARD"
+      "VIEW_DASHBOARD",
+      "MANAGE_EMPLOYEES",
+      "MANAGE_ATTENDANCE",
+      "MANAGE_SALARY",
+      "VIEW_REPORTS",
+      "MANAGE_SETTINGS",
+      "MANAGE_USERS",
+      "MANAGE_HOLIDAYS",
+      "MANAGE_ADVANCES"
     ]
   }
 ]
