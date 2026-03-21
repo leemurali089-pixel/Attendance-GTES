@@ -395,8 +395,13 @@
                     </div>
 
                     <!-- Backup -->
-                    <div class="dropdown me-2" id="landingBackupDropdown" style="display: none;">
-                        <button class="btn btn-outline-light btn-sm rounded-pill dropdown-toggle" type="button"
+                    <button class="btn btn-outline-info btn-sm rounded-pill px-3 me-2" onclick="DeepCloudMigrator.syncAll()">
+                        <i class="bi bi-cloud-arrow-up-fill me-1"></i> Force Cloud Sync
+                    </button>
+
+                    <div class="dropdown d-inline-block me-2" id="landingBackupDropdown">
+                        <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 dropdown-toggle shadow-sm"
+                            type="button" 
                             id="landingBackupBtn" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-hdd-network me-1"></i> Backup
                         </button>
@@ -522,41 +527,11 @@
         <div id="customersView" class="view-section d-none"></div>
 
         <!-- NEW MODULE PLACEHOLDERS -->
-        <div id="tasksView" class="view-section d-none">
-            <div class="container-fluid">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi bi-check-square-fill text-warning me-2"></i> Tasks</h2>
-                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
-                        <i class="bi bi-grid-fill"></i> Back to Apps
-                    </button>
-                </div>
-                <div class="card bg-dark text-white border-secondary">
-                    <div class="card-body p-5 text-center">
-                        <i class="bi bi-cone-striped display-1 text-muted mb-3"></i>
-                        <h3>Under Construction</h3>
-                        <p class="text-muted">The Tasks module is coming soon.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div id="tasksView" class="view-section d-none"></div>
 
-        <div id="paymentsView" class="view-section d-none">
-            <div class="container-fluid">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi bi-cash-coin text-info me-2"></i> Payment Follow Up</h2>
-                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
-                        <i class="bi bi-grid-fill"></i> Back to Apps
-                    </button>
-                </div>
-                <div class="card bg-dark text-white border-secondary">
-                    <div class="card-body p-5 text-center">
-                        <i class="bi bi-cone-striped display-1 text-muted mb-3"></i>
-                        <h3>Under Construction</h3>
-                        <p class="text-muted">The Payment Follow Up module is coming soon.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+
+        <div id="paymentsView" class="view-section d-none"></div>
+
 
 
         <!-- Analytics View -->
@@ -1709,6 +1684,7 @@
     <script src="js/exportImportHelper.js"></script>
     <script src="js/bookKeeperImport.js"></script>
     <script src="js/seedData.js"></script>
+    <script src="js/migrateToCloud.js"></script>
     <script src="js/app.js"></script>
 
     <!-- Employee Details Modal -->
