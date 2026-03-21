@@ -77,16 +77,22 @@ const UserManager = {
             throw new Error('Username already exists');
         }
 
-        // Hash password if running in Electron
+        // Hash password if running in Electron, otherwise store plain for web
         let password = userData.password;
+        let webPassword = null;
         if (window.electronAPI) {
-            password = await window.electronAPI.hashPassword(password);
+            password = await window.electronAPI.hashPassword(userData.password);
+            // Don't store plain text in Electron mode (security)
+        } else {
+            // Browser/PWA mode: store plain text password as webPassword
+            webPassword = userData.password;
         }
 
         const newUser = {
             id: Date.now().toString(),
             username: userData.username,
             password: password,
+            webPassword: webPassword, // Plain text for PWA login
             role: userData.role || this.ROLES.USER,
             fullName: userData.fullName || userData.username,
             permissions: userData.permissions || [this.PERMISSIONS.VIEW_DASHBOARD], // Default to VIEW_DASHBOARD at minimum
@@ -108,7 +114,7 @@ const UserManager = {
             let isValid = false;
 
             if (window.electronAPI) {
-                // Use secure verification
+                // Use secure verification (Electron desktop app)
                 isValid = await window.electronAPI.verifyPassword(password, user.password);
 
                 // Auto-migrate plain text password to hash
@@ -118,8 +124,22 @@ const UserManager = {
                     await this.saveUsers(users);
                 }
             } else {
-                // Fallback for browser mode (plain text)
-                isValid = user.password === password;
+                // Browser/PWA mode: verify using Web Crypto API (same PBKDF2 algorithm as Electron)
+                if (user.webPassword) {
+                    // Simple plain-text fallback if webPassword is set
+                    isValid = user.webPassword === password;
+                } else if (user.password && user.password.includes(':')) {
+                    // Hash stored in salt:hash format — verify using browser's PBKDF2
+                    try {
+                        isValid = await UserManager.verifyPasswordBrowser(password, user.password);
+                    } catch (e) {
+                        console.error('PBKDF2 verify error:', e);
+                        isValid = false;
+                    }
+                } else {
+                    // Plain text password (no hash, browser-created account)
+                    isValid = user.password === password;
+                }
             }
 
             if (isValid) {
@@ -303,6 +323,50 @@ const UserManager = {
             return await window.electronAPI.verifyPassword(password, user.password);
         } else {
             return user.password === password;
+        }
+    },
+
+    // Browser-side PBKDF2 verification (matches Electron's crypto.pbkdf2 algorithm)
+    // Algorithm: PBKDF2, SHA-512, 1000 iterations, 64 bytes, salt:hash format
+    async verifyPasswordBrowser(password, storedHash) {
+        try {
+            const [saltHex, originalHashHex] = storedHash.split(':');
+            if (!saltHex || !originalHashHex) return false;
+
+            // Convert salt hex string to Uint8Array
+            const salt = new Uint8Array(saltHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+
+            // Import the password as a key
+            const enc = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                enc.encode(password),
+                { name: 'PBKDF2' },
+                false,
+                ['deriveBits']
+            );
+
+            // Derive the key using same parameters as Electron (PBKDF2, SHA-512, 1000 iter, 64 bytes)
+            const derivedBits = await crypto.subtle.deriveBits(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: 1000,
+                    hash: 'SHA-512'
+                },
+                keyMaterial,
+                512 // 64 bytes = 512 bits
+            );
+
+            // Convert derived bits to hex string
+            const derivedHex = Array.from(new Uint8Array(derivedBits))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+
+            return derivedHex === originalHashHex;
+        } catch (e) {
+            console.error('Browser PBKDF2 verification error:', e);
+            return false;
         }
     }
 };
