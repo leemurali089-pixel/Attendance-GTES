@@ -87,7 +87,11 @@ const DeliveryManager = {
             technicianId: challanData.technicianId || '',
             terms: challanData.terms || 'Please check goods before accepting delivery',
             status: challanData.status || 'draft',
-            invoiceId: null,
+            invoiceId: challanData.invoiceId || null,
+            dispatchVia: challanData.dispatchVia || '',
+            lrNo: challanData.lrNo || '',
+            vehicleNo: challanData.vehicleNo || '',
+            dispatchDate: challanData.dispatchDate || '',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -230,10 +234,46 @@ const DeliveryManager = {
         if (challan) {
             // Restore items to inventory
             await this.adjustInventoryStock(challan.items, true);
+
+            // Move to Recycle Bin BEFORE removing
+            const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+            bin.push({
+                ...challan,
+                _deletedAt: new Date().toISOString(),
+                _recordType: 'challan'
+            });
+            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
         }
 
         const filtered = challans.filter(c => c.id !== challanId);
         await DataManager.saveData('challans', filtered);
+    },
+
+    /**
+     * Restore challan from recycle bin
+     */
+    async restoreChallan(challanId) {
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const index = bin.findIndex(item => item.id === challanId && item._recordType === 'challan');
+
+        if (index === -1) throw new Error('Challan not found in Recycle Bin');
+
+        const challan = { ...bin[index] };
+        delete challan._deletedAt;
+        delete challan._recordType;
+
+        const challans = DataManager.getData('challans') || [];
+        challans.push(challan);
+
+        const newBin = bin.filter((_, i) => i !== index);
+
+        // Deduct items back from inventory (reverse of what was done on delete)
+        await this.adjustInventoryStock(challan.items, false);
+
+        await DataManager.saveData('challans', challans);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin);
+
+        return challan;
     },
 
     /**

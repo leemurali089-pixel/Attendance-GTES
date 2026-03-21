@@ -160,6 +160,7 @@ const AdminModule = {
                                                 <input type="text" class="form-control" id="companyUPI" value="${s.upiId}" placeholder="e.g. yourname@okicici">
                                             </div>
                                         </div>
+                                    </div>
                                 </div>
 
                                 <div class="card mb-4">
@@ -402,7 +403,7 @@ const AdminModule = {
     getUserModalHTML() {
         return `
             <div class="modal fade" id="userModal" tabindex="-1">
-                <div class="modal-dialog">
+                <div class="modal-dialog modal-dialog-scrollable">
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="userModalTitle">Add User</h5>
@@ -428,7 +429,8 @@ const AdminModule = {
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Password</label>
-                                    <input type="password" class="form-control" id="userPassword" placeholder="Leave blank to keep unchanged">
+                                    <input type="password" class="form-control" id="userPassword" placeholder="Enter new password">
+                                    <small class="form-text text-muted" id="passwordHint">Leave blank to keep existing password unchanged.</small>
                                 </div>
                                 <div class="mb-3">
                                     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -507,6 +509,10 @@ const AdminModule = {
         document.getElementById('userForm').reset();
         document.getElementById('userId').value = '';
         document.getElementById('userModalTitle').textContent = 'Add User';
+        const hint = document.getElementById('passwordHint');
+        if (hint) hint.style.display = 'none'; // Password required for new users
+        const passField = document.getElementById('userPassword');
+        if (passField) passField.placeholder = 'Enter password (required)';
         new bootstrap.Modal(document.getElementById('userModal')).show();
     },
 
@@ -521,6 +527,10 @@ const AdminModule = {
         document.getElementById('userRole').value = user.role;
         document.getElementById('userPassword').value = ''; // Don't show password
         document.getElementById('userModalTitle').textContent = 'Edit User';
+        const hint = document.getElementById('passwordHint');
+        if (hint) hint.style.display = 'block'; // Show hint: password is optional for edits
+        const passField = document.getElementById('userPassword');
+        if (passField) passField.placeholder = 'Leave blank to keep existing password';
 
         // Set permissions
         const permissions = user.permissions || [];
@@ -533,39 +543,53 @@ const AdminModule = {
 
     async saveUser() {
         const id = document.getElementById('userId').value;
-        const username = document.getElementById('userUsername').value;
-        const fullName = document.getElementById('userFullName').value;
-        const role = document.getElementById('userRole').value;
+        const username = (document.getElementById('userUsername').value || '').trim();
+        const fullName = (document.getElementById('userFullName').value || '').trim();
+        const role = document.getElementById('userRole').value || 'user';
         const password = document.getElementById('userPassword').value;
         const permissions = Array.from(document.querySelectorAll('.user-permission:checked')).map(cb => cb.value);
 
-        // Ensure users always have at least VIEW_DASHBOARD permission
+        if (!username) { alert('Username is required.'); return; }
+        if (!fullName) { alert('Full Name is required.'); return; }
+
+        // Ensure VIEW_DASHBOARD is always included
         if (!permissions.includes('VIEW_DASHBOARD')) {
             permissions.push('VIEW_DASHBOARD');
         }
 
+        // Disable save button to prevent double-submit
+        const saveBtn = document.querySelector('#userModal .btn-primary');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
         try {
             if (id) {
-                // Update
+                // Update existing user
                 const updates = { username, fullName, role, permissions };
                 if (password) updates.password = password;
                 await UserManager.updateUser(id, updates);
                 AuditManager.log('USER_UPDATE', `Updated user ${username}`);
             } else {
-                // Create
-                if (!password) {
-                    alert('Password is required for new users');
-                    return;
-                }
+                // Create new user
+                if (!password) { alert('Password is required for new users'); return; }
                 await UserManager.createUser({ username, password, fullName, role, permissions });
                 AuditManager.log('USER_CREATE', `Created user ${username}`);
             }
 
-            bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
-            this.loadUsers();
-            App.showNotification('User saved successfully', 'success');
+            // Close modal safely
+            const modalEl = document.getElementById('userModal');
+            if (modalEl) {
+                let inst = bootstrap.Modal.getInstance(modalEl);
+                if (!inst) inst = new bootstrap.Modal(modalEl);
+                inst.hide();
+            }
+
+            await this.loadUsers();
+            App.showNotification('User saved successfully!', 'success');
         } catch (error) {
-            alert(error.message);
+            console.error('saveUser error:', error);
+            alert('Error saving user: ' + error.message);
+        } finally {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save User'; }
         }
     },
 

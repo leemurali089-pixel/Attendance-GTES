@@ -84,6 +84,20 @@ const DeliveryUI = {
         }
     },
 
+    /**
+     * Lightweight init — only sets up data managers, no UI rendering.
+     * Used when navigating to accounting sub-views (Challans, Job Cards, Customers).
+     */
+    async initManagersOnly() {
+        try {
+            if (typeof CustomerManager !== 'undefined') await CustomerManager.init();
+            if (typeof InventoryManager !== 'undefined') await InventoryManager.init();
+            if (typeof DeliveryManager !== 'undefined') await DeliveryManager.init();
+        } catch (error) {
+            console.error('DeliveryUI initManagersOnly failed:', error);
+        }
+    },
+
     setupEventListeners() {
         // Challan type change
         const challanTypeEl = document.getElementById('challanType');
@@ -505,7 +519,7 @@ const DeliveryUI = {
         if (!input) return;
 
         // Determine if we should only look for services
-        const isServiceSearch = inputId === 'globalServiceSearch';
+        const isServiceSearch = inputId.toLowerCase().includes('servicesearch');
 
         const processSelection = (value) => {
             if (!value) return;
@@ -527,6 +541,7 @@ const DeliveryUI = {
                 if (type === 'challan') this.addItemRow(found);
                 else if (type === 'invoice') this.addInvoiceItemRow(found);
                 else if (type === 'jobcard') this.addJobCardMaterialRow(found);
+                else if (type === 'jobcard_view') this.addJobCardMaterialRow(found, 'jcViewMaterialsBody');
 
                 App.showNotification(`Added ${found.name}`, 'success');
                 return true;
@@ -560,22 +575,40 @@ const DeliveryUI = {
 
     handleCustomerSearch(inputId, targetId) {
         const input = document.getElementById(inputId);
-        if (!input) return;
+        const targetSelect = document.getElementById(targetId);
+        if (!input || !targetSelect) return;
 
-        input.addEventListener('input', () => {
-            const value = input.value.trim();
-            // Filter out system accounts from searchable inputs
-            const customers = CustomerManager.getAllCustomers().filter(c => this.getAccountCategory(c) === 'Customer');
-            const found = customers.find(c => c.name === value);
+        const updateTarget = (value) => {
+            const query = value.trim().toLowerCase();
+            console.log(`Searching for customer: "${query}"`);
+
+            if (!query) {
+                targetSelect.value = '';
+                return;
+            }
+
+            const customers = CustomerManager.getAllCustomers().filter(c => {
+                const cat = this.getAccountCategory(c);
+                return cat === 'Customer' || cat === 'Supplier';
+            });
+            
+            const found = customers.find(c => 
+                (c.name && c.name.trim().toLowerCase() === query) || 
+                (c.phone && String(c.phone).trim().toLowerCase() === query)
+            );
 
             if (found) {
-                const targetSelect = document.getElementById(targetId);
-                if (targetSelect) {
-                    targetSelect.value = found.id;
-                    targetSelect.dispatchEvent(new Event('change'));
-                }
+                targetSelect.value = found.id;
+                targetSelect.dispatchEvent(new Event('change'));
+                console.log(`Customer search matched: ${found.name} (${found.id})`);
+            } else {
+                targetSelect.value = ''; // Clear if no match
+                if (query.length > 2) console.warn(`Customer search found no match for: "${query}" total checked: ${customers.length}`);
             }
-        });
+        };
+
+        input.addEventListener('input', () => updateTarget(input.value));
+        input.addEventListener('change', () => updateTarget(input.value));
     },
 
     async quickAddToInventory(rowId) {
@@ -863,8 +896,30 @@ const DeliveryUI = {
     },
 
     loadCustomers(searchQuery = '') {
-        const container = document.getElementById('customersContainer');
+        let containerId = this.currentCustomersContainerId || 'customersContainer';
+        let container = document.getElementById(containerId);
+
+        // Robust Container Detection: Scan all arguments for a container ID
+        const args = Array.from(arguments);
+        const viewArg = args.find(a => typeof a === 'string' && (a.endsWith('View') || a.endsWith('Container')));
+        if (viewArg) {
+            containerId = viewArg;
+            container = document.getElementById(containerId);
+            // If the viewArg was the first arg, arguments[1] might be search. 
+            // If it was the second arg, arguments[0] might be search.
+            const otherArg = args.find(a => typeof a === 'string' && a !== viewArg);
+            if (otherArg) searchQuery = otherArg;
+        }
+
         if (!container) return;
+
+        // If we're rendering into a top-level view, we might need a shell
+        if (container.classList.contains('view-section')) {
+            const accId = 'accCustomersContainer_' + Date.now();
+            container.innerHTML = `<div class="container-fluid p-4" id="${accId}"></div>`;
+            container = container.querySelector('#' + accId);
+            this.currentCustomersContainerId = accId;
+        }
 
         const allData = CustomerManager.getAllCustomers();
 
@@ -898,7 +953,7 @@ const DeliveryUI = {
             customers = customers.filter(c =>
                 c.name.toLowerCase().includes(lowerQuery) ||
                 (c.gstin || '').toLowerCase().includes(lowerQuery) ||
-                (c.phone || '').includes(searchQuery)
+                String(c.phone || '').includes(searchQuery)
             );
         }
 
@@ -916,9 +971,14 @@ const DeliveryUI = {
                         <h4 class="mb-0 text-primary">
                             <i class="bi bi-people-fill me-2"></i>${typeLabels[this.currentCustomerType]} (${customers.length})
                         </h4>
-                        <button class="btn btn-primary btn-sm" onclick="DeliveryUI.showCustomerModal()">
-                            <i class="bi bi-plus-circle me-1"></i> Add ${this.currentCustomerType}
-                        </button>
+                        <div class="btn-group">
+                            <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                                <i class="bi bi-grid-fill me-1"></i> Apps
+                            </button>
+                            <button class="btn btn-primary btn-sm ms-2" onclick="DeliveryUI.showCustomerModal()">
+                                <i class="bi bi-plus-circle me-1"></i> Add ${this.currentCustomerType}
+                            </button>
+                        </div>
                     </div>
 
                     <div class="input-group mb-3 glass-panel p-2 rounded">
@@ -939,10 +999,12 @@ const DeliveryUI = {
                             </thead>
                             <tbody>
                                 ${customers.length === 0 ? `<tr><td colspan="3" class="text-center p-5 text-muted">No ${this.currentCustomerType.toLowerCase()}s found</td></tr>` :
-                customers.map(c => `
+                customers.map(c => {
+                    try {
+                        return `
                                     <tr onclick="DeliveryUI.showCustomerBills('${c.id}')" style="cursor: pointer;">
                                         <td>
-                                            <div class="fw-bold text-white">${c.name}</div>
+                                            <div class="fw-bold text-white">${c.name || c.displayName || '(No Name)'}</div>
                                             <div class="extra-small text-muted">
                                                 ${c.gstin ? `<span class="me-2"><i class="bi bi-tag-fill me-1"></i>${c.gstin}</span>` : ''}
                                                 ${c.phone ? `<span><i class="bi bi-telephone-fill me-1"></i>${c.phone}</span>` : ''}
@@ -967,7 +1029,12 @@ const DeliveryUI = {
                                             </div>
                                         </td>
                                     </tr>
-                                `).join('')}
+                                `;
+                    } catch (e) {
+                        console.error('Error rendering customer row:', e, c);
+                        return `<tr class="table-danger"><td colspan="3">Error rendering record: ${c.name || c.id}</td></tr>`;
+                    }
+                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -1333,7 +1400,12 @@ const DeliveryUI = {
         `;
 
         // Remove old modal if exists
-        document.getElementById('ledgerModal')?.remove();
+        const oldModal = document.getElementById('ledgerModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
 
         // Insert modal HTML into DOM
         document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -1660,15 +1732,59 @@ const DeliveryUI = {
 
     // History Management
     loadHistory() {
-        const container = document.getElementById('historyContainer');
-        if (!container) return;
+        // Robust Container Detection
+        let containerId = this.currentHistoryContainerId || 'historyContainer';
+        let container = document.getElementById(containerId);
+
+        const args = Array.from(arguments);
+        const viewArg = args.find(a => typeof a === 'string' && (a.endsWith('View') || a.endsWith('Container')));
+        if (viewArg) {
+            containerId = viewArg;
+            container = document.getElementById(containerId);
+        }
+
+        console.log("loadHistory Diagnostics:", {
+            args: args,
+            viewArg: viewArg,
+            containerId: containerId,
+            containerExists: !!container
+        });
+
+        if (!container) {
+            console.error("loadHistory failed: container not found for ID", containerId);
+            App.showNotification("System Error: Container " + containerId + " not found in DOM", "error");
+            return;
+        }
+
+        // Diagnostic visual marker so we know the function ran
+        container.innerHTML = `<div class="p-3 bg-warning text-dark mb-3">Diagnostic: loadHistory is running...</div>`;
+
+        if (container.classList.contains('view-section')) {
+            const accId = 'accHistoryContainer_' + Date.now();
+            container.innerHTML = `<div class="container-fluid p-4" id="${accId}"></div>`;
+            container = container.querySelector('#' + accId);
+            this.currentHistoryContainerId = accId;
+        }
 
         const challans = DeliveryManager.getAllChallans();
         const invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
         const jobCards = (typeof JobCardManager !== 'undefined') ? JobCardManager.getAllJobCards() : [];
         const vouchers = (typeof VoucherManager !== 'undefined') ? DataManager.getData('vouchers') || [] : [];
         const customers = CustomerManager.getAllCustomers();
-        const technicians = [...new Set((DataManager.getData('employees') || []).map(e => e.name))];
+        
+        // Optimization: Create a customer map for O(1) lookups
+        const customerMap = new Map();
+        customers.forEach(c => {
+            if (c.id && c.id !== 'undefined') {
+                customerMap.set(c.id, c.name);
+            }
+        });
+
+        const employees = DataManager.getData('employees') || [];
+        const employeeMap = new Map();
+        employees.forEach(e => employeeMap.set(e.id, e.name));
+        
+        const technicians = [...new Set(employees.map(e => e.name))];
 
         // 1. Gather Data based on dataType
         let data = [];
@@ -1706,21 +1822,32 @@ const DeliveryUI = {
             data = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase')).map(p => ({ ...p, _source: 'purchase', total: p.amount }));
         }
 
-        // 2. Financial Year Helper
+        // 2. Financial Year Helper - Optimized to avoid heavy Date objects if possible
         const getFY = (dateStr) => {
+            if (!dateStr) return 'Unknown';
+            // Fast path for ISO strings or YYYY-MM-DD
+            if (typeof dateStr === 'string' && dateStr.length >= 10 && dateStr[4] === '-' && dateStr[7] === '-') {
+                const y = parseInt(dateStr.substring(0, 4));
+                const m = parseInt(dateStr.substring(5, 7));
+                const start = m >= 4 ? y : y - 1; // FY starts in April (m=4)
+                return `${start}-${(start + 1).toString().slice(2)}`;
+            }
             const d = new Date(dateStr);
-            const m = d.getMonth();
+            const m = d.getMonth() + 1;
             const y = d.getFullYear();
-            const start = m >= 3 ? y : y - 1;
+            const start = m >= 4 ? y : y - 1;
             return `${start}-${(start + 1).toString().slice(2)}`;
         };
-        const allFYs = [...new Set([...challans, ...invoices, ...jobCards, ...vouchers].map(item => getFY(item.date || item.createdAt)))].sort().reverse();
+        
+        // Cache FYs to avoid recalculating in the filter loop
+        data.forEach(item => { item._fy = getFY(item.date || item.createdAt); });
+        
+        const allFYs = [...new Set(data.map(item => item._fy))].filter(fy => fy !== 'Unknown').sort().reverse();
 
         // 3. Apply Filters
         const filtered = data.filter(item => {
-            const itemDate = item.date || item.createdAt;
             // FY Filter
-            const matchesFY = this.historyFilters.fy === 'all' || getFY(itemDate) === this.historyFilters.fy;
+            const matchesFY = this.historyFilters.fy === 'all' || item._fy === this.historyFilters.fy;
 
             // Technician Filter (only for challans/JC)
             let matchesTech = true;
@@ -1728,8 +1855,7 @@ const DeliveryUI = {
                 if (item._source === 'challan' || item._source === 'jobcard') {
                     let currentTechName = item.technicianId || item.technician;
                     if (currentTechName && currentTechName.startsWith('emp_')) {
-                        const emp = (DataManager.getData('employees') || []).find(e => e.id === currentTechName);
-                        if (emp) currentTechName = emp.name;
+                        currentTechName = employeeMap.get(currentTechName) || currentTechName;
                     }
                     matchesTech = currentTechName === this.historyFilters.technician;
                 } else {
@@ -1761,10 +1887,10 @@ const DeliveryUI = {
 
             // Search
             const searchLower = this.historyFilters.search.toLowerCase();
-            const customer = customers.find(c => c.id === item.customerId);
+            const custName = customerMap.get(item.customerId) || '';
             const matchesSearch = !searchLower ||
                 (item.id && item.id.toLowerCase().includes(searchLower)) ||
-                (customer && customer.name.toLowerCase().includes(searchLower)) ||
+                (custName.toLowerCase().includes(searchLower)) ||
                 (item.customNumber && item.customNumber.toLowerCase().includes(searchLower));
 
             return matchesFY && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
@@ -1774,192 +1900,262 @@ const DeliveryUI = {
         filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         // 5. Render UI
-        container.innerHTML = `
-            <div class="card glass-panel border-0 mb-4">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="mb-0 text-muted">Data Filters</h6>
-                        <button class="btn btn-outline-info btn-sm" onclick="ExportImportHelper.showModal('invoices-sales')">
-                            <i class="bi bi-arrow-left-right me-1"></i> Export/Import
-                        </button>
-                    </div>
-                    <div class="row g-3">
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Data Type</label>
-                            <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                onchange="DeliveryUI.setHistoryFilter('dataType', this.value)">
-                                <option value="all" ${this.historyFilters.dataType === 'all' ? 'selected' : ''}>All Records</option>
-                                <option value="challan-dc" ${this.historyFilters.dataType === 'challan-dc' ? 'selected' : ''}>Delivery Challans</option>
-                                <option value="challan-sc" ${this.historyFilters.dataType === 'challan-sc' ? 'selected' : ''}>Service Challans</option>
-                                <option value="invoice-gst" ${this.historyFilters.dataType === 'invoice-gst' ? 'selected' : ''}>GST Invoices</option>
-                                <option value="invoice-non-gst" ${this.historyFilters.dataType === 'invoice-non-gst' ? 'selected' : ''}>Non-GST Invoices</option>
-                                <option value="job-cards" ${this.historyFilters.dataType === 'job-cards' ? 'selected' : ''}>Job Cards</option>
-                                <optgroup label="Vouchers">
-                                    <option value="vouchers-receipt" ${this.historyFilters.dataType === 'vouchers-receipt' ? 'selected' : ''}>Receipts</option>
-                                    <option value="vouchers-payment" ${this.historyFilters.dataType === 'vouchers-payment' ? 'selected' : ''}>Payments</option>
-                                </optgroup>
-                                <option value="purchases" ${this.historyFilters.dataType === 'purchases' ? 'selected' : ''}>Purchases</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Financial Year</label>
-                            <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                onchange="DeliveryUI.setHistoryFilter('fy', this.value)">
-                                <option value="all">All Year</option>
-                                ${allFYs.map(fy => `<option value="${fy}" ${this.historyFilters.fy === fy ? 'selected' : ''}>FY ${fy}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Customer</label>
-                            <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                onchange="DeliveryUI.setHistoryFilter('customerId', this.value)">
-                                <option value="all">All Customers</option>
-                                ${customers.map(c => `<option value="${c.id}" ${this.historyFilters.customerId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Status</label>
-                            <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                onchange="DeliveryUI.setHistoryFilter('status', this.value)">
-                                <option value="all" ${this.historyFilters.status === 'all' ? 'selected' : ''}>All Status</option>
-                                <optgroup label="Invoices">
-                                    <option value="pending" ${this.historyFilters.status === 'pending' ? 'selected' : ''}>Unpaid (Pending)</option>
-                                    <option value="paid" ${this.historyFilters.status === 'paid' ? 'selected' : ''}>Paid</option>
-                                </optgroup>
-                                <optgroup label="Challans">
-                                    <option value="pending-invoice" ${this.historyFilters.status === 'pending-invoice' ? 'selected' : ''}>Not Invoiced</option>
-                                    <option value="invoiced" ${this.historyFilters.status === 'invoiced' ? 'selected' : ''}>Invoiced</option>
-                                </optgroup>
-                                <optgroup label="Job Cards">
-                                    <option value="pending-jc" ${this.historyFilters.status === 'pending-jc' ? 'selected' : ''}>Pending (All)</option>
-                                    <option value="job_done" ${this.historyFilters.status === 'job_done' ? 'selected' : ''}>Job Done</option>
-                                    <option value="dispatched" ${this.historyFilters.status === 'dispatched' ? 'selected' : ''}>Dispatched</option>
-                                </optgroup>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Technician</label>
-                            <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                onchange="DeliveryUI.setHistoryFilter('technician', this.value)">
-                                <option value="all">All Technicians</option>
-                                ${technicians.map(t => `<option value="${t}" ${this.historyFilters.technician === t ? 'selected' : ''}>${t}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted">Search ID/DC</label>
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
-                                <input type="text" class="form-control bg-dark text-white border-secondary" 
-                                    placeholder="Search..." value="${this.historyFilters.search}"
-                                    oninput="DeliveryUI.setHistoryFilter('search', this.value)">
-                                <button class="btn btn-outline-warning" onclick="DeliveryUI.repairImportedData()" title="Repair / Sync Data">
-                                    <i class="bi bi-wrench"></i>
+        // Only render the filter skeleton if it's not already there
+        const resultsExist = document.getElementById('historyTableBody');
+        if (!resultsExist) {
+            container.innerHTML = `
+                <div class="card glass-panel border-0 mb-4">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0 text-muted">Data Filters</h6>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline-warning btn-sm" onclick="RecycleBinUI.open()" title="Recycle Bin">
+                                    <i class="bi bi-trash3 me-1"></i> Recycle Bin
                                 </button>
+                                <button class="btn btn-outline-info btn-sm" onclick="ExportImportHelper.showModal('invoices-sales')">
+                                    <i class="bi bi-arrow-left-right me-1"></i> Export/Import
+                                </button>
+                            </div>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Data Type</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('dataType', this.value)">
+                                    <option value="all" ${this.historyFilters.dataType === 'all' ? 'selected' : ''}>All Records</option>
+                                    <option value="challan-dc" ${this.historyFilters.dataType === 'challan-dc' ? 'selected' : ''}>Delivery Challans</option>
+                                    <option value="challan-sc" ${this.historyFilters.dataType === 'challan-sc' ? 'selected' : ''}>Service Challans</option>
+                                    <option value="invoice-gst" ${this.historyFilters.dataType === 'invoice-gst' ? 'selected' : ''}>GST Invoices</option>
+                                    <option value="invoice-non-gst" ${this.historyFilters.dataType === 'invoice-non-gst' ? 'selected' : ''}>Non-GST Invoices</option>
+                                    <option value="job-cards" ${this.historyFilters.dataType === 'job-cards' ? 'selected' : ''}>Job Cards</option>
+                                    <optgroup label="Vouchers">
+                                        <option value="vouchers-receipt" ${this.historyFilters.dataType === 'vouchers-receipt' ? 'selected' : ''}>Receipts</option>
+                                        <option value="vouchers-payment" ${this.historyFilters.dataType === 'vouchers-payment' ? 'selected' : ''}>Payments</option>
+                                    </optgroup>
+                                    <option value="purchases" ${this.historyFilters.dataType === 'purchases' ? 'selected' : ''}>Purchases</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Financial Year</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('fy', this.value)">
+                                    <option value="all">All Year</option>
+                                    ${allFYs.map(fy => `<option value="${fy}" ${this.historyFilters.fy === fy ? 'selected' : ''}>FY ${fy}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Customer</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('customerId', this.value)">
+                                    <option value="all">All Customers</option>
+                                    ${customers.map(c => `<option value="${c.id}" ${this.historyFilters.customerId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Status</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('status', this.value)">
+                                    <option value="all" ${this.historyFilters.status === 'all' ? 'selected' : ''}>All Status</option>
+                                    <optgroup label="Invoices">
+                                        <option value="pending" ${this.historyFilters.status === 'pending' ? 'selected' : ''}>Unpaid (Pending)</option>
+                                        <option value="paid" ${this.historyFilters.status === 'paid' ? 'selected' : ''}>Paid</option>
+                                    </optgroup>
+                                    <optgroup label="Challans">
+                                        <option value="pending-invoice" ${this.historyFilters.status === 'pending-invoice' ? 'selected' : ''}>Not Invoiced</option>
+                                        <option value="invoiced" ${this.historyFilters.status === 'invoiced' ? 'selected' : ''}>Invoiced</option>
+                                    </optgroup>
+                                    <optgroup label="Job Cards">
+                                        <option value="pending-jc" ${this.historyFilters.status === 'pending-jc' ? 'selected' : ''}>Pending (All)</option>
+                                        <option value="job_done" ${this.historyFilters.status === 'job_done' ? 'selected' : ''}>Job Done</option>
+                                        <option value="dispatched" ${this.historyFilters.status === 'dispatched' ? 'selected' : ''}>Dispatched</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Technician</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('technician', this.value)">
+                                    <option value="all">All Technicians</option>
+                                    ${technicians.map(t => `<option value="${t}" ${this.historyFilters.technician === t ? 'selected' : ''}>${t}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Search ID/DC</label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control bg-dark text-white border-secondary" 
+                                        id="historySearchInput"
+                                        placeholder="Search..." value="${this.historyFilters.search}"
+                                        oninput="DeliveryUI.setHistoryFilter('search', this.value)">
+                                    <button class="btn btn-outline-warning" onclick="DeliveryUI.repairImportedData()" title="Repair / Sync Data">
+                                        <i class="bi bi-wrench"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="table-responsive">
-                <table class="table table-dark table-hover table-sm border-secondary align-middle">
-                    <thead>
-                        <tr>
-                            <th>ID / No</th>
-                            <th>Date</th>
-                            <th>Type</th>
-                            <th>Customer</th>
-                            <th>Total</th>
-                            <th>History / Status</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${filtered.length === 0 ? '<tr><td colspan="7" class="text-center p-4 text-muted">No matching records found</td></tr>' : ''}
-                        ${filtered.map(item => {
-            const customer = customers.find(c => c.id === item.customerId);
-            let typeBadge = '';
-            let statusHtml = '';
-            let actionHtml = '';
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover table-sm border-secondary align-middle">
+                        <thead>
+                            <tr>
+                                <th>ID / No</th>
+                                <th>Date</th>
+                                <th>Type</th>
+                                <th>Customer</th>
+                                <th>Total</th>
+                                <th>History / Status</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <!-- Rows rendered incrementally -->
+                        </tbody>
+                    </table>
+                    <div id="historyLoadingStatus" class="text-center py-3 d-none">
+                        <div class="spinner-border spinner-border-sm text-warning" role="status"></div>
+                        <span class="ms-2 small text-muted">Loading more records...</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Keep focus if we were searching
+            // Note: browser might handle this, but let's be careful.
+            // Just clear the body and restart rendering
+            resultsExist.innerHTML = '';
+        }
 
-            if (item._source === 'challan') {
-                typeBadge = item.type === 'service' ? 'bg-info' : 'bg-primary';
-                statusHtml = `
-                                    <span class="badge ${item.invoiceId ? 'bg-success' : 'bg-warning'}">${item.invoiceId ? 'INVOICED' : 'PENDING'}</span>
-                                    ${item.invoiceId ? `<br><small class="text-muted">${item.invoiceId}</small>` : ''}
-                                `;
-                actionHtml = `
-                                    <button class="btn btn-sm btn-outline-info" onclick="DeliveryUI.viewChallan('${item.id}')" title="View">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editChallan('${item.id}')" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                `;
-            } else if (item._source === 'invoice') {
-                typeBadge = item.type === 'with-bill' ? 'bg-success' : 'bg-secondary';
-                statusHtml = `
-                                    <span class="badge ${item.status === 'paid' ? 'bg-success' : 'bg-warning'}">${item.status.toUpperCase()}</span>
-                                    ${item.challanId ? `<br><small class="text-muted">Ref: ${item.challanId}</small>` : ''}
-                                `;
-                actionHtml = `
-                                    <button class="btn btn-sm btn-outline-success" onclick="DeliveryUI.viewInvoice('${item.id}')" title="View">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editInvoice('${item.id}')" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                `;
-            } else if (item._source === 'jobcard') {
-                typeBadge = 'bg-warning text-dark';
-                statusHtml = `
-                                    <span class="badge bg-secondary">${item.status.toUpperCase()}</span>
-                                    <br><small class="text-muted">${item.customerRef || ''}</small>
-                                `;
-                actionHtml = `
-                                    <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.viewJobCard('${item.id}')" title="View">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-info" onclick="DeliveryUI.editJobCard('${item.id}')" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                `;
-            } else if (item._source === 'voucher') {
-                typeBadge = 'bg-light text-dark';
-                statusHtml = `<span class="badge bg-outline-light text-muted small">${(item.type || 'PAYMENT').toUpperCase()}</span>`;
-                actionHtml = `
-                                    <button class="btn btn-sm btn-outline-light" onclick="DeliveryUI.viewVoucher('${item.id}')" title="View">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editVoucher('${item.id}')" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                `;
+        // Chunked Rendering Logic
+        const tbody = document.getElementById('historyTableBody');
+        const chunkSize = 50;
+        let currentIndex = 0;
+
+        const renderNextChunk = () => {
+            if (currentIndex >= filtered.length) {
+                if (filtered.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-muted">No matching records found</td></tr>';
+                }
+                const loadingStatus = document.getElementById('historyLoadingStatus');
+                if (loadingStatus) loadingStatus.classList.add('d-none');
+                return;
             }
 
-            return `
-                                <tr>
-                                    <td><span class="fw-bold">${item.id}</span></td>
-                                    <td>${DataManager.formatDateDisplay(item.date || item.createdAt)}</td>
-                                    <td><span class="badge ${typeBadge}">${item._source === 'challan' ? item.type.toUpperCase() : (item._source === 'invoice' ? (item.type === 'with-bill' ? 'GST INV' : 'NON-GST') : item._source.toUpperCase())}</span></td>
-                                    <td>${customer?.name || 'Unknown'}</td>
-                                    <td class="fw-bold">₹${(item.total || 0).toFixed(2)}</td>
-                                    <td>${statusHtml}</td>
-                                    <td class="text-end">
-                                        <div class="btn-group">
-                                            ${actionHtml}
-                                            <button class="btn btn-sm btn-outline-danger" onclick="DeliveryUI.deleteGenericRecord('${item._source}', '${item.id}')" title="Delete">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `;
-        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+            const loadingStatus = document.getElementById('historyLoadingStatus');
+            if (loadingStatus) loadingStatus.classList.remove('d-none');
+            
+            const chunk = filtered.slice(currentIndex, currentIndex + chunkSize);
+            const rowsHtml = chunk.map(item => {
+                try {
+                    let custName = customerMap.get(item.customerId) || item.customerName || 'N/A';
+                    // Extra fallback for synced documents
+                    if (custName === 'N/A' && item.invoiceId && typeof InvoiceManager !== 'undefined') {
+                        const linkedInv = InvoiceManager.getInvoice(item.invoiceId);
+                        if (linkedInv) custName = linkedInv.customerName || 'N/A';
+                    }
+                    let typeBadge = '';
+                    let statusHtml = '';
+                    let actionHtml = '';
+
+                    if (item._source === 'challan') {
+                        typeBadge = item.type === 'service' ? 'bg-info' : 'bg-primary';
+                        statusHtml = `
+                            <span class="badge ${item.invoiceId ? 'bg-success' : 'bg-warning'}">${item.invoiceId ? 'INVOICED' : 'PENDING'}</span>
+                            ${item.invoiceId ? `<br><small class="text-muted">${item.referenceNumber || item.invoiceId}</small>` : ''}
+                        `;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-info" onclick="DeliveryUI.viewChallan('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editChallan('${item.id}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="DeliveryUI.printChallan('${item.id}')" title="Download PDF">
+                                <i class="bi bi-download"></i>
+                            </button>
+                        `;
+                    } else if (item._source === 'invoice') {
+                        const invType = (item.type || '').toLowerCase();
+                        typeBadge = (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst') ? 'bg-success' : 'bg-secondary';
+                        const s = (item.status || 'pending').toUpperCase();
+                        statusHtml = `
+                            <span class="badge ${item.status === 'paid' ? 'bg-success' : 'bg-warning'}">${s}</span>
+                            ${item.challanId ? `<br><small class="text-muted">Ref: ${item.challanId}</small>` : ''}
+                        `;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-success" onclick="DeliveryUI.viewInvoice('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editInvoice('${item.id}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        `;
+                    } else if (item._source === 'jobcard') {
+                        typeBadge = 'bg-warning text-dark';
+                        const stat = (item.status || 'pending').toUpperCase();
+                        statusHtml = `
+                            <span class="badge bg-secondary">${stat}</span>
+                            <br><small class="text-muted">${item.customerRef || ''}</small>
+                        `;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.viewJobCard('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-info" onclick="DeliveryUI.editJobCard('${item.id}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        `;
+                    } else if (item._source === 'voucher') {
+                        typeBadge = 'bg-light text-dark';
+                        const vType = (item.type || 'PAYMENT').toUpperCase();
+                        statusHtml = `<span class="badge bg-outline-light text-muted small">${vType}</span>`;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-light" onclick="DeliveryUI.viewVoucher('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editVoucher('${item.id}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        `;
+                    }
+                    
+                    const safeTotal = (parseFloat(item.total) || 0).toFixed(2);
+                    const invType = (item.type || '').toLowerCase();
+                    const safeTypeStr = item._source === 'challan' ? (item.type || '').toUpperCase() : 
+                                      (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') : 
+                                      (item._source || '').toUpperCase());
+
+                    return `
+                        <tr>
+                            <td><span class="fw-bold">${item.id}</span></td>
+                            <td>${DataManager.formatDateDisplay(item.date || item.createdAt)}</td>
+                            <td><span class="badge ${typeBadge}">${safeTypeStr}</span></td>
+                            <td>${custName}</td>
+                            <td class="fw-bold">₹${safeTotal}</td>
+                            <td>${statusHtml}</td>
+                            <td class="text-end">
+                                <div class="btn-group">
+                                    ${actionHtml}
+                                    <button class="btn btn-sm btn-outline-danger" onclick="DeliveryUI.deleteGenericRecord('${item._source}', '${item.id}')" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                } catch(renderErr) {
+                    console.error("Error rendering row item:", item, renderErr);
+                    return `<tr><td colspan="7" class="text-danger">Error rendering record ${item.id}</td></tr>`;
+                }
+            }).join('');
+
+            tbody.insertAdjacentHTML('beforeend', rowsHtml);
+            currentIndex += chunkSize;
+
+            requestAnimationFrame(renderNextChunk);
+        };
+
+        renderNextChunk();
     },
 
     async deleteGenericRecord(source, id) {
@@ -1979,6 +2175,28 @@ const DeliveryUI = {
             } else {
                 if (!confirm(`Delete this invoice?`)) return;
             }
+        } else if (source === 'jobcard') {
+            const challans = DeliveryManager.getAllChallans();
+            const invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
+            const linkedChallan = challans.find(c => c.jobCardId === id);
+            const linkedInvoice = invoices.find(i => i.jobCardId === id);
+            
+            if (linkedChallan || linkedInvoice) {
+                let msg = `Delete this Job Card?\n\nClick OK to also delete the interlinked:\n`;
+                if (linkedInvoice) msg += `- Invoice (${linkedInvoice.invoiceNo || linkedInvoice.id})\n`;
+                if (linkedChallan) msg += `- Challan (${linkedChallan.id})\n`;
+                msg += `\nClick Cancel to ONLY delete the Job Card and keep the linked documents.`;
+                
+                const choice = confirm(msg);
+                if (choice) {
+                    deleteChallanToo = true; // Reusing this boolean to mean "delete all children"
+                } else {
+                    if (!confirm("Delete ONLY the Job Card? (The linked documents will remain)")) return;
+                    deleteChallanToo = false;
+                }
+            } else {
+                if (!confirm(`Delete this Job Card?`)) return;
+            }
         } else {
             if (!confirm(`Delete this ${source}?`)) return;
         }
@@ -1986,7 +2204,22 @@ const DeliveryUI = {
         try {
             if (source === 'challan') await DeliveryManager.deleteChallan(id);
             else if (source === 'invoice') await InvoiceManager.deleteInvoice(id, deleteChallanToo);
-            else if (source === 'jobcard') await JobCardManager.deleteJobCard(id);
+            else if (source === 'jobcard') {
+                await JobCardManager.deleteJobCard(id);
+                if (deleteChallanToo) {
+                    const challans = DeliveryManager.getAllChallans();
+                    const linkedChallan = challans.find(c => c.jobCardId === id);
+                    if (linkedChallan) await DeliveryManager.deleteChallan(linkedChallan.id);
+
+                    if (typeof InvoiceManager !== 'undefined') {
+                        const invoices = InvoiceManager.getAllInvoices();
+                        const linkedInvoices = invoices.filter(i => i.jobCardId === id);
+                        for (let inv of linkedInvoices) {
+                            await InvoiceManager.deleteInvoice(inv.id, false);
+                        }
+                    }
+                }
+            }
             else if (source === 'voucher') await VoucherManager.deleteVoucher(id);
             else if (source === 'purchase' && typeof ExpenseManager !== 'undefined') await ExpenseManager.deleteExpense(id);
 
@@ -2042,8 +2275,14 @@ const DeliveryUI = {
 
         const customer = CustomerManager.getCustomer(challan.customerId);
         const settings = DataManager.getData('gtes_settings') || {};
-        const companyName = settings.companyName || "MJS PrimeLogic";
-        const companyAddress = settings.registeredAddress || "123, Tech Park, City";
+        const companyName = settings.companyName || "Gas Tech Engineering Service";
+        const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
+        const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
+        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
+        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
+        const gstin = settings.gstin || "33AFXPR3235A32F";
+        const pan = settings.pan || "AFXPR3235A";
+        const iec = settings.iec || "AFXPR3235A";
         const typeLabel = challan.type === 'delivery' ? 'Delivery Challan' : 'Service Challan';
 
         const formatDate = (dateStr) => {
@@ -2088,8 +2327,11 @@ const DeliveryUI = {
                                 <!-- Header Section -->
                                 <div class="row mb-5 border-bottom border-dark border-2 pb-3">
                                     <div class="col-7">
-                                        <h2 class="fw-bold text-primary mb-1">${companyName}</h2>
-                                        <p class="mb-0 text-muted small" style="max-width: 300px;">${companyAddress}</p>
+                                        <h2 class="fw-bold text-primary mb-1">${companyName.toUpperCase()}</h2>
+                                        <p class="mb-0 text-muted small" style="max-width: 400px;">${companyAddress}</p>
+                                        <p class="mb-0 text-muted extra-small">Work: ${workAddress}</p>
+                                        <p class="mb-0 text-muted extra-small">Email: ${email} | Ph: ${phone}</p>
+                                        <p class="mb-0 text-muted extra-small fw-bold">GSTIN: ${gstin} | PAN: ${pan}</p>
                                     </div>
                                     <div class="col-5 text-end">
                                         <h3 class="fw-bold text-uppercase mb-1" style="letter-spacing: 2px; color: #333;">${typeLabel}</h3>
@@ -2105,9 +2347,9 @@ const DeliveryUI = {
                                     <div class="col-6">
                                         <div class="p-3 border rounded-3 h-100 bg-light bg-opacity-50">
                                             <h6 class="text-uppercase text-muted extra-small fw-bold mb-3 border-bottom pb-1">Billed To / Customer</h6>
-                                            <h5 class="fw-bold mb-1">${customer?.name || 'Walk-in Customer'}</h5>
+                                            <h5 class="fw-bold mb-1">${customer?.name || challan.customerName || (window.InvoiceManager && challan.invoiceId ? InvoiceManager.getInvoice(challan.invoiceId)?.customerName : '') || 'Walk-in Customer'}</h5>
                                             <div class="small text-muted mb-2">
-                                                ${customer?.address ? `<div>${customer.address}</div>` : ''}
+                                                ${customer?.address ? `<div>${customer.address}</div>` : (challan.customerAddress ? `<div>${challan.customerAddress}</div>` : (window.InvoiceManager && challan.invoiceId ? `<div>${InvoiceManager.getInvoice(challan.invoiceId)?.customerAddress || ''}</div>` : ''))}
                                                 ${customer?.phone ? `<div>Phone: ${customer.phone}</div>` : ''}
                                                 ${customer?.gstin ? `<div class="mt-2 fw-bold text-dark">GSTIN: ${customer.gstin}</div>` : ''}
                                             </div>
@@ -2125,6 +2367,26 @@ const DeliveryUI = {
                                                 <tr class="small">
                                                     <td class="text-muted py-1">Ref No:</td>
                                                     <td class="fw-bold text-end py-1">${challan.referenceNumber}</td>
+                                                </tr>` : ''}
+                                                ${challan.dispatchVia ? `
+                                                <tr class="small">
+                                                    <td class="text-muted py-1">Dispatch Via:</td>
+                                                    <td class="fw-bold text-end py-1">${challan.dispatchVia}</td>
+                                                </tr>` : ''}
+                                                ${challan.lrNo ? `
+                                                <tr class="small">
+                                                    <td class="text-muted py-1">LR / Track No:</td>
+                                                    <td class="fw-bold text-end py-1">${challan.lrNo}</td>
+                                                </tr>` : ''}
+                                                ${challan.vehicleNo ? `
+                                                <tr class="small">
+                                                    <td class="text-muted py-1">Vehicle No:</td>
+                                                    <td class="fw-bold text-end py-1">${challan.vehicleNo}</td>
+                                                </tr>` : ''}
+                                                ${challan.dispatchDate ? `
+                                                <tr class="small">
+                                                    <td class="text-muted py-1">Dispatch Date:</td>
+                                                    <td class="fw-bold text-end py-1">${formatDate(challan.dispatchDate)}</td>
                                                 </tr>` : ''}
                                                 ${challan.technicianId ? `
                                                 <tr class="small">
@@ -2238,7 +2500,13 @@ const DeliveryUI = {
             </div>
         `;
 
-        document.getElementById('challanViewModal')?.remove();
+        const oldModalEl = document.getElementById('challanViewModal');
+        if (oldModalEl) {
+            const oldInstance = bootstrap.Modal.getInstance(oldModalEl);
+            if (oldInstance) oldInstance.hide();
+            oldModalEl.remove();
+        }
+
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         const modal = new bootstrap.Modal(document.getElementById('challanViewModal'));
         modal.show();
@@ -2324,7 +2592,7 @@ const DeliveryUI = {
             const invoiceData = {
                 date: new Date().toISOString().split('T')[0],
                 customerId: challan.customerId,
-                customerName: CustomerManager.getCustomer(challan.customerId)?.name || 'Unknown',
+                customerName: CustomerManager.getCustomer(challan.customerId)?.name || challan.customerName || 'Walk-in Customer',
                 challanId: challan.id,
                 type: challan.gstMode ? 'with-bill' : 'without-bill',
                 items: challan.items,
@@ -2487,8 +2755,25 @@ const DeliveryUI = {
     },
 
     loadJobCards() {
-        const container = document.getElementById('jobCardContainer');
+        // Robust Container Detection
+        let containerId = this.currentJobCardContainerId || 'jobCardContainer';
+        let container = document.getElementById(containerId);
+
+        const args = Array.from(arguments);
+        const viewArg = args.find(a => typeof a === 'string' && (a.endsWith('View') || a.endsWith('Container')));
+        if (viewArg) {
+            containerId = viewArg;
+            container = document.getElementById(containerId);
+        }
+
         if (!container) return;
+
+        if (container.classList.contains('view-section')) {
+            const accId = 'accJobCardContainer_' + Date.now();
+            container.innerHTML = `<div class="container-fluid p-4" id="${accId}"></div>`;
+            container = container.querySelector('#' + accId);
+            this.currentJobCardContainerId = accId;
+        }
 
         let jobCards = (typeof JobCardManager !== 'undefined') ? JobCardManager.getAllJobCards() : [];
 
@@ -2506,10 +2791,15 @@ const DeliveryUI = {
 
         container.innerHTML = `
         <div class="d-flex justify-content-between align-items-center mb-3">
-                <h4><i class="bi bi-tools text-warning me-2"></i>Job Cards</h4>
-                <button class="btn btn-primary" onclick="DeliveryUI.showJobCardForm()">
-                    <i class="bi bi-plus-circle me-1"></i> New Job Card
-                </button>
+                <h4 class="mb-0"><i class="bi bi-tools text-warning me-2"></i>Job Cards</h4>
+                <div class="btn-group">
+                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <i class="bi bi-grid-fill me-1"></i> Apps
+                    </button>
+                    <button class="btn btn-primary btn-sm ms-2" onclick="DeliveryUI.showJobCardForm()">
+                        <i class="bi bi-plus-circle me-1"></i> New Job Card
+                    </button>
+                </div>
             </div>
             
             <div class="d-flex gap-2 mb-3 overflow-auto">
@@ -2535,7 +2825,9 @@ const DeliveryUI = {
                     </thead>
                     <tbody>
                         ${jobCards.length === 0 ? '<tr><td colspan="7" class="text-center text-light py-4">No job cards found</td></tr>' :
-                jobCards.map(jc => `
+                jobCards.map(jc => {
+                                try {
+                                    return `
                                 <tr>
                                     <td>${jc.id}</td>
                                     <td>${DataManager.formatDateDisplay(jc.date)}</td>
@@ -2552,7 +2844,12 @@ const DeliveryUI = {
                                         </button>
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `;
+                                } catch (e) {
+                                    console.error('Error rendering jobcard row:', e, jc);
+                                    return `<tr class="table-danger"><td colspan="7">Error rendering record: ${jc.id}</td></tr>`;
+                                }
+                            }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -2571,7 +2868,7 @@ const DeliveryUI = {
 
     async showJobCardForm() {
         this.updateInventoryDatalist();
-        const container = document.getElementById('jobCardContainer');
+        const container = document.getElementById(this.currentJobCardContainerId || 'jobCardContainer');
         if (!container) return;
 
         let technicians = [];
@@ -2628,10 +2925,7 @@ const DeliveryUI = {
                                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                                     <input type="text" class="form-control" id="jcCustomerSearch" 
                                         placeholder="Type customer name..." list="customerList" autocomplete="off" required>
-                                    <select id="jcCustomer" style="display: none;">
-                                        <option value="">Select Customer...</option>
-                                        ${customers.map(c => `<option value="${c.id}">${c.name} (${c.phone || '-'})</option>`).join('')}
-                                    </select>
+                                    <input type="hidden" id="jcCustomer" required>
                                 </div>
                             </div>
                             <div class="col-md-4 d-flex align-items-end">
@@ -2743,6 +3037,8 @@ const DeliveryUI = {
 
         // Initialize search
         this.handleInventorySearch('jcGlobalSearch', 'jobcard');
+        this.handleInventorySearch('jcServiceSearch', 'jobcard');
+        this.handleCustomerSearch('jcCustomerSearch', 'jcCustomer');
 
         // Add event listener for form submit
         document.getElementById('jobCardForm').addEventListener('submit', (e) => {
@@ -2751,10 +3047,12 @@ const DeliveryUI = {
         });
     },
 
-    addJobCardMaterialRow(data = null) {
-        const tbody = document.getElementById('jcMaterialsBody');
+    addJobCardMaterialRow(data = null, targetBodyId = 'jcMaterialsBody') {
+        const tbody = document.getElementById(targetBodyId);
         const emptyRow = document.getElementById('emptyMaterialsRow');
+        const viewEmptyRow = document.getElementById('viewEmptyMaterialsRow');
         if (emptyRow) emptyRow.remove();
+        if (viewEmptyRow) viewEmptyRow.remove();
 
         const row = document.createElement('tr');
         row.innerHTML = `
@@ -2774,8 +3072,6 @@ const DeliveryUI = {
                     <option value="installed">Installed</option>
                     <option value="returned">Returned</option>
                 </select>
-            </td>
-            <td class="text-end">
                 <button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('tr').remove()">
                     <i class="bi bi-trash"></i>
                 </button>
@@ -2786,10 +3082,35 @@ const DeliveryUI = {
 
     async saveJobCard() {
         try {
-            const customerId = document.getElementById('jcCustomer').value;
-            const customer = CustomerManager.getCustomer(customerId);
+            let customerId = document.getElementById('jcCustomer').value;
+            const customerNameInput = document.getElementById('jcCustomerSearch');
+            const customerName = customerNameInput ? customerNameInput.value.trim() : '';
 
-            if (!customer) throw new Error('Please select a valid customer');
+            console.log('Attempting to save Job Card.', { customerId, customerName });
+            
+            let customer = CustomerManager.getCustomer(customerId);
+            
+            // Fallback Search: If hidden ID is missing but name matches an existing customer exactly
+            if (!customer && customerName) {
+                console.log('Hidden ID missing. Attempting fallback search by name:', customerName);
+                const allCustomers = CustomerManager.getAllCustomers();
+                customer = allCustomers.find(c => 
+                    (c.name && c.name.trim().toLowerCase() === customerName.toLowerCase()) ||
+                    (c.phone && String(c.phone).trim() === customerName)
+                );
+                
+                if (customer) {
+                    customerId = customer.id || '';
+                    console.log('Fallback match found:', customer.name, customer.id);
+                }
+            }
+
+            if (!customer) {
+                const allCustomers = CustomerManager.getAllCustomers();
+                console.error('Validation failed: No valid customer found for input:', customerName);
+                console.log('Available customers in system:', allCustomers.map(c => c.name));
+                throw new Error('Please select a valid customer');
+            }
 
             // Gather materials
             const materials = [];
@@ -2949,19 +3270,66 @@ const DeliveryUI = {
                                         </div>
                                     </div>
 
-                                    <h6 class="fw-bold mb-3 small text-dark"><i class="bi bi-box-seam me-2"></i>Materials Tracking</h6>
+                                    <!-- Search Section Added -->
+                                    <div class="row g-3 mb-4">
+                                        <div class="col-md-6">
+                                            <div class="card glass-panel border-secondary h-100 bg-light">
+                                                <div class="card-body p-2 text-dark">
+                                                    <label class="form-label small text-muted text-uppercase fw-bold mb-1">Search Inventory (Materials)</label>
+                                                    <div class="input-group input-group-sm mb-2">
+                                                        <span class="input-group-text bg-white border-secondary text-primary"><i class="bi bi-search"></i></span>
+                                                        <input type="text" class="form-control bg-white text-dark border-secondary" 
+                                                            id="jcViewGlobalSearch" placeholder="Type material name..." 
+                                                            list="inventoryList" autocomplete="off">
+                                                    </div>
+                                                    <div class="row g-2">
+                                                        <div class="col-6">
+                                                            <button type="button" class="btn btn-sm btn-outline-success w-100" onclick="DeliveryUI.addJobCardMaterialRow(null, 'jcViewMaterialsBody')">
+                                                                <i class="bi bi-plus-circle me-1"></i> Custom
+                                                            </button>
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <button type="button" class="btn btn-sm btn-outline-primary w-100" onclick="DeliveryUI.showInventoryModal()">
+                                                                <i class="bi bi-box-seam me-1"></i> New
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="card glass-panel border-secondary h-100 bg-light">
+                                                <div class="card-body p-2 text-dark">
+                                                    <label class="form-label small text-muted text-uppercase fw-bold mb-1">Search Services / Labor</label>
+                                                    <div class="input-group input-group-sm mb-2">
+                                                        <span class="input-group-text bg-white border-secondary text-warning"><i class="bi bi-tools"></i></span>
+                                                        <input type="text" class="form-control bg-white text-dark border-secondary" 
+                                                            id="jcViewServiceSearch" placeholder="Type service name..." 
+                                                            list="serviceList" autocomplete="off">
+                                                    </div>
+                                                    <button type="button" class="btn btn-sm btn-outline-warning w-100 text-dark" onclick="DeliveryUI.showSection('services')">
+                                                        <i class="bi bi-gear-fill me-1"></i> Manage Services
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold mb-3 small text-dark d-flex align-items-center">
+                                        <i class="bi bi-box-seam me-2"></i>Materials Tracking
+                                    </h6>
                                     <div class="table-responsive">
                                         <table class="table table-sm table-bordered border-secondary small text-dark">
                                             <thead style="background-color: #f8f9fa;" class="text-dark">
                                                 <tr>
                                                     <th>Material</th>
-                                                    <th>Qty</th>
+                                                    <th style="width: 10%">Qty</th>
                                                     <th>Replaced Item</th>
-                                                    <th>Current Status</th>
-                                                    <th class="text-center">Action</th>
+                                                    <th style="width: 20%">Current Status</th>
+                                                    <th class="text-center" style="width: 8%"></th>
                                                 </tr>
                                             </thead>
-                                            <tbody>
+                                            <tbody id="jcViewMaterialsBody">
                                                 ${jobCard.materials && jobCard.materials.length > 0 ?
                 jobCard.materials.map((m, idx) => `
                                                     <tr class="align-middle">
@@ -2988,6 +3356,27 @@ const DeliveryUI = {
                                             </tbody>
                                         </table>
                                     </div>
+                                    ${(!jobCard.materials || jobCard.materials.length === 0) ? `
+                                        <div id="viewEmptyMaterialsRow" class="text-center text-muted small py-3 bg-light border border-top-0 rounded-bottom">
+                                            No materials tracked. Add using search above.
+                                        </div>
+                                    ` : ''}
+
+                                    <h6 class="fw-bold mt-4 mb-3 small text-muted d-flex align-items-center">
+                                        <i class="bi bi-clock-history me-2"></i>Update History
+                                    </h6>
+                                    <div class="bg-light border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                                        ${jobCard.history && jobCard.history.length > 0 ?
+                jobCard.history.slice().reverse().map(h => `
+                                                <div class="d-flex justify-content-between small border-bottom pb-1 mb-1">
+                                                    <span class="text-dark">
+                                                        <span class="badge bg-secondary me-1">${h.status.toUpperCase()}</span>
+                                                        ${h.note}
+                                                    </span>
+                                                    <span class="text-muted">${h.displayDate}</span>
+                                                </div>
+                                            `).join('') : '<p class="text-muted small mb-0 text-center py-2">No history records yet.</p>'}
+                                    </div>
                                 </form>
                             </div>
                         </div>
@@ -3003,31 +3392,52 @@ const DeliveryUI = {
         `;
 
         // Remove old modal if exists
-        document.getElementById('jobCardViewModal')?.remove();
+        const oldModal = document.getElementById('jobCardViewModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
         const modal = new bootstrap.Modal(document.getElementById('jobCardViewModal'));
         modal.show();
+
+        // Initialize search for View modal
+        this.handleInventorySearch('jcViewGlobalSearch', 'jobcard_view');
+        this.handleInventorySearch('jcViewServiceSearch', 'jobcard_view');
     },
 
     async saveJobCardDetails() {
         try {
             const id = document.getElementById('jcViewId').value;
             const status = document.getElementById('jcViewStatus').value;
-            const workDone = document.getElementById('jcViewWorkDone').value;
+                   // Gather ALL materials from the view table
+            const materials = [];
+            document.querySelectorAll('#jcViewMaterialsBody tr').forEach(row => {
+                // Check if it's an existing item row (with data-index)
+                const statusSelect = row.querySelector('.material-status-select');
+                if (statusSelect) {
+                    const index = parseInt(statusSelect.getAttribute('data-index'));
+                    const name = row.cells[0].innerText || row.cells[0].textContent;
+                    const quantity = parseInt(row.querySelector('.material-qty-input')?.value || row.cells[1].innerText || 1);
+                    const replaced = row.querySelector('.material-replaced-input')?.value || '';
+                    const status = statusSelect.value;
+                    materials.push({ name, quantity, replaced, status });
+                } else {
+                    // It's a newly added row
+                    const name = row.querySelector('[name="materialName"]')?.value;
+                    const quantity = row.querySelector('[name="materialQty"]')?.value;
+                    const replaced = row.querySelector('[name="materialReplaced"]')?.value;
+                    const status = row.querySelector('[name="materialStatus"]')?.value;
 
-            // Get original job card to access materials array structure
-            const originalJC = JobCardManager.getJobCard(id);
-            const materials = [...originalJC.materials];
-
-            // Update material statuses and replaced info from inputs
-            document.querySelectorAll('.material-status-select').forEach(select => {
-                const index = parseInt(select.getAttribute('data-index'));
-                if (materials[index]) {
-                    materials[index].status = select.value;
-                    const replacedInput = document.querySelector(`.material-replaced-input[data-index="${index}"]`);
-                    if (replacedInput) {
-                        materials[index].replaced = replacedInput.value;
+                    if (name) {
+                        materials.push({
+                            name,
+                            quantity: parseInt(quantity) || 1,
+                            replaced: replaced || '',
+                            status: status || 'pending'
+                        });
                     }
                 }
             });
@@ -3057,72 +3467,62 @@ const DeliveryUI = {
         try {
             const jc = JobCardManager.getJobCard(id);
             if (!jc) throw new Error('Job Card not found');
+            
+            // Redirect to modern InvoicesUI (Screenshot 2 style)
+            if (typeof InvoicesUI !== 'undefined') {
+                InvoicesUI.showCreateModal(type === 'with-bill' ? 'sales-gst' : 'sales-non-gst');
+                
+                // Wait a moment for modal to render, then populate
+                setTimeout(() => {
+                    const form = document.getElementById('createInvoiceForm');
+                    if (!form) return;
 
-            // Switch to Invoices section and show form
-            this.showSection('invoices');
-            this.showInvoiceForm(type);
-
-            // Fill basic info
-            const invCustomer = document.getElementById('invCustomer');
-            if (invCustomer) {
-                invCustomer.value = jc.customerId;
-                // Trigger change to update customer info in UI
-                invCustomer.dispatchEvent(new Event('change'));
-            }
-
-            const invDate = document.getElementById('invDate');
-            if (invDate) invDate.value = jc.date;
-
-            // Fill Job Card Ref
-            const jcCustomerRef = document.getElementById('jcCustomerRef');
-            if (jcCustomerRef) jcCustomerRef.value = jc.customerRef || '';
-
-            // Clear existing rows and add materials
-            const tbody = document.getElementById('invItemsBody');
-            if (tbody) {
-                tbody.innerHTML = '';
-                const inventory = InventoryManager.getAllMaterials();
-
-                for (const m of jc.materials) {
-                    const row = document.createElement('tr');
-                    // Try to find rate in inventory
-                    const invItem = inventory.find(i => i.name.toLowerCase() === m.name.toLowerCase());
-                    const rate = invItem ? invItem.rate : 0;
-
-                    row.innerHTML = `
-                        <td>
-                            <input type="text" class="form-control form-control-sm" name="invItemDesc" value="${m.name}" required>
-                            ${m.replaced ? `<small class="text-muted d-block mt-1">Replaced: ${m.replaced}</small>` : ''}
-                        </td>
-                        <td>
-                            <input type="number" class="form-control form-control-sm" name="invItemQty" value="${m.quantity}" min="1" oninput="DeliveryUI.calculateInvoiceTotals()" required>
-                        </td>
-                        <td>
-                            <input type="number" class="form-control form-control-sm" name="invItemRate" value="${rate}" min="0" step="0.01" oninput="DeliveryUI.calculateInvoiceTotals()" required>
-                        </td>
-                        <td class="text-end align-middle item-amount">${(rate * m.quantity).toFixed(2)}</td>
-                        <td class="text-center">
-                            <button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('tr').remove(); DeliveryUI.calculateInvoiceTotals();">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
-                    `;
-                    tbody.appendChild(row);
-                }
-                this.calculateInvoiceTotals();
-
-                // Add a hidden field or property to link to JobCard for post-save actions
-                // Initialize search
-                this.handleInventorySearch('invGlobalSearch', 'invoice');
-
-                const form = document.getElementById('invoiceForm');
-                if (form) {
+                    // Tag form with Job Card ID so the saved invoice triggers a Service Challan
                     form.setAttribute('data-source-jc', id);
-                    form.setAttribute('data-jc-ref', jc.customerRef || '');
-                }
+
+                    // Fill Customer
+                    const customerInput = form.querySelector('[name="customerName"]');
+                    if (customerInput) {
+                        customerInput.value = jc.customerName || '';
+                        const idInput = form.querySelector('[name="customerId"]');
+                        if (idInput) {
+                            idInput.value = (jc.customerId && jc.customerId !== 'undefined') ? jc.customerId : '';
+                        }
+                        
+                        // Trigger change to update other info
+                        customerInput.dispatchEvent(new Event('change'));
+                    }
+
+                    // Fill DC Ref
+                    const poInput = form.querySelector('[name="poNumber"]');
+                    if (poInput) {
+                        poInput.value = jc.customerRef || jc.id || '';
+                    }
+
+                    // Pre-fill materials
+                    if (jc.materials && jc.materials.length > 0) {
+                        // Clear existing rows (keep the header)
+                        const tbody = document.getElementById('invoiceItemsBody');
+                        if (tbody) tbody.innerHTML = '';
+                        
+                        jc.materials.filter(m => m.status === 'installed').forEach(m => {
+                            if (typeof InvoicesUI.addItemRow === 'function') {
+                                InvoicesUI.addItemRow({
+                                    name: m.name,
+                                    itemDescription: m.replaced ? `Replaced: ${m.replaced}` : '',
+                                    quantity: m.quantity,
+                                    unit: 'pcs',
+                                    rate: 0
+                                });
+                            }
+                        });
+                    }
+                }, 500);
+            } else {
+                throw new Error('Modern Invoice system not loaded');
             }
 
-            App.showNotification(`Job Card imported into ${type === 'with-bill' ? 'GST' : 'Non-GST'} Invoice!`, 'success');
+            App.showNotification(`Job Card ${id} sent to invoice form`, 'success');
 
         } catch (error) {
             console.error('Conversion Error:', error);
@@ -3244,10 +3644,10 @@ const DeliveryUI = {
         <div class="d-flex justify-content-between align-items-center mb-4">
                 <h4><i class="bi bi-receipt text-success me-2"></i>Invoices</h4>
                 <div>
-                    <button class="btn btn-success me-2" onclick="DeliveryUI.showInvoiceForm('with-bill')">
+                    <button class="btn btn-success me-2" onclick="InvoicesUI.showCreateModal('sales-gst')">
                         <i class="bi bi-plus-circle me-1"></i> GST Invoice
                     </button>
-                    <button class="btn btn-outline-success" onclick="DeliveryUI.showInvoiceForm('without-bill')">
+                    <button class="btn btn-outline-success" onclick="InvoicesUI.showCreateModal('sales-non-gst')">
                         <i class="bi bi-plus-circle me-1"></i> Non-GST Invoice
                     </button>
                 </div>
@@ -3299,361 +3699,74 @@ const DeliveryUI = {
         }
     },
 
-    showInvoiceForm(type) {
-        this.updateInventoryDatalist();
-        const container = document.getElementById('invoicesContainer');
-        if (!container) return;
-
-        const today = new Date().toISOString().split('T')[0];
-        const customers = CustomerManager.getAllCustomers();
-        const nextId = InvoiceManager.generateInvoiceNumber(type);
-        const title = type === 'with-bill' ? 'New GST Invoice' : 'New Non-GST Invoice';
-
-        container.innerHTML = `
-    <div class="card bg-dark text-white border-secondary">
-                <div class="card-header border-secondary d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>${title}</h5>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.loadInvoices()">
-                        <i class="bi bi-arrow-left me-1"></i> Back to List
-                    </button>
-                </div>
-                <div class="card-body">
-                    <form id="invoiceForm">
-                        <input type="hidden" id="invType" value="${type}">
-                        
-                        <div class="row g-3 mb-4">
-                            <div class="col-md-3">
-                                <label class="form-label">Invoice #</label>
-                                <input type="text" class="form-control" id="invNumber" value="${nextId}" readonly>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Customer DC / Ref No</label>
-                                <input type="text" class="form-control" id="jcCustomerRef" placeholder="e.g. DC-1234">
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Date</label>
-                                <input type="date" class="form-control" id="invDate" value="${today}" required>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Customer *</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
-                                    <input type="text" class="form-control" id="invCustomerSearch" 
-                                        placeholder="Type customer name..." list="customerList" autocomplete="off" required>
-                                    <select id="invCustomer" style="display: none;">
-                                        <option value="">Select Customer...</option>
-                                        ${customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Items & Services Search -->
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="card glass-panel border-secondary h-100">
-                                    <div class="card-body p-2">
-                                        <label class="form-label small text-info mb-1">Search Inventory (Materials)</label>
-                                        <div class="input-group input-group-sm mb-2">
-                                            <span class="input-group-text bg-dark border-secondary text-info"><i class="bi bi-search"></i></span>
-                                            <input type="text" class="form-control bg-dark text-white border-secondary" 
-                                                id="invGlobalSearch" placeholder="Type material name..." 
-                                                list="inventoryList" autocomplete="off">
-                                        </div>
-                                        <div class="row g-2">
-                                            <div class="col-6">
-                                                <button type="button" class="btn btn-sm btn-success w-100" onclick="DeliveryUI.addInvoiceItemRow()">
-                                                    <i class="bi bi-plus"></i> Custom
-                                                </button>
-                                            </div>
-                                            <div class="col-6">
-                                                <button type="button" class="btn btn-sm btn-primary w-100" onclick="DeliveryUI.showInventoryModal()">
-                                                    <i class="bi bi-box"></i> New
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card glass-panel border-secondary h-100">
-                                    <div class="card-body p-2">
-                                        <label class="form-label small text-warning mb-1">Search Services / Labor</label>
-                                        <div class="input-group input-group-sm mb-2">
-                                            <span class="input-group-text bg-dark border-secondary text-warning"><i class="bi bi-tools"></i></span>
-                                            <input type="text" class="form-control bg-dark text-white border-secondary" 
-                                                id="invServiceSearch" placeholder="Type service name..." 
-                                                list="serviceList" autocomplete="off">
-                                        </div>
-                                        <button type="button" class="btn btn-sm btn-outline-warning w-100" onclick="DeliveryUI.showSection('services')">
-                                            <i class="bi bi-gear"></i> Manage Services
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <h6 class="mb-0">Selected Items</h6>
-                        </div>
-
-                        <div class="table-responsive mb-3">
-                            <table class="table table-dark table-sm table-bordered border-secondary" id="invItemsTable">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 25%">Item</th>
-                                        <th style="width: 25%">Description</th>
-                                        <th style="width: 10%">Qty</th>
-                                        <th style="width: 10%">Unit</th>
-                                        <th style="width: 15%">Rate</th>
-                                        <th style="width: 10%">Amount</th>
-                                        <th style="width: 5%"></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="invItemsBody">
-                                    <tr id="invEmptyRow">
-                                        <td colspan="5" class="text-center text-muted small py-3">No items added</td>
-                                    </tr>
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th colspan="3" class="text-end">Subtotal:</th>
-                                        <th class="text-end" id="invSubtotal">0.00</th>
-                                        <th></th>
-                                    </tr>
-                                    ${type === 'with-bill' ? `
-                                    <tr>
-                                        <th colspan="3" class="text-end align-middle">
-                                            CGST (<input type="number" id="invCgstRate" value="9" class="form-control form-control-sm d-inline-block bg-dark text-white border-secondary text-end p-1" style="width: 70px; vertical-align: middle;" onchange="DeliveryUI.calculateInvoiceTotals()">%):
-                                        </th>
-                                        <th class="text-end" id="invCgstAmount">0.00</th>
-                                        <th></th>
-                                    </tr>
-                                    <tr>
-                                        <th colspan="3" class="text-end align-middle">
-                                            SGST (<input type="number" id="invSgstRate" value="9" class="form-control form-control-sm d-inline-block bg-dark text-white border-secondary text-end p-1" style="width: 70px; vertical-align: middle;" onchange="DeliveryUI.calculateInvoiceTotals()">%):
-                                        </th>
-                                        <th class="text-end" id="invSgstAmount">0.00</th>
-                                        <th></th>
-                                    </tr>
-                                    ` : ''}
-                                    <tr class="fs-5">
-                                        <th colspan="3" class="text-end">Total:</th>
-                                        <th class="text-end text-success" id="invTotal">0.00</th>
-                                        <th></th>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-
-                        <div class="d-flex justify-content-end gap-2">
-                            <button type="button" class="btn btn-secondary" onclick="DeliveryUI.loadInvoices()">Cancel</button>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="bi bi-save me-1"></i> Create Invoice
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-    `;
-
-        // Setup Search Listeners
-        this.handleInventorySearch('invGlobalSearch', 'invoice');
-        this.handleInventorySearch('invServiceSearch', 'invoice');
-        this.handleCustomerSearch('invCustomerSearch', 'invCustomer');
-
-        document.getElementById('invoiceForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.saveInvoice();
-        });
-    },
-
-    addInvoiceItemRow(data = null) {
-        const tbody = document.getElementById('invItemsBody');
-        const emptyRow = document.getElementById('invEmptyRow');
-        if (emptyRow) emptyRow.remove();
-
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>
-                <input type="text" class="form-control form-control-sm item-name" 
-                    name="invItemName" placeholder="Item Name" required value="${data ? (data.name || data.description || '') : ''}" list="inventoryList">
-            </td>
-            <td>
-                <input type="text" class="form-control form-control-sm item-desc" 
-                    name="invItemDesc" placeholder="Description" value="${data ? (data.itemDescription || '') : ''}">
-            </td>
-            <td>
-                <input type="number" class="form-control form-control-sm item-qty" 
-                    name="invItemQty" value="${data ? data.quantity : 1}" min="0.01" step="0.01" oninput="DeliveryUI.calculateInvoiceTotals()" required>
-            </td>
-            <td>
-                <select class="form-select form-select-sm item-unit" name="invItemUnit">
-                    <option value="pcs" ${data && data.unit === 'pcs' ? 'selected' : ''}>pcs</option>
-                    <option value="kg" ${data && data.unit === 'kg' ? 'selected' : ''}>kg</option>
-                    <option value="ltr" ${data && data.unit === 'ltr' ? 'selected' : ''}>ltr</option>
-                    <option value="mtr" ${data && data.unit === 'mtr' ? 'selected' : ''}>mtr</option>
-                    <option value="set" ${data && data.unit === 'set' ? 'selected' : ''}>set</option>
-                    <option value="sqft" ${data && data.unit === 'sqft' ? 'selected' : ''}>sqft</option>
-                    <option value="service" ${data && data.unit === 'service' ? 'selected' : ''}>service</option>
-                </select>
-            </td>
-            <td>
-                <input type="number" class="form-control form-control-sm item-rate" 
-                    name="invItemRate" value="${data ? data.rate : 0}" min="0" step="0.01" oninput="DeliveryUI.calculateInvoiceTotals()" required>
-            </td>
-            <td class="text-end align-middle item-amount">${data ? data.rate.toFixed(2) : '0.00'}</td>
-            <td class="text-center">
-                <button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('tr').remove(); DeliveryUI.calculateInvoiceTotals();">
-                    <i class="bi bi-trash"></i>
-                </button>
-            </td>
-        `;
-
-        tbody.appendChild(row);
-        if (data) this.calculateInvoiceTotals();
-    },
-
-    calculateInvoiceTotals() {
-        const rows = document.querySelectorAll('#invItemsBody tr');
-        let subtotal = 0;
-
-        rows.forEach(row => {
-            if (row.id === 'invEmptyRow') return;
-            const qty = parseFloat(row.querySelector('input[name="invItemQty"]').value) || 0;
-            const rate = parseFloat(row.querySelector('input[name="invItemRate"]').value) || 0;
-            const amount = qty * rate;
-            row.querySelector('.item-amount').textContent = amount.toFixed(2);
-            subtotal += amount;
-        });
-
-        document.getElementById('invSubtotal').textContent = subtotal.toFixed(2);
-
-        const type = document.getElementById('invType').value;
-        let total = subtotal;
-
-        if (type === 'with-bill') {
-            const cgstRate = parseFloat(document.getElementById('invCgstRate').value) || 0;
-            const sgstRate = parseFloat(document.getElementById('invSgstRate').value) || 0;
-
-            const cgst = (subtotal * cgstRate) / 100;
-            const sgst = (subtotal * sgstRate) / 100;
-
-            document.getElementById('invCgstAmount').textContent = cgst.toFixed(2);
-            document.getElementById('invSgstAmount').textContent = sgst.toFixed(2);
-            total += cgst + sgst;
-        }
-
-        document.getElementById('invTotal').textContent = Math.round(total).toFixed(2);
-    },
-
-    async saveInvoice() {
-        try {
-            const type = document.getElementById('invType').value;
-            const customerId = document.getElementById('invCustomer').value;
-            if (!customerId) {
-                throw new Error('Please select a valid customer from the list');
-            }
-            const customer = CustomerManager.getCustomer(customerId);
-
-            if (!customer) throw new Error('Please select a customer');
-
-            const items = [];
-            const rows = document.querySelectorAll('#invItemsBody tr');
-            rows.forEach(row => {
-                if (row.id === 'invEmptyRow') return;
-                const itemName = row.querySelector('.item-name')?.value || '';
-                items.push({
-                    name: itemName,
-                    description: itemName, // Backward compatibility
-                    itemDescription: row.querySelector('.item-desc')?.value || '',
-                    quantity: parseFloat(row.querySelector('.item-qty').value) || 0,
-                    unit: row.querySelector('.item-unit')?.value || 'pcs',
-                    rate: parseFloat(row.querySelector('.item-rate').value) || 0,
-                    amount: parseFloat(row.querySelector('.item-amount').textContent) || 0
-                });
-            });
-
-            if (items.length === 0) throw new Error('Please add at least one item');
-
-            const subtotal = parseFloat(document.getElementById('invSubtotal').textContent);
-            const total = parseFloat(document.getElementById('invTotal').textContent);
-
-            const gst = { cgst: 0, sgst: 0, igst: 0 };
-            if (type === 'with-bill') {
-                gst.cgst = parseFloat(document.getElementById('invCgstAmount').textContent);
-                gst.sgst = parseFloat(document.getElementById('invSgstAmount').textContent);
-            }
-
-            // Check for Job Card source from hidden attribute or form state
-            const invForm = document.getElementById('invoiceForm');
-            const jobCardId = invForm ? invForm.getAttribute('data-source-jc') : null;
-
-            const invoiceData = {
-                type,
-                customerId,
-                customerName: customer.name,
-                date: document.getElementById('invDate').value,
-                referenceNumber: document.getElementById('jcCustomerRef') ? document.getElementById('jcCustomerRef').value : '',
-                jobCardId: jobCardId, // Store Job Card ID if applicable
-                items,
-                subtotal,
-                gst,
-                total,
-                roundOff: total - (subtotal + gst.cgst + gst.sgst)
-            };
-
-            const invoice = await InvoiceManager.createInvoice(invoiceData);
-
-            if (jobCardId) {
-                // Update Job Card status to dispatched and store invoice link
-                await JobCardManager.updateJobCard(jobCardId, {
-                    status: 'dispatched',
-                    invoiceId: invoice.id
-                });
-            }
-
-            // Automatically create Service or Delivery Challan
-            await this.createAutoChallanFromInvoice(invoice);
-
-            App.showNotification(`Invoice and ${jobCardId ? 'Service' : 'Delivery'} Challan created successfully!`, 'success');
-            this.loadInvoices();
-
-        } catch (error) {
-            console.error('Error saving invoice:', error);
-            App.showNotification(error.message, 'error');
-        }
-    },
+    // REDUNDANT: Legacy methods removed.
+    // Creating invoices is now handled by InvoicesUI.showCreateModal().
 
     async createAutoChallanFromInvoice(invoice) {
         try {
             // Logic: If Job Card is present, it's a Service Challan (SC). Else it's a Delivery Challan (DC).
             const isService = !!invoice.jobCardId;
             const challanType = isService ? 'service' : 'delivery';
+            const invoiceStableId = invoice.id; 
+            const invoiceNo = invoice.invoiceNo || invoice.id;
+
+            // Check if a challan already exists for this invoice (during edits)
+            // Search by invoiceId (stable link) or referenceNumber (legacy link)
+            const existingChallans = DeliveryManager.getAllChallans();
+            const existing = existingChallans.find(c => 
+                (c.invoiceId === invoiceStableId) || 
+                (c.referenceNumber === invoiceNo && c.type === challanType) ||
+                (c.referenceNumber === invoiceStableId && c.type === challanType)
+            );
+
+            const customer = typeof CustomerManager !== 'undefined' ? CustomerManager.getCustomer(invoice.customerId) : null;
+            const customerName = customer ? customer.name : (invoice.customerName || 'Walk-in Customer');
+            const dispatch = invoice.dispatchDetails || {};
 
             const challanData = {
                 type: challanType,
                 date: invoice.date,
                 customerId: invoice.customerId,
-                referenceNumber: invoice.id, // Reference the Invoice #
-                jobCardId: invoice.jobCardId || null, // Explicitly store Job Card ID
-                items: invoice.items.map(item => ({
-                    description: item.description,
+                customerName: customerName,
+                customerAddress: customer ? customer.address : (invoice.customerAddress || ''),
+                referenceNumber: invoiceNo, // Use the current display number
+                invoiceId: invoiceStableId, // Link by stable ID
+                jobCardId: invoice.jobCardId || null, 
+                dispatchVia: dispatch.via || '',
+                lrNo: dispatch.lrNo || '',
+                vehicleNo: dispatch.vehicleNo || '',
+                dispatchDate: dispatch.date || '',
+                workDone: invoice.narration || '',
+                items: (invoice.items || []).map(item => ({
+                    name: item.name,
+                    description: item.description || '',
                     quantity: item.quantity,
                     unit: item.unit || 'pcs',
-                    rate: 0, // No prices on automated challans
+                    rate: 0, 
                     amount: 0
                 })),
                 gstMode: false,
                 status: 'completed',
-                notes: `Auto-generated from Invoice ${invoice.id}.${invoice.jobCardId ? ' Job Card: ' + invoice.jobCardId : ''}`
+                notes: `Auto-generated from Invoice ${invoiceNo}.${invoice.jobCardId ? ' Job Card: ' + invoice.jobCardId : ''}`
             };
 
-            await DeliveryManager.createChallan(challanData);
-            console.log(`${isService ? 'Service' : 'Delivery'} Challan created for invoice:`, invoice.id);
+            let finalChallan;
+            if (existing) {
+                // Update the existing DC with brand new info from the Invoice
+                finalChallan = await DeliveryManager.updateChallan(existing.id, challanData);
+                console.log(`${isService ? 'Service' : 'Delivery'} Challan synced for invoice:`, invoiceNo);
+            } else {
+                finalChallan = await DeliveryManager.createChallan(challanData);
+                console.log(`${isService ? 'Service' : 'Delivery'} Challan created for invoice:`, invoiceNo);
+            }
+
+            // Also update the invoice to point back to this challan (important for sync)
+            if (finalChallan && invoice.challanId !== finalChallan.id) {
+                await InvoiceManager.updateInvoice(invoiceStableId, { challanId: finalChallan.id });
+            }
         } catch (error) {
             console.error('Error creating auto challan:', error);
-            App.showNotification('Warning: Could not create automated challan', 'warning');
+            App.showNotification('Warning: Could not sync automated challan', 'warning');
         }
     },
 
@@ -3684,24 +3797,27 @@ const DeliveryUI = {
                         <div class="modal-header border-0 pb-0">
                             <div>
                                 <h5 class="modal-title text-white fw-bold"><i class="bi bi-file-earmark-check me-2"></i>${typeLabel} Preview</h5>
-                                <p class="small text-muted mb-0">${invoice.id} | ${invoice.customerName}</p>
+                                <p class="small text-muted mb-0">${invoice.invoiceNo || invoice.id} | ${invoice.customerName}</p>
                             </div>
                             <div class="d-flex gap-2 align-items-center">
                                 <button type="button" class="btn btn-outline-light btn-sm border-secondary" onclick="DeliveryUI.toggleModalFullscreen('invoicePreviewModal')" title="Toggle Fullscreen">
                                     <i class="bi bi-fullscreen"></i>
                                 </button>
-                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.printInvoice('${invoice.id}')" title="Download PDF">
-                                    <i class="bi bi-download me-1"></i> Download PDF
+                                <button type="button" class="btn btn-outline-info" onclick="DeliveryUI.nativePrint()" title="Print (Faster)">
+                                    <i class="bi bi-printer me-1"></i> Print
+                                </button>
+                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.printInvoice('${invoice.id}')" title="Download PDF (Highest Quality)">
+                                    <i class="bi bi-download me-1"></i> Save PDF
                                 </button>
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-4">
-                            <div id="invoicePrintArea" class="bg-white text-dark p-5 shadow-lg mx-auto" style="min-height: 1050px; max-width: 850px;">
+                        <div class="modal-body p-0 bg-secondary-subtle overflow-auto" style="max-height: 90vh;">
+                            <div id="invoicePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 10pt; box-sizing: border-box; border: 1px solid #dee2e6;">
                                 <!-- Company Header -->
                                 <div class="text-center border-bottom pb-3 mb-4">
                                     <h2 class="fw-bold mb-1">${companyName.toUpperCase()}</h2>
-                                    <p class="mb-0 small">No.232/233, Nageshwara Road, Athipet, Chennai - 600058</p>
+                                    <p class="mb-0 small">${companyAddress}</p>
                                     <p class="mb-0 small">Work Address: ${workAddress}</p>
                                     <p class="mb-0 small">Email: ${email} | Ph: ${phone}</p>
                                     <p class="mb-0 small fw-bold">GSTIN: ${gstin} | PAN: ${pan} | IEC: ${iec}</p>
@@ -3712,101 +3828,92 @@ const DeliveryUI = {
                                     <div class="col-7">
                                         <h6 class="text-uppercase text-muted small fw-bold mb-2">DETAILS OF RECEIVER (BILLED TO)</h6>
                                         <h5 class="fw-bold mb-1">${invoice.customerName}</h5>
-                                        <p class="mb-0 small" style="white-space: pre-line;">${customer?.address || ''}</p>
+                                        <p class="mb-0 small" style="white-space: pre-line;">${customer?.address || invoice.customerAddress || ''}</p>
                                         ${customer?.phone ? `<p class="mb-0 small mt-1"><strong>Phone:</strong> ${customer.phone}</p>` : ''}
                                         ${customer?.gstin ? `<p class="mb-0 small"><strong>GSTIN:</strong> ${customer.gstin}</p>` : ''}
                                     </div>
-                                    <div class="col-5 text-end">
-                                        <h3 class="fw-bold text-uppercase mb-3">${typeLabel}</h3>
-                                        <table class="table table-sm table-borderless mb-0 w-auto ms-auto">
-                                            <tr><td class="text-muted pe-3 py-1">Invoice No:</td><td class="fw-bold py-1">${invoice.id}</td></tr>
-                                            <tr><td class="text-muted pe-3 py-1">Date:</td><td class="fw-bold py-1">${DataManager.formatDateDisplay(invoice.date)}</td></tr>
-                                            ${invoice.referenceNumber ? `<tr><td class="text-muted pe-3 py-1">Ref / DC:</td><td class="fw-bold py-1">${invoice.referenceNumber}</td></tr>` : ''}
+                                    <div class="col-5">
+                                        <div class="text-end mb-3">
+                                            <h3 class="fw-bold text-uppercase mb-0">${typeLabel}</h3>
+                                        </div>
+                                        <table class="table table-sm table-borderless mb-0 small" style="font-size: 8.5pt;">
+                                            <tr><td class="text-muted text-end pe-2 py-0">Invoice No:</td><td class="fw-bold py-0">${invoice.invoiceNo || invoice.id}</td></tr>
+                                            <tr><td class="text-muted text-end pe-2 py-0">Date:</td><td class="fw-bold py-0">${DataManager.formatDateDisplay(invoice.date)}</td></tr>
+                                            ${invoice.dispatchDetails?.via ? `<tr><td class="text-muted text-end pe-2 py-0">Dispatch Via:</td><td class="fw-bold py-0">${invoice.dispatchDetails.via}</td></tr>` : ''}
+                                            ${invoice.dispatchDetails?.lrNo ? `<tr><td class="text-muted text-end pe-2 py-0">LR/Track No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.lrNo}</td></tr>` : ''}
+                                            ${invoice.dispatchDetails?.vehicleNo ? `<tr><td class="text-muted text-end pe-2 py-0">Vehicle No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.vehicleNo}</td></tr>` : ''}
+                                            ${invoice.dispatchDetails?.date ? `<tr><td class="text-muted text-end pe-2 py-0">Disp. Date:</td><td class="fw-bold py-0">${DataManager.formatDateDisplay(invoice.dispatchDetails.date)}</td></tr>` : ''}
                                         </table>
                                     </div>
                                 </div>
 
                                 <!-- Items Table -->
-                                <table class="table table-bordered border-dark mb-4 text-dark">
-                                    <thead style="background-color: #f8f9fa;" class="text-dark">
-                                        <tr class="text-center align-middle small fw-bold">
-                                            <th style="width: 5%">#</th>
-                                            <th style="width: 35%">DESCRIPTION</th>
+                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%;">
+                                    <thead style="background-color: #eee;" class="text-dark">
+                                        <tr class="text-center align-middle extra-small fw-bold">
+                                            <th style="width: 4%">#</th>
+                                            <th style="width: 28%">DESCRIPTION</th>
                                             <th style="width: 10%">HSN</th>
-                                            <th style="width: 8%">QTY</th>
-                                            <th style="width: 8%">UNIT</th>
-                                            <th style="width: 12%">RATE</th>
-                                            <th style="width: 12%">PER</th>
-                                            <th style="width: 10%">DISC</th>
-                                            <th style="width: 10%">COST</th>
-                                            <th style="width: 10%">SGST</th>
-                                            <th style="width: 10%">AMOUNT</th>
-                                        </tr>
-                                        <tr class="text-center small">
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th>%</th>
-                                            <th>Amt</th>
-                                            <th>%</th>
-                                            <th>Amt</th>
+                                            <th style="width: 7%">QTY</th>
+                                            <th style="width: 6%">UNIT</th>
+                                            <th style="width: 9%">RATE</th>
+                                            <th style="width: 4%">DISC</th>
+                                            <th style="width: 6%">CGST%</th>
+                                            <th style="width: 6%">SGST%</th>
+                                            <th style="width: 20%">TOTAL</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${invoice.items.map((item, idx) => `
-                                            <tr class="align-middle">
-                                                <td class="text-center small">${idx + 1}</td>
+                                        ${invoice.items.map((item, idx) => {
+                                            const itemGstRate = parseFloat(item.gstRate) || 0;
+                                            const cgstRate = itemGstRate / 2;
+                                            const sgstRate = itemGstRate / 2;
+                                            
+                                            return `
+                                            <tr class="align-middle text-dark">
+                                                <td class="text-center extra-small">${idx + 1}</td>
                                                 <td>
-                                                    <div class="fw-bold">${item.name || item.description || ''}</div>
-                                                    ${item.itemDescription ? `<div class="text-muted extra-small">${item.itemDescription}</div>` : ''}
+                                                    <div class="fw-bold extra-small">${item.name || item.description || ''}</div>
                                                 </td>
-                                                <td class="text-center small">${item.hsn || '-'}</td>
-                                                <td class="text-center">${item.quantity}</td>
-                                                <td class="text-center small">${item.unit || 'nos'}</td>
-                                                <td class="text-end">${item.rate.toFixed(2)}</td>
-                                                <td class="text-center small">unit</td>
-                                                <td class="text-center">0%</td>
-                                                <td class="text-end">0.00</td>
-                                                <td class="text-center">9.0%</td>
-                                                <td class="text-end fw-bold">${item.amount.toFixed(2)}</td>
+                                                <td class="text-center extra-small">${item.hsn || '-'}</td>
+                                                <td class="text-center extra-small">${item.quantity}</td>
+                                                <td class="text-center extra-small">${item.unit || 'nos'}</td>
+                                                <td class="text-end extra-small">${item.rate.toFixed(2)}</td>
+                                                <td class="text-center extra-small">${item.discount || 0}%</td>
+                                                <td class="text-center extra-small">${cgstRate.toFixed(1)}%</td>
+                                                <td class="text-center extra-small">${sgstRate.toFixed(1)}%</td>
+                                                <td class="text-end fw-bold extra-small">${item.amount.toFixed(2)}</td>
                                             </tr>
-                                        `).join('')}
+                                            `;
+                                        }).join('')}
                                     </tbody>
                                     <tfoot>
-                                        <tr>
-                                            <td colspan="10" class="text-end border-0 pt-3 fw-bold">Subtotal:</td>
-                                            <td class="text-end border-0 pt-3 fw-bold">₹${invoice.subtotal.toFixed(2)}</td>
+                                        <tr class="align-middle text-dark">
+                                            <td colspan="9" class="text-end fw-bold extra-small py-2" style="border: 1px solid #000;">Subtotal:</td>
+                                            <td class="text-end fw-bold extra-small py-2" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.subtotal.toFixed(2)}</td>
                                         </tr>
                                         ${invoice.gst && invoice.gst.cgst > 0 ? `
-                                        <tr>
-                                            <td colspan="10" class="text-end border-0 py-1 small">CGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${invoice.gst.cgst.toFixed(2)}</td>
+                                        <tr class="align-middle text-dark">
+                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">CGST Amt:</td>
+                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.gst.cgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         ${invoice.gst && invoice.gst.sgst > 0 ? `
-                                        <tr>
-                                            <td colspan="10" class="text-end border-0 py-1 small">SGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${invoice.gst.sgst.toFixed(2)}</td>
+                                        <tr class="align-middle text-dark">
+                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">SGST Amt:</td>
+                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.gst.sgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
-                                        ${invoice.gst && invoice.gst.igst > 0 ? `
-                                        <tr>
-                                            <td colspan="10" class="text-end border-0 py-1 small">IGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${invoice.gst.igst.toFixed(2)}</td>
+                                        ${invoice.roundOff ? `
+                                        <tr class="align-middle text-dark">
+                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">Round Off:</td>
+                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">${invoice.roundOff > 0 ? '+' : ''}${invoice.roundOff.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
-                                        <tr>
-                                            <td colspan="10" class="text-end border-0 py-1 small">Total Tax:</td>
-                                            <td class="text-end border-0 py-1 small">₹${((invoice.gst?.cgst || 0) + (invoice.gst?.sgst || 0) + (invoice.gst?.igst || 0)).toFixed(2)}</td>
-                                        </tr>
-                                        <tr class="table-secondary">
-                                            <td colspan="10" class="text-end fw-bold text-uppercase py-3">Total Amount</td>
-                                            <td class="text-end fw-bold py-3 fs-5">₹${invoice.total.toFixed(2)}</td>
-                                        </tr>
+                                         <tr style="background-color: #f8f9fa !important;">
+                                             <td colspan="9" class="text-end text-uppercase py-3 extra-small fw-bold" style="color: #000 !important; border: 2px solid #000;">Total Amount</td>
+                                             <td class="text-end py-3 extra-small fs-6 fw-bold" style="color: #000 !important; border: 2px solid #000; padding-right: 5px !important;">₹${invoice.total.toFixed(2)}</td>
+                                         </tr>
                                     </tfoot>
                                 </table>
 
@@ -3816,6 +3923,13 @@ const DeliveryUI = {
                                         <h6 class="fw-bold small mb-2">Terms & Conditions:</h6>
                                         <p class="extra-small text-muted mb-1">1. Goods once sold will not be taken back.</p>
                                         <p class="extra-small text-muted mb-3">2. Subject to Chennai Jurisdiction.</p>
+
+                                        ${invoice.narration ? `
+                                        <div class="mb-3 p-2 border rounded bg-light" style="font-size: 8.5pt;">
+                                            <span class="text-muted text-uppercase fw-bold extra-small d-block mb-1">Narration:</span>
+                                            <div class="text-dark">${invoice.narration}</div>
+                                        </div>
+                                        ` : ''}
                                         
                                         <div class="d-flex align-items-center border rounded p-2 bg-light" style="width: fit-content;">
                                             <div class="bg-white p-1 border me-3">
@@ -3847,7 +3961,12 @@ const DeliveryUI = {
         `;
 
         // Remove old modal if exists
-        document.getElementById('invoicePreviewModal')?.remove();
+        const oldModal = document.getElementById('invoicePreviewModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
 
         // Insert modal HTML into DOM
         document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -3855,6 +3974,14 @@ const DeliveryUI = {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('invoicePreviewModal'));
         modal.show();
+    },
+
+
+    nativePrint() {
+        window.focus();
+        setTimeout(() => {
+            window.print();
+        }, 500);
     },
 
     async printInvoice(id) {
@@ -3877,32 +4004,43 @@ const DeliveryUI = {
         const opt = {
             margin: [0.3, 0.3, 0.3, 0.3],
             filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
+            image: { type: 'jpeg', quality: 0.90 },
+            html2canvas: { scale: 1.0, useCORS: true, logging: false },
             jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
         };
 
         if (typeof html2pdf !== 'undefined') {
-            App.showNotification('Preparing PDF Viewer...', 'info');
-            const worker = html2pdf().set(opt).from(element);
+            const btn = document.querySelector('#invoicePreviewModal .btn-primary, #voucherPreviewModal .btn-primary');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
 
-            if (window.electronAPI && window.electronAPI.savePdf) {
-                try {
+            App.showNotification('Generating PDF...', 'info');
+            
+            try {
+                const worker = html2pdf().set(opt).from(element);
+
+                if (window.electronAPI && window.electronAPI.savePdf) {
                     const pdfBase64 = await worker.output('base64');
                     await window.electronAPI.savePdf({
                         blobBase64: pdfBase64,
                         filename: filename,
                         subfolder: 'Invoices'
                     });
-                } catch (e) {
-                    console.error('PDF Save Error:', e);
                 }
-            }
 
-            // Open in professional browser viewer instead of direct download
-            worker.output('bloburl').then(url => {
+                // Open in professional browser viewer
+                const blob = await worker.output('blob');
+                const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
-            });
+                
+            } catch (e) {
+                console.error('PDF Generation Error:', e);
+                App.showNotification('Error generating PDF', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
         } else {
             window.print();
         }
@@ -3922,6 +4060,11 @@ const DeliveryUI = {
         const settings = DataManager.getData('gtes_settings') || {};
         const companyName = settings.companyName || "Gas Tech Engineering Service";
         const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
+        const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
+        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
+        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
+        const gstin = settings.gstin || "33AFXPR3235A32F";
+        const pan = settings.pan || "AFXPR3235A";
 
         const isReceipt = voucher.type === 'receipt';
         const title = isReceipt ? 'Receipt' : 'Payment';
@@ -3960,7 +4103,7 @@ const DeliveryUI = {
                                     <div class="col-7">
                                         <h6 class="fw-bold border-bottom border-dark pb-1 text-muted small text-uppercase" style="width: fit-content;">${isReceipt ? 'Received From' : 'Paid To'}:</h6>
                                         <h5 class="fw-bold mb-1">${voucher.customerName}</h5>
-                                        <p class="mb-0 small text-muted" style="white-space: pre-line;">${customer?.address || ''}</p>
+                                        <p class="mb-0 small text-muted" style="white-space: pre-line;">${customer?.address || voucher.customerAddress || ''}</p>
                                         ${customer?.gstin ? `<p class="mb-0 small"><strong>GSTIN:</strong> ${customer.gstin}</p>` : ''}
                                     </div>
                                     <div class="col-5 text-end">
@@ -4024,7 +4167,12 @@ const DeliveryUI = {
         `;
 
         // Remove old modal if exists
-        document.getElementById('voucherPreviewModal')?.remove();
+        const oldModal = document.getElementById('voucherPreviewModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
         const modal = new bootstrap.Modal(document.getElementById('voucherPreviewModal'));
@@ -4096,6 +4244,8 @@ const DeliveryUI = {
         const companyName = settings.companyName || "Gas Tech Engineering Service";
         const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
         const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
+        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
+        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
         const gstin = settings.gstin || "33AFXPR3235A32F";
         const pan = settings.pan || "AFXPR3235A";
         const iec = settings.iec || "AFXPR3235A";
@@ -4107,14 +4257,17 @@ const DeliveryUI = {
                         <div class="modal-header border-0">
                             <h5 class="modal-title text-white">Purchase Bill Preview</h5>
                             <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-outline-info" onclick="DeliveryUI.nativePrint()">
+                                    <i class="bi bi-printer"></i> Print
+                                </button>
                                 <button type="button" class="btn btn-primary" onclick="DeliveryUI.printPurchase('${expense.id}')">
-                                    <i class="bi bi-download"></i> Download PDF
+                                    <i class="bi bi-download"></i> Save PDF
                                 </button>
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-4">
-                            <div id="purchasePrintArea" class="bg-white text-dark p-5" style="min-height: 800px;">
+                        <div class="modal-body p-0 bg-secondary-subtle overflow-auto" style="max-height: 90vh;">
+                            <div id="purchasePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 10pt; box-sizing: border-box; border: 1px solid #dee2e6;">
                                 <!-- Company Header -->
                                 <div class="text-center border-bottom pb-3 mb-4">
                                     <h2 class="fw-bold mb-1">${companyName.toUpperCase()}</h2>
@@ -4146,97 +4299,99 @@ const DeliveryUI = {
                                 </div>
 
                                 <!-- Items Table -->
-                                <table class="table table-bordered border-dark mb-4 text-dark">
-                                    <thead style="background-color: #f8f9fa;" class="text-dark">
-                                        <tr class="text-center align-middle small fw-bold">
-                                            <th style="width: 5%">#</th>
-                                            <th style="width: 40%">DESCRIPTION</th>
-                                            <th style="width: 10%">HSN</th>
-                                            <th style="width: 8%">QTY</th>
+                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%;">
+                                    <thead style="background-color: #eee;" class="text-dark">
+                                        <tr class="text-center align-middle extra-small fw-bold">
+                                            <th style="width: 3%">#</th>
+                                            <th style="width: 16%">DESCRIPTION</th>
+                                            <th style="width: 8%">HSN</th>
+                                            <th style="width: 5%">QTY</th>
+                                            <th style="width: 5%">UNIT</th>
                                             <th style="width: 10%">RATE</th>
-                                            <th style="width: 8%">PER</th>
-                                            <th style="width: 8%">DISC</th>
-                                            <th style="width: 10%">COST</th>
-                                            <th style="width: 10%">SGST</th>
-                                            <th style="width: 10%">AMOUNT</th>
-                                        </tr>
-                                        <tr class="text-center small">
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th></th>
-                                            <th>%</th>
-                                            <th>Amt</th>
-                                            <th>%</th>
-                                            <th>Amt</th>
+                                            <th style="width: 5%">DISC</th>
+                                            <th style="width: 7%">CGST%</th>
+                                            <th style="width: 9.5%">CGST AMT</th>
+                                            <th style="width: 7%">SGST%</th>
+                                            <th style="width: 9.5%">SGST AMT</th>
+                                            <th style="width: 15%">TOTAL</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${(expense.items && expense.items.length > 0) ? expense.items.map((it, idx) => `
-                                            <tr class="align-middle">
-                                                <td class="text-center small">${idx + 1}</td>
+                                        ${(expense.items && expense.items.length > 0) ? expense.items.map((it, idx) => {
+                                            const itGstRate = parseFloat(it.gstRate) || 0;
+                                            const cRate = itGstRate / 2;
+                                            const sRate = itGstRate / 2;
+                                            const cAmt = (it.amount * cRate / 100);
+                                            const sAmt = (it.amount * sRate / 100);
+                                            
+                                            return `
+                                            <tr class="align-middle text-dark">
+                                                <td class="text-center extra-small">${idx + 1}</td>
                                                 <td>
-                                                    <div class="fw-bold">${it.name || it.description}</div>
+                                                    <div class="fw-bold extra-small">${it.name || it.description}</div>
                                                 </td>
-                                                <td class="text-center small">${it.hsn || '7422'}</td>
-                                                <td class="text-center">${it.quantity || 1}</td>
-                                                <td class="text-end">${(it.rate || 0).toFixed(2)}</td>
-                                                <td class="text-center small">nos</td>
-                                                <td class="text-center">0%</td>
-                                                <td class="text-end">0.00</td>
-                                                <td class="text-center">9.0%</td>
-                                                <td class="text-end fw-bold">${(it.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center extra-small">${it.hsn || '-'}</td>
+                                                <td class="text-center extra-small">${it.quantity || 1}</td>
+                                                <td class="text-center extra-small">nos</td>
+                                                <td class="text-end extra-small">${(it.rate || 0).toFixed(2)}</td>
+                                                <td class="text-center extra-small">0%</td>
+                                                <td class="text-center extra-small">${cRate.toFixed(1)}%</td>
+                                                <td class="text-end extra-small">${cAmt.toFixed(2)}</td>
+                                                <td class="text-center extra-small">${sRate.toFixed(1)}%</td>
+                                                <td class="text-end extra-small">${sAmt.toFixed(2)}</td>
+                                                <td class="text-end fw-bold extra-small">${(it.amount || 0).toFixed(2)}</td>
                                             </tr>
-                                        `).join('') : `
-                                            <tr class="align-middle">
-                                                <td class="text-center small">1</td>
+                                            `;
+                                        }).join('') : `
+                                            <tr class="align-middle text-dark">
+                                                <td class="text-center extra-small">1</td>
                                                 <td>
-                                                    <div class="fw-bold">${expense.description}</div>
+                                                    <div class="fw-bold extra-small">${expense.description}</div>
                                                 </td>
-                                                <td class="text-center small">-</td>
-                                                <td class="text-center">1</td>
-                                                <td class="text-end">${(expense.amount || 0).toFixed(2)}</td>
-                                                <td class="text-center small">unit</td>
-                                                <td class="text-center">0%</td>
-                                                <td class="text-end">0.00</td>
-                                                <td class="text-center">0%</td>
-                                                <td class="text-end fw-bold">${(expense.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center extra-small">-</td>
+                                                <td class="text-center extra-small">1</td>
+                                                <td class="text-center extra-small">unit</td>
+                                                <td class="text-end extra-small">${(expense.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center extra-small">0%</td>
+                                                <td class="text-center extra-small">0%</td>
+                                                <td class="text-end extra-small">0.00</td>
+                                                <td class="text-center extra-small">0%</td>
+                                                <td class="text-end extra-small">0.00</td>
+                                                <td class="text-end fw-bold extra-small">${(expense.amount || 0).toFixed(2)}</td>
                                             </tr>
                                         `}
                                     </tbody>
                                     <tfoot>
                                         <tr>
-                                            <td colspan="9" class="text-end border-0 pt-3 fw-bold">Subtotal:</td>
-                                            <td class="text-end border-0 pt-3 fw-bold">₹${(expense.subtotal || expense.amount || 0).toFixed(2)}</td>
+                                            <td colspan="11" class="text-end border-0 pt-3 fw-bold extra-small">Subtotal:</td>
+                                            <td class="text-end border-0 pt-3 fw-bold extra-small">₹${(expense.subtotal || expense.amount || 0).toFixed(2)}</td>
                                         </tr>
                                         ${(expense.cgst && expense.cgst > 0) ? `
                                         <tr>
-                                            <td colspan="9" class="text-end border-0 py-1 small">CGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${expense.cgst.toFixed(2)}</td>
+                                            <td colspan="11" class="text-end border-0 py-1 extra-small">CGST Amt:</td>
+                                            <td class="text-end border-0 py-1 extra-small">₹${expense.cgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         ${(expense.sgst && expense.sgst > 0) ? `
                                         <tr>
-                                            <td colspan="9" class="text-end border-0 py-1 small">SGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${expense.sgst.toFixed(2)}</td>
+                                            <td colspan="11" class="text-end border-0 py-1 extra-small">SGST Amt:</td>
+                                            <td class="text-end border-0 py-1 extra-small">₹${expense.sgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         ${(expense.igst && expense.igst > 0) ? `
                                         <tr>
-                                            <td colspan="9" class="text-end border-0 py-1 small">IGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small">₹${expense.igst.toFixed(2)}</td>
+                                            <td colspan="11" class="text-end border-0 py-1 extra-small">IGST Amt:</td>
+                                            <td class="text-end border-0 py-1 extra-small">₹${expense.igst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         <tr>
-                                            <td colspan="9" class="text-end border-0 py-1 small">Total Tax:</td>
-                                            <td class="text-end border-0 py-1 small">₹${((expense.cgst || 0) + (expense.sgst || 0) + (expense.igst || 0)).toFixed(2)}</td>
+                                            <td colspan="11" class="text-end border-0 py-1 extra-small">Total Tax:</td>
+                                            <td class="text-end border-0 py-1 extra-small">₹${((expense.cgst || 0) + (expense.sgst || 0) + (expense.igst || 0)).toFixed(2)}</td>
                                         </tr>
-                                        <tr class="table-secondary">
-                                            <td colspan="9" class="text-end fw-bold text-uppercase py-3">Total Amount</td>
-                                            <td class="text-end fw-bold py-3 fs-5">₹${(expense.amount || 0).toFixed(2)}</td>
-                                        </tr>
+                                         <tr style="border: 2px solid #000; background-color: #f8f9fa !important;">
+                                              <td colspan="11" class="text-end text-uppercase py-3 extra-small fw-bold" style="color: #000 !important;">Total Amount</td>
+                                              <td class="text-end py-3 extra-small fs-6 fw-bold" style="color: #000 !important; padding-right: 15px !important;">₹${(expense.amount || 0).toFixed(2)}</td>
+                                         </tr>
                                     </tfoot>
                                 </table>
 
@@ -4263,7 +4418,12 @@ const DeliveryUI = {
         `;
 
         // Remove old modal if exists
-        document.getElementById('purchaseViewModal')?.remove();
+        const oldModal = document.getElementById('purchaseViewModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
 
         // Insert modal HTML into DOM
         document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -4280,46 +4440,55 @@ const DeliveryUI = {
             await new Promise(r => setTimeout(r, 200));
             element = document.getElementById('purchasePrintArea');
         }
-
+    
         if (!element) {
             App.showNotification('Purchase print area not found', 'error');
             return;
         }
-
-        const expense = ExpenseManager.getAllExpenses().find(e => e.id === id);
-        if (!expense) return;
-
+    
         const filename = `Purchase_${id}.pdf`;
         const opt = {
             margin: [0.3, 0.3, 0.3, 0.3],
             filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
+            image: { type: 'jpeg', quality: 0.90 },
+            html2canvas: { scale: 1.0, useCORS: true, logging: false },
             jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
         };
-
+    
         if (typeof html2pdf !== 'undefined') {
-            App.showNotification('Preparing PDF Viewer...', 'info');
-            const worker = html2pdf().set(opt).from(element);
-
-            if (window.electronAPI && window.electronAPI.savePdf) {
-                try {
+            const btn = document.querySelector('#purchaseViewModal .btn-primary');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
+    
+            App.showNotification('Generating PDF...', 'info');
+            
+            try {
+                const worker = html2pdf().set(opt).from(element);
+    
+                if (window.electronAPI && window.electronAPI.savePdf) {
                     const pdfBase64 = await worker.output('base64');
                     await window.electronAPI.savePdf({
                         blobBase64: pdfBase64,
                         filename: filename,
                         subfolder: 'Purchases'
                     });
-                } catch (e) {
-                    console.error('PDF Save Error:', e);
                 }
-            }
-
-            worker.output('bloburl').then(url => {
+    
+                // Open in professional browser viewer
+                const blob = await worker.output('blob');
+                const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
-            });
+                
+            } catch (e) {
+                console.error('PDF Generation Error:', e);
+                App.showNotification('Error generating PDF', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
         } else {
-            App.showNotification('PDF generation library not loaded', 'error');
+            window.print();
         }
     },
 
@@ -4413,7 +4582,13 @@ const DeliveryUI = {
             </div>
         `;
 
-        document.getElementById('purchaseEntryModal')?.remove();
+        // Remove old modal if exists
+        const oldModal = document.getElementById('purchaseEntryModal');
+        if (oldModal) {
+            const inst = bootstrap.Modal.getInstance(oldModal);
+            if (inst) inst.hide();
+            oldModal.remove();
+        }
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         const modal = new bootstrap.Modal(document.getElementById('purchaseEntryModal'));
 

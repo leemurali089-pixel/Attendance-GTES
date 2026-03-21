@@ -35,19 +35,23 @@ ipcMain.handle('verify-password', async (event, password, storedHash) => {
 
 let mainWindow;
 
-// Data folder path - use userData for packaged app, local Data folder for development
-// When packaged, __dirname points to inside app.asar which is read-only
-// So we use the parent directory of app.asar for the Data folder
+// Data folder path - use OneDrive if available for multi-PC syncing
 let DATA_FOLDER;
-if (app.isPackaged) {
-    // For packaged app: use the parent directory of resources/app.asar
-    // This will be in the installation directory, e.g., C:\Users\Dell\OneDrive\MJS PrimeLogic\Data
-    const appPath = app.getAppPath(); // Points to resources/app.asar or resources/app
-    const resourcesPath = path.dirname(appPath); // Points to resources/
-    const installPath = path.dirname(resourcesPath); // Points to installation directory
-    DATA_FOLDER = path.join(installPath, 'Data');
+let GLOBAL_BASE_PATH;
+
+if (process.env.OneDrive) {
+    // If OneDrive is active on this PC, sync everything through it
+    GLOBAL_BASE_PATH = path.join(process.env.OneDrive, 'Attendance GTES');
 } else {
-    // For development: use local Data folder in project directory
+    // Fallback to Documents if OneDrive isn't configured
+    GLOBAL_BASE_PATH = path.join(app.getPath('documents'), 'Attendance GTES');
+}
+
+if (app.isPackaged) {
+    DATA_FOLDER = path.join(GLOBAL_BASE_PATH, 'Data');
+} else {
+    // For local development, keep it strictly to the current project clone
+    GLOBAL_BASE_PATH = __dirname;
     DATA_FOLDER = path.join(__dirname, 'Data');
 }
 
@@ -122,17 +126,61 @@ function setupFileWatcher(window) {
     }
 }
 
-// Save data to file
-ipcMain.handle('save-data', async (event, key, data) => {
-    try {
-        const filePath = path.join(DATA_FOLDER, `${key}.json`);
-        await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
-        console.log(`Saved ${key}.json`);
-        return { success: true };
-    } catch (error) {
-        console.error(`Error saving ${key}:`, error);
-        return { success: false, error: error.message };
+// Queue for sequential file writes (Prevents OneDrive/Sync collisions)
+const writeQueue = new Map(); // Map of key -> Promise chain
+
+/**
+ * Robustly save data with retries and atomic write (temp-then-rename)
+ */
+async function robustSave(key, data) {
+    const filePath = path.join(DATA_FOLDER, `${key}.json`);
+    const tempPath = filePath + '.tmp';
+    const maxRetries = 5;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // 1. Write to temporary file
+            await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf8');
+            
+            // 2. Atomic rename (replaces old file if it exists)
+            await fs.rename(tempPath, filePath);
+            
+            return { success: true };
+        } catch (error) {
+            lastError = error;
+            // Common OneDrive/Sync locks: EBUSY, EPERM, UNKNOWN
+            console.warn(`[Save Queue] Attempt ${attempt} failed for ${key}: ${error.code || error.message}`);
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, attempt * 200));
+        }
     }
+
+    console.error(`[Save Queue] ❌ All ${maxRetries} attempts failed for ${key}.`);
+    return { success: false, error: lastError?.message || 'Unknown save error' };
+}
+
+// Bridge console logs from renderer to terminal for debugging
+ipcMain.on('log-to-terminal', (event, message) => {
+    console.log(`[Renderer]: ${message}`);
+});
+
+// Queue-wrapped IPC handler
+ipcMain.handle('save-data', async (event, key, data) => {
+    // Get or create queue for this specific file key
+    if (!writeQueue.has(key)) {
+        writeQueue.set(key, Promise.resolve());
+    }
+
+    // Append this save operation to the chain
+    const currentQueue = writeQueue.get(key);
+    const nextOperation = currentQueue
+        .then(() => robustSave(key, data))
+        .catch(err => ({ success: false, error: err.message }));
+
+    writeQueue.set(key, nextOperation);
+    return nextOperation;
 });
 
 // Load data from file
@@ -141,29 +189,25 @@ ipcMain.handle('load-data', async (event, key) => {
         const filePath = path.join(DATA_FOLDER, `${key}.json`);
         const data = await fs.readFile(filePath, 'utf8');
         const stats = await fs.stat(filePath);
-        console.log(`Loaded ${key}.json`);
+
+        // Optimization: For huge files (> 5MB), just return success and let the renderer know it's too big
+        // Or return raw string to avoid serialization costs of large objects
+        if (data.length > 5 * 1024 * 1024) {
+             console.log(`Large file detected (${key}.json), returning raw string to renderer.`);
+             return { success: true, isRaw: true, data: data, lastModified: stats.mtimeMs };
+        }
 
         let parsedData = null;
         try {
             parsedData = JSON.parse(data);
         } catch (parseError) {
             console.error(`Error parsing ${key}.json:`, parseError);
-            // Return null so the app can use defaults or fallback
             return { success: true, data: null, lastModified: stats.mtimeMs };
         }
 
-        return {
-            success: true,
-            data: parsedData,
-            lastModified: stats.mtimeMs
-        };
+        return { success: true, data: parsedData, lastModified: stats.mtimeMs };
     } catch (error) {
-        if (error.code === 'ENOENT') {
-            // File doesn't exist
-            console.log(`File not found: ${key}.json`);
-            return { success: true, data: null };
-        }
-        console.error(`Error loading ${key}:`, error);
+        if (error.code === 'ENOENT') return { success: true, data: null };
         return { success: false, error: error.message };
     }
 });
@@ -210,15 +254,8 @@ ipcMain.handle('read-file-buffer', async (event, filePath) => {
 ipcMain.handle('create-backup', async () => {
     try {
         const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-        // Use same approach as DATA_FOLDER to get the correct base path
-        let basePath;
-        if (app.isPackaged) {
-            const appPath = app.getAppPath();
-            const resourcesPath = path.dirname(appPath);
-            basePath = path.dirname(resourcesPath);
-        } else {
-            basePath = __dirname;
-        }
+        // Use the globally synchronized base path
+        let basePath = GLOBAL_BASE_PATH;
         const backupFolder = path.join(basePath, 'Backups', date);
 
         // Create backup folder if it doesn't exist
@@ -344,15 +381,7 @@ ipcMain.handle('import-backup', async () => {
 // Save PDF to specific folder (PRD Requirement)
 ipcMain.handle('save-pdf', async (event, { blobBase64, filename, subfolder }) => {
     try {
-        let basePath;
-        if (app.isPackaged) {
-            const appPath = app.getAppPath();
-            const resourcesPath = path.dirname(appPath);
-            basePath = path.dirname(resourcesPath);
-        } else {
-            basePath = __dirname;
-        }
-
+        let basePath = GLOBAL_BASE_PATH;
         const outputDir = path.join(basePath, 'ChallanOutput', subfolder);
         await fs.mkdir(outputDir, { recursive: true });
 
@@ -366,6 +395,44 @@ ipcMain.handle('save-pdf', async (event, { blobBase64, filename, subfolder }) =>
         console.error('Error saving PDF:', error);
         return { success: false, error: error.message };
     }
+});
+
+// Direct Cloud Sync for large data (Bypasses Renderer/IPC overhead)
+const https = require('https');
+ipcMain.handle('sync-to-cloud', async (event, key, data) => {
+    return new Promise((resolve) => {
+        const payload = JSON.stringify(data);
+        const options = {
+            hostname: 'mjs-primelogic-default-rtdb.asia-southeast1.firebasedatabase.app',
+            port: 443,
+            path: `/${key}.json`,
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        };
+
+        console.log(`[Main Sync]: Uploading ${key} directly to Firebase... (${Buffer.byteLength(payload)} bytes)`);
+        
+        const req = https.request(options, (res) => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+                console.log(`[Main Sync]: ✅ ${key} uploaded successfully (Status ${res.statusCode})`);
+                resolve({ success: true });
+            } else {
+                console.error(`[Main Sync]: ❌ ${key} failed (Status ${res.statusCode})`);
+                resolve({ success: false, error: `Firebase error ${res.statusCode}` });
+            }
+        });
+
+        req.on('error', (e) => {
+            console.error(`[Main Sync]: ❌ ${key} error:`, e.message);
+            resolve({ success: false, error: e.message });
+        });
+
+        req.write(payload);
+        req.end();
+    });
 });
 
 // Email sending

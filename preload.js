@@ -30,6 +30,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // PDF operations
     savePdf: (data) => ipcRenderer.invoke('save-pdf', data),
 
+    // Deep Sync operations (New in v1.1.5)
+    syncToCloud: (key, data) => ipcRenderer.invoke('sync-to-cloud', key, data),
+
     // Check if running in Electron
-    isElectron: true
+    isElectron: true,
+    
+    // Low-level IPC
+    send: (channel, data) => ipcRenderer.send(channel, data)
 });

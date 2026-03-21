@@ -59,33 +59,82 @@
 /* Invoice and Challan print area - force light theme for readability */
 .invoice-sheet,
 #challanPrintArea,
-#invoicePrintArea {
+#invoicePrintArea,
+#jobCardPrintArea {
     background-color: #ffffff !important;
     color: #1a202c !important;
+    padding: 30px !important;
 }
 
 .invoice-sheet *,
 #challanPrintArea *,
-#invoicePrintArea * {
+#invoicePrintArea *,
+#jobCardPrintArea * {
     color: inherit !important;
 }
 
 .invoice-sheet .text-muted,
 #challanPrintArea .text-muted,
-#invoicePrintArea .text-muted {
-    color: #6b7280 !important;
+#invoicePrintArea .text-muted,
+#jobCardPrintArea .text-muted,
+#jobCardPrintArea label {
+    color: #64748b !important;
 }
 
 .invoice-sheet .text-primary,
 #challanPrintArea .text-primary,
-#invoicePrintArea .text-primary {
-    color: #3b82f6 !important;
+#invoicePrintArea .text-primary,
+#jobCardPrintArea .text-primary {
+    color: #2563eb !important;
 }
 
 .invoice-sheet .badge,
 #challanPrintArea .badge,
-#invoicePrintArea .badge {
+#invoicePrintArea .badge,
+#jobCardPrintArea .badge {
     color: #ffffff !important;
+}
+
+/* Ensure inputs inside print areas are clean */
+#jobCardPrintArea .form-control,
+#jobCardPrintArea .form-select,
+#jobCardPrintArea textarea {
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #1e293b !important;
+}
+
+#jobCardPrintArea .card {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+}
+
+#jobCardPrintArea .card-header {
+    background-color: #f1f5f9 !important;
+    color: #1e293b !important;
+}
+
+#jobCardPrintArea .table th {
+    background-color: #f1f5f9 !important;
+    color: #1e293b !important;
+    border-color: #e2e8f0 !important;
+}
+
+#jobCardPrintArea .table td {
+    color: #1e293b !important;
+    border-color: #e2e8f0 !important;
+}
+
+/* Fix visibility of select options and datalist items in light-mode print area */
+#jobCardPrintArea select option,
+#jobCardPrintArea datalist option {
+    background-color: #ffffff !important;
+    color: #1e293b !important;
+}
+
+/* Force light scrollbars for the print area if needed */
+#jobCardPrintArea {
+    color-scheme: light !important;
 }
 
 [data-theme="light"] {
@@ -1517,6 +1566,7 @@ a:hover {
     font-size: 2.5rem;
     font-weight: 700;
     background: linear-gradient(to right, #fff, #94a3b8);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     margin-bottom: 0.5rem;
@@ -1623,6 +1673,7 @@ footer {
 .footer-brand {
     font-weight: 700;
     background: linear-gradient(to right, #fff, #94a3b8);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     letter-spacing: -0.5px;
@@ -2371,73 +2422,67 @@ footer p {
     color: var(--text-secondary) !important;
 }
 
-/* Print Styles for PDF Generation */
+/* Print Styles - Ensure only the document area is printed */
 @media print {
-    @page {
-        size: A4;
-        margin: 10mm;
-    }
-
-    body {
-        background: white !important;
-        color: black !important;
-        font-size: 12pt;
-    }
-
-    /* Hide non-printable elements */
-    .no-print,
-    .navbar,
-    .sidebar,
-    .modal-footer,
-    .btn,
-    .toast-container,
-    #theme-toggle,
-    #backupDropdown,
-    #userInfo {
+    /* Critical: Hide EVERYTHING first */
+    body > *:not(.modal) {
         display: none !important;
     }
 
-    /* Ensure full width for reports */
-    .container,
-    .container-fluid {
-        width: 100% !important;
-        max-width: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
+    .navbar, .footer, .btn, .no-print, .modal-header, .modal-footer {
+        display: none !important;
     }
 
-    /* Table optimizations */
-    table {
-        width: 100% !important;
-        border-collapse: collapse !important;
-    }
-
-    th,
-    td {
-        border: 1px solid #ddd !important;
-        padding: 4px !important;
-        font-size: 10pt !important;
-    }
-
-    /* Avoid breaking rows inside tables */
-    tr {
-        page-break-inside: avoid;
-    }
-
-    /* Ensure header is visible */
-    .report-header {
+    /* Modal Reset */
+    .modal {
+        position: static !important;
         display: block !important;
-        text-align: center;
-        margin-bottom: 20px;
+        background: white !important;
+        overflow: visible !important;
+    }
+    
+    .modal-dialog {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    
+    .modal-content {
+        border: none !important;
+        box-shadow: none !important;
+        background: white !important;
     }
 
-    /* Reset text colors for print */
-    .text-primary,
-    .text-success,
-    .text-danger,
-    .text-warning,
-    .text-info,
-    .text-muted {
+    /* The target area - force it to the top */
+    #invoicePrintArea, 
+    #purchasePrintArea, 
+    #challanPrintArea {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        padding: 5mm !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: white !important;
         color: black !important;
+    }
+
+    html, body {
+        background: white !important;
+        color: black !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Table Fixes */
+    .table-bordered th, .table-bordered td {
+        border: 1px solid #000 !important;
+    }
+    
+    .table thead th {
+        background-color: #f2f2f2 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 }

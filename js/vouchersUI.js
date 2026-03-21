@@ -4,13 +4,60 @@
  * Integrated with Synced Data
  */
 const VouchersUI = {
+    currentMode: 'gst', // 'gst', 'non-gst', or 'purchase'
+    
     async init() {
         console.log('Vouchers UI Initialized');
-        // Check if we are on the vouchers view
     },
 
-    load() {
-        this.renderVouchersList();
+    load(params = {}) {
+        const mode = params.mode || null;
+        if (!mode) {
+            this.renderSubSelection();
+        } else {
+            this.currentMode = mode;
+            this.renderVouchersList();
+        }
+    },
+
+    renderSubSelection() {
+        const view = document.getElementById('vouchersView');
+        if (!view) return;
+
+        view.innerHTML = `
+            <div class="container-fluid">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-cash-stack text-info me-2"></i> Vouchers</h2>
+                    <button class="btn btn-outline-light btn-sm" onclick="App.showView('accounting')">
+                        <i class="bi bi-arrow-left"></i> Back to Accounting
+                    </button>
+                </div>
+                
+                <div class="row g-4 justify-content-center pt-5">
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary hover-lift h-100 text-center p-5" onclick="VouchersUI.load({mode: 'gst'})" style="cursor:pointer">
+                            <i class="bi bi-cash-stack text-success display-1 mb-4"></i>
+                            <h3 class="card-title text-white">GST Vouchers</h3>
+                            <p class="text-muted">Taxable Receipts/Payments</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary hover-lift h-100 text-center p-5" onclick="VouchersUI.load({mode: 'non-gst'})" style="cursor:pointer">
+                            <i class="bi bi-wallet2 text-info display-1 mb-4"></i>
+                            <h3 class="card-title text-white">Plain Vouchers</h3>
+                            <p class="text-muted">Cash/Bank (No GST)</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary hover-lift h-100 text-center p-5" onclick="VouchersUI.load({mode: 'purchase'})" style="cursor:pointer">
+                            <i class="bi bi-journal-check text-warning display-1 mb-4"></i>
+                            <h3 class="card-title text-white">Purchase Vouchers</h3>
+                            <p class="text-muted">Expense Tracking</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
     },
 
     renderVouchersList() {
@@ -25,7 +72,7 @@ const VouchersUI = {
         view.innerHTML = `
             <div class="container-fluid">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi bi-cash-stack text-info me-2"></i> Vouchers</h2>
+                    <h2><i class="bi bi-cash-stack text-info me-2"></i> ${this.currentMode === 'gst' ? 'GST Vouchers' : (this.currentMode === 'purchase' ? 'Purchase Vouchers' : 'Plain Vouchers')}</h2>
                     <div>
                         <button class="btn btn-secondary btn-sm me-2" onclick="VouchersUI.importBankStatement()">
                             <i class="bi bi-bank"></i> Import Bank Statement
@@ -33,11 +80,11 @@ const VouchersUI = {
                         <button class="btn btn-outline-info btn-sm me-2" onclick="ExportImportHelper.openImportExport('vouchers')">
                             <i class="bi bi-arrow-left-right me-1"></i> Export/Import
                         </button>
-                        <button class="btn btn-primary btn-sm me-2" onclick="VouchersUI.showCreateModal()">
-                            <i class="bi bi-plus-lg"></i> New Voucher
+                        <button class="btn btn-primary btn-sm me-2" onclick="VouchersUI.showCreateModal('${this.currentMode === 'purchase' ? 'payment' : 'receipt'}')">
+                            <i class="bi bi-plus-lg"></i> New ${this.currentMode === 'purchase' ? 'Purchase' : 'Voucher'}
                         </button>
-                        <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
-                            <i class="bi bi-arrow-left"></i> Back
+                        <button class="btn btn-outline-light btn-sm" onclick="VouchersUI.load()">
+                            <i class="bi bi-arrow-left"></i> Back to Selection
                         </button>
                     </div>
                 </div>
@@ -82,7 +129,25 @@ const VouchersUI = {
 
     updateTable() {
         // Fetch vouchers
-        const vouchers = DataManager.getData('vouchers') || [];
+        let vouchers = DataManager.getData('vouchers') || [];
+        
+        // If mode is purchase, we also want to show expenses/purchases
+        if (this.currentMode === 'purchase') {
+            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+            // Filter only purchase category expenses
+            const purchases = expenses.filter(e => 
+                (e.category || '').toLowerCase().includes('purchase')
+            ).map(e => ({
+                ...e,
+                id: e.id || e.billNo || e.vch_no || 'PUR-BK',
+                customerName: e.vendor || e.customerName || 'N/A',
+                isPurchase: true,
+                type: 'purchase'
+            }));
+            
+            // For purchase mode, we specifically want to see these
+            vouchers = purchases;
+        }
         // Sort by voucher number desc
         vouchers.sort((a, b) => {
             const numA = parseInt((a.id || '').replace(/\D/g, '')) || 0;
@@ -117,7 +182,24 @@ const VouchersUI = {
                     </tr>
                 </thead>
                 <tbody>
-                    ${vouchers.map(v => {
+                    ${vouchers.filter(v => {
+                        // If we are in purchase mode, we already filtered the list to items that are purchases
+                        if (this.currentMode === 'purchase') {
+                            return true;
+                        }
+
+                        // Exclude purchases from both GST and Plain voucher views
+                        if (v.isPurchase || v.type === 'purchase') return false;
+
+                        // GST Voucher: has GST flag OR legacy imports (hasGst is undefined)
+                        // Explicitly exclude plain vouchers (hasGst === false)
+                        if (this.currentMode === 'gst') {
+                            return v.hasGst !== false;
+                        }
+                        
+                        // Plain Voucher: Explicitly marked as hasGst === false
+                        return v.hasGst === false;
+                    }).map(v => {
             const searchStr = `${v.id} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
             const typeStr = (v.type || 'general').toLowerCase();
@@ -131,10 +213,13 @@ const VouchersUI = {
                                 ${v.customerName || v.customerId || 'N/A'}
                                 ${v.linkedInvoiceId ? `<br><small class="text-muted"><i class="bi bi-link-45deg"></i> Inv: ${v.linkedInvoiceId}</small>` : ''}
                             </td>
-                            <td class="text-end">₹${parseFloat(v.amount).toFixed(2)}</td>
+                            <td class="text-end">₹${(parseFloat(v.amount) + parseFloat(v.tdsAmount || 0) + parseFloat(v.discountAmount || 0)).toFixed(2)}</td>
                             <td class="text-center text-secondary">${v.paymentMode || 'Cash'}</td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-info" onclick="VouchersUI.previewVoucher('${v.id}')" title="View Voucher">
+                                <button class="btn btn-sm btn-outline-warning" onclick="VouchersUI.showEditVoucherModal('${v.id}')" title="Edit Voucher">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-info ms-1" onclick="VouchersUI.previewVoucher('${v.id}')" title="View Voucher">
                                     <i class="bi bi-eye"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-light ms-1" onclick="VouchersUI.generatePDF('${v.id}')" title="Print/PDF">
@@ -200,73 +285,110 @@ const VouchersUI = {
 
         const modalHtml = `
             <div class="modal fade" id="createVoucherModal" tabindex="-1">
-                <div class="modal-dialog modal-xl modal-dialog-centered"> <!-- XL modal for more space -->
+                <div class="modal-dialog modal-xl modal-dialog-scrollable"> <!-- XL modal for more space -->
                     <div class="modal-content bg-dark text-white border-secondary">
                         <div class="modal-header border-secondary">
                             <h5 class="modal-title"><i class="bi bi-wallet2 me-2"></i>New Voucher - ${title}</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-link text-white" onclick="document.querySelector('#createVoucherModal .modal-dialog').classList.toggle('modal-fullscreen')" title="Toggle Fullscreen">
+                                    <i class="bi bi-arrows-fullscreen"></i>
+                                </button>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
                         </div>
-                        <div class="modal-body">
-                            <form id="createVoucherForm">
-                                <div class="row mb-3">
-                                    <div class="col-md-3">
-                                        <label class="form-label">Type</label>
-                                        <select class="form-select bg-secondary text-white border-secondary" name="type" id="voucherType" onchange="VouchersUI.toggleReferenceFields(this.value)">
-                                            <option value="receipt" ${!isPayment ? 'selected' : ''}>Receipt (From Customer)</option>
-                                            <option value="payment" ${isPayment ? 'selected' : ''}>Payment (To Vendor)</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Date</label>
-                                        <input type="date" class="form-control bg-secondary text-white border-secondary" name="date" value="${new Date().toISOString().split('T')[0]}" required>
-                                    </div>
-                                    <div class="col-md-6" id="invoiceSelectContainer">
-                                        <label class="form-label" id="lblParty">Party Name</label>
-                                        <div class="position-relative">
-                                            <input type="text" class="form-control bg-secondary text-white border-secondary" id="voucherPartySearch" name="customerName" placeholder="Type to search party..." autocomplete="off" required>
-                                            <div id="voucherPartyDropdown" class="list-group position-absolute w-100 shadow d-none" style="z-index: 1050; max-height: 250px; overflow-y: auto;">
-                                                <!-- Dropdown items here -->
-                                            </div>
+                        <div class="modal-body p-0 bg-dark text-white d-flex flex-column" style="max-height: calc(100vh - 120px); overflow: hidden;">
+                            <style>
+                                .vch-form-control {
+                                    background: #1a1d20 !important;
+                                    border: 1px solid #373b3e !important;
+                                    color: #fff !important;
+                                }
+                                .vch-form-control:focus {
+                                    background: #212529 !important;
+                                    border-color: #0dcaf0 !important;
+                                    box-shadow: 0 0 0 0.25rem rgba(13, 202, 240, 0.25) !important;
+                                }
+                                .highlight-vch {
+                                    border: 1px solid #0dcaf0 !important;
+                                    background: rgba(13, 202, 240, 0.05) !important;
+                                    font-weight: bold;
+                                    color: #0dcaf0 !important;
+                                }
+                                .vch-form-label {
+                                    font-size: 0.8rem;
+                                    color: #6c757d;
+                                    margin-bottom: 0.25rem;
+                                    font-weight: 500;
+                                }
+                            </style>
+                            <form id="createVoucherForm" class="d-flex flex-column h-100">
+                                <!-- Fixed Top Section -->
+                                <div class="p-4 flex-shrink-0" style="background: var(--bs-dark); z-index: 10;">
+                                    <div class="row mb-3">
+                                        <div class="col-md-3">
+                                            <div class="vch-form-label">Type</div>
+                                            <select class="form-select vch-form-control" name="type" id="voucherType" onchange="VouchersUI.onVoucherTypeChange(this.value)">
+                                                <option value="receipt" ${!isPayment ? 'selected' : ''}>Receipt (From Customer)</option>
+                                                <option value="payment" ${isPayment ? 'selected' : ''}>Payment (To Vendor)</option>
+                                            </select>
                                         </div>
-                                        <input type="hidden" name="customerId" id="voucherCustomerId">
+                                        <div class="col-md-3">
+                                            <div class="vch-form-label">Voucher No.</div>
+                                            <input type="text" class="form-control vch-form-control highlight-vch" name="voucherId" id="voucherIdField" value="${VoucherManager.getNextVoucherNumber(type)}" required>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="vch-form-label">Date</div>
+                                            <input type="date" class="form-control vch-form-control" name="date" value="${new Date().toISOString().split('T')[0]}" required>
+                                        </div>
+                                        <div class="col-md-6 mt-3 mt-md-0" id="invoiceSelectContainer">
+                                            <div class="vch-form-label" id="lblParty">Party Name</div>
+                                            <div class="position-relative">
+                                                <input type="text" class="form-control vch-form-control" id="voucherPartySearch" name="customerName" placeholder="Type to search party..." autocomplete="off" required>
+                                                <div id="voucherPartyDropdown" class="list-group position-absolute w-100 shadow d-none" style="z-index: 1050; max-height: 250px; overflow-y: auto;">
+                                                    <!-- Dropdown items here -->
+                                                </div>
+                                            </div>
+                                            <input type="hidden" name="customerId" id="voucherCustomerId">
+                                            <input type="hidden" name="customerAddress" id="voucherCustomerAddress">
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="row mb-3">
-                                     <div class="col-md-3">
-                                        <label class="form-label">Amount</label>
-                                        <input type="number" class="form-control bg-secondary text-white border-secondary" name="amount" min="0" step="0.01" required>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Payment Mode</label>
-                                        <select class="form-select bg-secondary text-white border-secondary" name="paymentMode" onchange="VouchersUI.onPaymentModeChange(this)">
-                                            <option value="cash">Cash</option>
-                                            <option value="bank">Bank Transfer</option>
-                                            <option value="cheque">Cheque</option>
-                                            <option value="upi">UPI/Online</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3" id="refNoContainer" style="display:none;">
-                                        <label class="form-label">Ref/Cheque No.</label>
-                                        <input type="text" class="form-control bg-secondary text-white border-secondary" name="refNo" placeholder="Cheque/Ref No">
-                                    </div>
-                                    <div class="col-md-2" id="tdsContainer">
-                                        <label class="form-label text-warning">TDS Amount</label>
-                                        <input type="number" class="form-control bg-dark border-warning text-warning" name="tdsAmount" id="tdsAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="TDS">
-                                    </div>
-                                    <div class="col-md-2" id="discountContainer">
-                                        <label class="form-label text-info">Discount</label>
-                                        <input type="number" class="form-control bg-dark border-info text-info" name="discountAmount" id="discountAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="Discount">
-                                    </div>
-                                     <div class="col-md-2" id="remarksContainer"> <!-- Reduced width to accommodate discount -->
-                                        <label class="form-label">Remarks</label>
-                                        <input type="text" class="form-control bg-secondary text-white border-secondary" name="remarks" placeholder="Optional remarks">
+                                    <div class="row">
+                                         <div class="col-md-3">
+                                            <div class="vch-form-label">Amount</div>
+                                            <input type="number" class="form-control vch-form-control" name="amount" min="0" step="0.01" required>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="vch-form-label">Payment Mode</div>
+                                            <select class="form-select vch-form-control" name="paymentMode" onchange="VouchersUI.onPaymentModeChange(this)">
+                                                <option value="cash">Cash</option>
+                                                <option value="bank">Bank Transfer</option>
+                                                <option value="cheque">Cheque</option>
+                                                <option value="upi">UPI/Online</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3" id="refNoContainer" style="display:none;">
+                                            <div class="vch-form-label">Ref/Cheque No.</div>
+                                            <input type="text" class="form-control vch-form-control" name="refNo" placeholder="Cheque/Ref No">
+                                        </div>
+                                        <div class="col-md-2" id="tdsContainer" style="${this.currentMode !== 'gst' ? 'display:none;' : ''}">
+                                            <div class="vch-form-label text-warning">TDS Amount</div>
+                                            <input type="number" class="form-control bg-dark border-warning text-warning" name="tdsAmount" id="tdsAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="TDS">
+                                        </div>
+                                        <div class="col-md-2" id="discountContainer" style="${this.currentMode !== 'gst' ? 'display:none;' : ''}">
+                                            <div class="vch-form-label text-info">Discount</div>
+                                            <input type="number" class="form-control bg-dark border-info text-info" name="discountAmount" id="discountAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="Discount">
+                                        </div>
+                                        <div class="col-md-2" id="remarksContainer">
+                                            <div class="vch-form-label">Remarks</div>
+                                            <input type="text" class="form-control vch-form-control" name="remarks" placeholder="Optional remarks">
+                                        </div>
                                     </div>
                                 </div>
                                 
-                                <!-- Invoice Linking Section -->
-                                <div id="invoiceLinkingSection" class="border border-secondary p-2 rounded mb-3 d-none">
-                                    <label class="form-label small text-info fw-bold">Select Pending Invoices/Bills:</label>
-                                     <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                                <!-- Scrollable Invoice Linking Section -->
+                                <div id="invoiceLinkingSection" class="p-4 pt-1 d-none" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                                    <label class="form-label fw-bold text-info flex-shrink-0"><i class="bi bi-link-45deg"></i> Select Pending Invoices:</label>
+                                    <div class="table-responsive border border-secondary rounded" style="background: rgba(0,0,0,0.2); flex: 1; overflow-y: auto;">
                                         <table class="table table-dark table-sm table-bordered border-secondary" id="pendingInvoicesTable">
                                             <thead class="sticky-top bg-secondary">
                                                 <tr>
@@ -301,7 +423,7 @@ const VouchersUI = {
 
                             </form>
                         </div>
-                        <div class="modal-footer border-secondary">
+                        <div class="modal-footer border-secondary mt-auto">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                             <button type="button" class="btn btn-primary" onclick="VouchersUI.saveVoucher()">Save Voucher</button>
                         </div>
@@ -321,6 +443,21 @@ const VouchersUI = {
         });
 
         modal.show();
+    },
+
+    onVoucherTypeChange(type) {
+        this.toggleReferenceFields(type);
+        
+        // Update Voucher No for the new type
+        const idField = document.getElementById('voucherIdField');
+        if (idField) {
+            idField.value = VoucherManager.getNextVoucherNumber(type);
+        }
+    },
+
+    toggleReferenceFields(type) {
+        // Simple placeholder if needed, current implementation doesn't strictly need logic here 
+        // as onVoucherTypeChange handles it, but keeping for compatibility.
     },
 
     onPaymentModeChange(select) {
@@ -389,11 +526,16 @@ const VouchersUI = {
     showStatementProcessingModal(transactions) {
         const modalHtml = `
             <div class="modal fade" id="bankStatementModal" tabindex="-1">
-                <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-dialog modal-xl modal-dialog-scrollable">
                     <div class="modal-content bg-dark text-white border-secondary">
                         <div class="modal-header border-secondary">
                             <h5 class="modal-title"><i class="bi bi-bank me-2"></i>Process Bank Statement</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-link text-white" onclick="document.querySelector('#bankStatementModal .modal-dialog').classList.toggle('modal-fullscreen')" title="Toggle Fullscreen">
+                                    <i class="bi bi-arrows-fullscreen"></i>
+                                </button>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
                         </div>
                         <div class="modal-body p-0">
                             <div class="alert alert-info m-3 py-2 small">
@@ -401,13 +543,13 @@ const VouchersUI = {
                             </div>
                             <div class="table-responsive" style="max-height: 60vh;">
                                 <table class="table table-dark table-hover table-sm mb-0 align-middle">
-                                    <thead class="sticky-top bg-dark">
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Description</th>
-                                            <th class="text-end">Debit</th>
-                                            <th class="text-end">Credit</th>
-                                            <th class="text-center">Action</th>
+                                    <thead class="sticky-top">
+                                        <tr style="background-color: #212529;">
+                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Date</th>
+                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Description</th>
+                                            <th class="text-end" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Debit</th>
+                                            <th class="text-end" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Credit</th>
+                                            <th class="text-center" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -429,11 +571,17 @@ const VouchersUI = {
                 tx.converted = true; // Mark as converted locally for row styling
             } else {
                 actionHtml = `
-                    <button class="btn btn-sm btn-${isDebit ? 'outline-warning' : 'outline-info'}" 
-                            onclick="VouchersUI.convertBankTx(${index})">
-                        <i class="bi bi-${isDebit ? 'arrow-up-right' : 'arrow-down-left'}"></i>
-                        ${isDebit ? 'Payment' : 'Receipt'}
-                    </button>`;
+                    <div class="d-flex gap-1 justify-content-center flex-wrap">
+                        <button class="btn btn-sm btn-${isDebit ? 'outline-warning' : 'outline-info'}" 
+                                onclick="VouchersUI.convertBankTx(${index})">
+                            <i class="bi bi-${isDebit ? 'arrow-up-right' : 'arrow-down-left'}"></i>
+                            ${isDebit ? 'Payment' : 'Receipt'}
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" 
+                                onclick="VouchersUI.assignBankParty(${index})" title="Link this transaction to a party name for future auto-matching (no voucher created)">
+                            <i class="bi bi-person-plus"></i> Assign Party
+                        </button>
+                    </div>`;
             }
 
             return `
@@ -482,26 +630,20 @@ const VouchersUI = {
 
         const modalEl = document.getElementById('bankStatementModal');
 
-        // Add filter bar dynamically after insert
-        const allMatches = [...new Set(
-            transactions
-                .map(tx => VoucherManager.resolveBankParty(tx.description))
-                .filter(Boolean)
-        )].sort();
-
+        const filters = this.bsFilters || { party: '', type: '', status: '' };
         const filterBarHtml = `
             <div class="d-flex gap-2 align-items-center flex-wrap px-3 pb-2 pt-0">
-                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRows()">
+                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRows()" value="${filters.party}">
                 <select id="bsTypeFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
-                    <option value="">All Types</option>
-                    <option value="debit">Debit (Payments)</option>
-                    <option value="credit">Credit (Receipts)</option>
+                    <option value="" ${filters.type === '' ? 'selected' : ''}>All Types</option>
+                    <option value="debit" ${filters.type === 'debit' ? 'selected' : ''}>Debit (Payments)</option>
+                    <option value="credit" ${filters.type === 'credit' ? 'selected' : ''}>Credit (Receipts)</option>
                 </select>
                 <select id="bsStatusFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
-                    <option value="">All Status</option>
-                    <option value="pending">Pending</option>
-                    <option value="imported">Imported</option>
-                    <option value="matched">Auto-Matched</option>
+                    <option value="" ${filters.status === '' ? 'selected' : ''}>All Status</option>
+                    <option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>Pending</option>
+                    <option value="imported" ${filters.status === 'imported' ? 'selected' : ''}>Imported</option>
+                    <option value="matched" ${filters.status === 'matched' ? 'selected' : ''}>Auto-Matched</option>
                 </select>
                 <span id="bsRowCount" class="text-muted small ms-auto"></span>
             </div>
@@ -531,9 +673,14 @@ const VouchersUI = {
     },
 
     filterBankRows() {
-        const partyQ = (document.getElementById('bsPartyFilter')?.value || '').toLowerCase();
+        const partyRaw = document.getElementById('bsPartyFilter')?.value || '';
+        const partyQ = partyRaw.toLowerCase();
         const typeQ = (document.getElementById('bsTypeFilter')?.value || '');
         const statusQ = (document.getElementById('bsStatusFilter')?.value || '');
+        
+        // Save for persistence
+        this.bsFilters = { party: partyRaw, type: typeQ, status: statusQ };
+
         const rows = document.querySelectorAll('#bankStatementModal tbody tr');
         let visible = 0;
 
@@ -647,6 +794,190 @@ const VouchersUI = {
         }, 300);
     },
 
+    /**
+     * Assign a party name to a bank transaction description without creating a voucher.
+     * Saves the mapping to gtes_bank_alias for future auto-matching.
+     */
+    assignBankParty(index) {
+        const tx = this.currentBankTransactions?.[index];
+        if (!tx) return;
+
+        // Remove any existing assign modal
+        const oldModal = document.getElementById('assignPartyModal');
+        if (oldModal) { bootstrap.Modal.getInstance(oldModal)?.dispose(); oldModal.remove(); }
+
+        const amtColor = tx.type === 'debit' ? '#ff6b6b' : '#51cf66';
+        const amtSign  = tx.type === 'debit' ? '-' : '+';
+
+        const modalHtml = `
+        <div class="modal fade" id="assignPartyModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered" style="max-width:520px;">
+                <div class="modal-content border-0 shadow-lg" style="background:#1a1d23;">
+                    <div class="modal-header border-0 pb-0 px-4 pt-4">
+                        <h5 class="modal-title text-white fw-bold">
+                            <i class="bi bi-person-plus me-2 text-info"></i>Assign Party
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body px-4 pt-3 pb-4">
+                        <!-- Transaction info card -->
+                        <div class="rounded-3 p-3 mb-4" style="background:#0d1117; border:1px solid #30363d;">
+                            <div class="small mb-1" style="text-transform:uppercase;letter-spacing:.05em;font-size:.7rem;color:#94a3b8;">Transaction Description</div>
+                            <div class="text-white mb-2" style="font-size:.85rem;word-break:break-all;">${tx.description}</div>
+                            <div class="d-flex gap-3 small">
+                                <span><span style="color:#94a3b8;">Amount:</span> <strong style="color:${amtColor};">${amtSign}₹${tx.amount.toFixed(2)}</strong></span>
+                                <span style="color:#30363d;">|</span>
+                                <span><span style="color:#94a3b8;">Date:</span> <strong class="text-white">${new Date(tx.date).toLocaleDateString('en-IN')}</strong></span>
+                            </div>
+                        </div>
+
+                        <!-- Party search -->
+                        <div class="mb-1 small fw-bold text-white">Select or type Party Name</div>
+                        <div class="position-relative mb-2">
+                            <input type="text" id="assignPartySearchInput"
+                                class="form-control fw-bold"
+                                style="background:#0d1117;border:1px solid #58a6ff;color:#e6edf3;font-size:.95rem;"
+                                placeholder="Search party..." autocomplete="off">
+                            <div id="assignPartyDropdown"
+                                class="list-group position-absolute w-100 shadow-lg d-none"
+                                style="z-index:2000;max-height:220px;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:8px;top:calc(100% + 4px);">
+                            </div>
+                        </div>
+                        <div class="small" style="color:#8b949e;">
+                            <i class="bi bi-info-circle me-1"></i>Saves the mapping for future auto-matching. <strong class="text-white">No voucher will be created.</strong>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 px-4 pb-4 pt-0 d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" id="assignPartySaveBtn" class="btn btn-info text-dark fw-bold" onclick="VouchersUI.confirmAssignParty(${index})">
+                            <i class="bi bi-check2 me-1"></i>Save Mapping
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modalEl = document.getElementById('assignPartyModal');
+        modalEl.addEventListener('hidden.bs.modal', () => modalEl.remove());
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+
+        // Setup custom live-search dropdown with keyboard navigation
+        modalEl.addEventListener('shown.bs.modal', () => {
+            const searchInput   = document.getElementById('assignPartySearchInput');
+            const dropdown      = document.getElementById('assignPartyDropdown');
+            if (!searchInput || !dropdown) return;
+
+            let customers = typeof CustomerManager !== 'undefined'
+                ? CustomerManager.getAllCustomers()
+                : (DataManager.getData('customers') || []);
+
+            let activeIdx = -1;
+
+            const renderDropdown = (query) => {
+                const q = (query || '').toLowerCase().trim();
+                activeIdx = -1;
+                let matches = q
+                    ? customers.filter(c =>
+                        (c.name || '').toLowerCase().includes(q) ||
+                        String(c.phone || '').includes(q))
+                    : customers;
+                matches = matches.slice(0, 60);
+
+                if (!matches.length) {
+                    dropdown.innerHTML = '<div class="px-3 py-2 small" style="color:#8b949e;">No matching parties found</div>';
+                    dropdown.classList.remove('d-none');
+                    return;
+                }
+
+                dropdown.innerHTML = matches.map((c, i) => `
+                    <button type="button"
+                        class="list-group-item list-group-item-action border-0 d-flex justify-content-between align-items-center assignPartyItem"
+                        style="background:#161b22;color:#e6edf3;font-size:.88rem;padding:8px 12px;"
+                        data-name="${c.name.replace(/"/g,'&quot;')}"
+                        data-idx="${i}"
+                        onmouseenter="this.style.background='#1f2937'"
+                        onmouseleave="this.style.background=this.classList.contains('active-item')?'#0d47a1':'#161b22'"
+                        onclick="VouchersUI._assignPartyPick('${c.name.replace(/'/g,"\\'")}')">
+                        <span class="fw-bold text-info">${c.name}</span>
+                        <small style="color:#8b949e;">${c.phone || ''}</small>
+                    </button>`).join('');
+                dropdown.classList.remove('d-none');
+            };
+
+            searchInput.addEventListener('input', (e) => renderDropdown(e.target.value));
+            searchInput.addEventListener('focus', () => renderDropdown(searchInput.value));
+
+            // Keyboard navigation
+            searchInput.addEventListener('keydown', (e) => {
+                const items = dropdown.querySelectorAll('.assignPartyItem');
+                if (!items.length) return;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    activeIdx = Math.min(activeIdx + 1, items.length - 1);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    activeIdx = Math.max(activeIdx - 1, 0);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (activeIdx >= 0 && items[activeIdx]) items[activeIdx].click();
+                    else if (searchInput.value.trim()) document.getElementById('assignPartySaveBtn')?.click();
+                    return;
+                } else if (e.key === 'Escape') {
+                    dropdown.classList.add('d-none');
+                    return;
+                } else { return; }
+
+                items.forEach((el, i) => {
+                    const active = i === activeIdx;
+                    el.classList.toggle('active-item', active);
+                    el.style.background = active ? '#0d47a1' : '#161b22';
+                    el.style.color = active ? '#fff' : '#e6edf3';
+                });
+                if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+            });
+
+            // Close dropdown on outside click
+            document.addEventListener('click', (e) => {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.add('d-none');
+                }
+            }, { once: false });
+
+            searchInput.focus();
+        });
+    },
+
+    // Called when user picks a party from the dropdown list
+    _assignPartyPick(name) {
+        const searchInput = document.getElementById('assignPartySearchInput');
+        const dropdown    = document.getElementById('assignPartyDropdown');
+        if (searchInput) searchInput.value = name;
+        if (dropdown) dropdown.classList.add('d-none');
+    },
+
+    async confirmAssignParty(index) {
+        const partyName = document.getElementById('assignPartySearchInput')?.value?.trim();
+        if (!partyName) {
+            App.showNotification('Please select or type a party name.', 'warning');
+            return;
+        }
+
+        const tx = this.currentBankTransactions?.[index];
+        if (!tx) return;
+
+        await VoucherManager.saveBankMapping(tx.description, partyName);
+        tx.assignedParty = partyName;
+
+        const modalEl = document.getElementById('assignPartyModal');
+        bootstrap.Modal.getInstance(modalEl)?.hide();
+
+        App.showNotification(`"${partyName}" assigned. Future imports will auto-match this description.`, 'success');
+        this.showStatementProcessingModal(this.currentBankTransactions);
+    },
+
     toggleReferenceFields(type) {
         // Delegate to onTypeChange if passing element, or handle value directly
         const select = document.getElementById('voucherType');
@@ -667,34 +998,46 @@ const VouchersUI = {
     setupPartyDropdown() {
         const input = document.getElementById('voucherPartySearch');
         const dropdown = document.getElementById('voucherPartyDropdown');
+        const modalEl = document.getElementById('createVoucherModal');
         if (!input || !dropdown) return;
+
+        // Use AbortController to cleanly remove ALL listeners when modal closes
+        const controller = new AbortController();
+        const signal = controller.signal;
 
         // Close dropdown when clicking outside
         document.addEventListener('click', (e) => {
             if (!input.contains(e.target) && !dropdown.contains(e.target)) {
                 dropdown.classList.add('d-none');
             }
-        });
+        }, { signal });
 
         // Show/filter dropdown on typing
         input.addEventListener('input', (e) => {
             document.getElementById('voucherCustomerId').value = ''; // Reset ID when typing
             this.handlePartySearch(e.target.value);
             dropdown.classList.remove('d-none');
-        });
+        }, { signal });
 
         // Show dropdown on focus
         input.addEventListener('focus', (e) => {
             this.handlePartySearch(e.target.value);
             dropdown.classList.remove('d-none');
-        });
+        }, { signal });
         
-        // Handle explicit clearing via input property
+        // Handle explicit clearing
         input.addEventListener('change', () => {
             if (input.value.trim() === '') {
                 this.onPartySelect(input);
             }
-        });
+        }, { signal });
+
+        // Auto-cleanup when modal closes
+        if (modalEl) {
+            modalEl.addEventListener('hidden.bs.modal', () => {
+                controller.abort();
+            }, { once: true });
+        }
     },
 
     handlePartySearch(query) {
@@ -742,7 +1085,7 @@ const VouchersUI = {
         if (hiddenId) hiddenId.value = id;
         if (dropdown) dropdown.classList.add('d-none');
 
-        // Look up extra info for the badge
+        // Look up customer info (done once at top to avoid reference errors)
         let customers = [];
         if (typeof CustomerManager !== 'undefined') {
             customers = CustomerManager.getAllCustomers();
@@ -751,6 +1094,10 @@ const VouchersUI = {
         }
         const found = customers.find(c => c.id === id);
         const phone = found ? String(found.phone || '') : '';
+
+        // Populate hidden customer address field
+        const hiddenAddr = document.getElementById('voucherCustomerAddress');
+        if (hiddenAddr) hiddenAddr.value = found?.address || '';
 
         // Hide search input and show styled badge
         const wrapper = input ? input.closest('.position-relative') : null;
@@ -817,23 +1164,36 @@ const VouchersUI = {
 
         if (isPayment) {
             // Load Pending Purchase Bills (Expenses)
-            const expenses = DataManager.getData('gtes_expenses') || []; // Check correct key
-            const purchases = DataManager.getData('purchases') || []; // Also check purchases table
+            const expenses = DataManager.getData('gtes_expenses') || []; 
+            const purchases = DataManager.getData('purchases') || []; 
             
             const allPurchaseLikeDocs = [...expenses, ...purchases];
             pendingDocs = allPurchaseLikeDocs.filter(doc =>
                 (doc.vendor === name || doc.customerName === name || doc.partyName === name || doc.supplier === name) && 
-                (doc.status !== 'paid')
+                (doc.status !== 'paid' && doc.status !== 'cancelled')
             );
 
         } else {
             // Load Pending Sales Invoices
             const allInvoices = DataManager.getData('invoices') || [];
-            pendingDocs = allInvoices.filter(inv =>
-                (inv.customerId === (customer?.id || '') || inv.customerName === name) &&
-                inv.status !== 'cancelled' &&
-                inv.status !== 'paid'
-            );
+            pendingDocs = allInvoices.filter(inv => {
+                const nameMatch = (inv.customerId === (customer?.id || '') || inv.customerName === name);
+                const statusMatch = (inv.status !== 'cancelled' && inv.status !== 'paid');
+                
+                // Mode Match Filter - Improved robustness
+                let modeMatch = true;
+                const invType = (inv.type || '').toLowerCase();
+                
+                if (this.currentMode === 'gst') {
+                    // Show only GST invoices (including legacy with no type or 'with-bill')
+                    modeMatch = (invType === 'gst-invoice' || invType === 'with-bill' || !invType || invType === 'sales-gst');
+                } else if (this.currentMode === 'non-gst') {
+                    // Show only Plain invoices
+                    modeMatch = (invType === 'non-gst-invoice' || invType === 'without-bill' || invType === 'sales-non-gst');
+                }
+                
+                return nameMatch && statusMatch && modeMatch;
+            });
         }
 
         // Sort by date
@@ -848,8 +1208,15 @@ const VouchersUI = {
             pendingDocs.forEach(doc => {
                 const tr = document.createElement('tr');
                 const docNo = doc.invoiceNo || doc.billNo || doc.vch_no || doc.id;
-                const total = parseFloat(doc.total || doc.amount || 0).toFixed(2);
-                let pending = total; // Ideally calculate pending balance if partial payments exist
+                const totalAmountNum = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
+                const total = totalAmountNum.toFixed(2);
+                
+                // NEW: Use VoucherManager to get actual pending balance
+                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum);
+                const pending = pendingNum.toFixed(2);
+                
+                // Skip if practically zero
+                if (pendingNum <= 0.01) return;
 
                 tr.innerHTML = `
                     <td class="text-center align-middle">
@@ -863,7 +1230,11 @@ const VouchersUI = {
                         <div class="fw-bold">${isPayment ? 'Purchase' : 'Sales'}</div>
                         <div class="small text-muted d-flex align-items-center">
                             Bill No: ${docNo}
-                            ${!isPayment ? `<button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="InvoicesUI.generateInvoicePDF('${doc.id}')" title="View Bill"><i class="bi bi-eye"></i></button>` : ''}
+                            <button type="button" class="btn btn-link btn-sm p-0 ms-2 text-info" 
+                                    onclick="${isPayment ? `InvoicesUI.previewPurchase` : `InvoicesUI.previewInvoice`}('${doc.id}')" 
+                                    title="View ${isPayment ? 'Bill' : 'Invoice'}">
+                                <i class="bi bi-eye"></i>
+                            </button>
                         </div>
                         <div class="small text-muted">Date: ${doc.date}</div>
                     </td>
@@ -885,7 +1256,12 @@ const VouchersUI = {
     calculateTotal(checkbox) {
         // Get the base transaction amount (the bank import / manually entered amount)
         const visibleAmountInput = document.querySelector('#createVoucherForm [name="amount"]');
-        const txnAmount = parseFloat(visibleAmountInput ? visibleAmountInput.value : 0) || 0;
+        const bankAmount = parseFloat(visibleAmountInput ? visibleAmountInput.value : 0) || 0;
+
+        // NEW: Calculate Total Settlement (Gross)
+        const tds = parseFloat(document.getElementById('tdsAmount')?.value) || 0;
+        const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
+        const totalSettlement = bankAmount + tds + discount;
 
         // If a checkbox was toggled
         if (checkbox) {
@@ -905,7 +1281,7 @@ const VouchersUI = {
                 const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
                 alreadyAllocated += advance;
 
-                const remaining = Math.max(0, txnAmount - alreadyAllocated);
+                const remaining = Math.max(0, totalSettlement - alreadyAllocated);
                 const billAmount = parseFloat(checkbox.dataset.amount) || 0;
 
                 // Fill min(billAmount, remaining) — partial payment if needed
@@ -936,6 +1312,19 @@ const VouchersUI = {
             }
         });
 
+        // Add Advance amount
+        const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
+
+        // Proportionally distribute TDS and Discount across allocations
+        const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
+        if (allocations.length > 0 && totalAllocated > 0) {
+            allocations.forEach(a => {
+                const ratio = a.amount / totalAllocated;
+                a.tdsAmount = parseFloat((tds * ratio).toFixed(2));
+                a.discountAmount = parseFloat((discount * ratio).toFixed(2));
+            });
+        }
+
         // Store allocations in a hidden field for saveVoucher
         let allocField = document.getElementById('linkedAllocationsJSON');
         if (!allocField) {
@@ -947,13 +1336,9 @@ const VouchersUI = {
         }
         allocField.value = JSON.stringify(allocations);
 
-        // Add Advance, TDS and Discount amounts
-        const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
-        const tds = parseFloat(document.getElementById('tdsAmount')?.value) || 0;
-        const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
-        allocated += (advance + tds + discount);
-
-        const balance = txnAmount - (allocated - tds - discount);
+        allocated += advance;
+ 
+        const balance = totalSettlement - allocated;
 
         // Update the running balance display
         const totalDisplay = document.getElementById('totalVoucherAmount');
@@ -973,8 +1358,8 @@ const VouchersUI = {
                 ? 'alert alert-success py-1 px-2 mt-2 mb-0 small d-flex justify-content-between'
                 : 'alert alert-info py-1 px-2 mt-2 mb-0 small d-flex justify-content-between';
         banner.innerHTML = `
-            <span><i class="bi bi-wallet2 me-1"></i>Bank/Cash: <strong>₹${txnAmount.toFixed(2)}</strong></span>
-            <span>Allocated: <strong>₹${allocated.toFixed(2)}</strong> (TDS: ₹${tds.toFixed(2)}, Disc: ₹${discount.toFixed(2)})</span>
+            <span><i class="bi bi-wallet2 me-1"></i>Bank/Cash: <strong>₹${bankAmount.toFixed(2)}</strong></span>
+            <span>Total Settlement: <strong>₹${totalSettlement.toFixed(2)}</strong> (TDS: ₹${tds.toFixed(2)}, Disc: ₹${discount.toFixed(2)})</span>
             <span ${balance < 0 ? 'class="text-danger fw-bold"' : balance === 0 ? 'class="text-success fw-bold"' : ''}>
                 ${balance < 0 ? '⚠️ Over by' : 'Balance'}: <strong>₹${Math.abs(balance).toFixed(2)}</strong>
             </span>
@@ -1035,6 +1420,7 @@ const VouchersUI = {
         const allocations = allocJson ? JSON.parse(allocJson) : [];
 
         const data = {
+            id: formData.get('voucherId'),
             type: formData.get('type'),
             date: formData.get('date'),
             customerName: name,
@@ -1047,7 +1433,10 @@ const VouchersUI = {
             allocations: allocations, // Detailed allocations
             tdsAmount: parseFloat(formData.get('tdsAmount') || 0),
             discountAmount: parseFloat(formData.get('discountAmount') || 0),
-            remarks: formData.get('remarks')
+            remarks: formData.get('remarks'),
+            customerAddress: formData.get('customerAddress') || '',
+            hasGst: this.currentMode === 'gst',
+            isPurchase: this.currentMode === 'purchase'
         };
 
         try {
@@ -1106,8 +1495,22 @@ const VouchersUI = {
         try {
             const dataForExport = sessionVouchers.map(v => {
                 const isReceipt = v.type === 'receipt';
-                const mode = v.paymentMode ? v.paymentMode.toLowerCase() : 'bank';
-                const receivedInto = mode === 'cash' ? 'Cash' : 'Bank';
+                const modeRaw = v.paymentMode ? v.paymentMode.trim() : 'Bank';
+                
+                let paymentModeCol = 'Bank';
+                let refCol = v.referenceId || '';
+
+                if (modeRaw.toLowerCase() === 'cash') {
+                    paymentModeCol = 'Cash';
+                } else {
+                    paymentModeCol = 'Bank';
+                    // If no specific reference ID, use the payment sub-mode (Rtgs, Upi, etc.) as the reference
+                    if (!refCol && modeRaw.toLowerCase() !== 'bank') {
+                        refCol = modeRaw.charAt(0).toUpperCase() + modeRaw.slice(1).toLowerCase();
+                    }
+                }
+
+                const receivedInto = (paymentModeCol === 'Cash') ? 'Cash' : 'Bank';
                 
                 // Format Allocation: "INV1:200;INV2:150;"
                 const setOff = v.allocations ? v.allocations.map(a => `${a.no}:${a.amount}`).join(';') + ';' : '';
@@ -1117,15 +1520,15 @@ const VouchersUI = {
                     'Receipt Number': v.id,
                     'Received Into': receivedInto,
                     'Received From': v.customerName || '',
-                    'Amount': v.amount,
+                    'Amount': (parseFloat(v.amount) + parseFloat(v.tdsAmount || 0) + parseFloat(v.discountAmount || 0)),
                     'Narration or Any Other Remarks': v.remarks || '',
                     'Set Off Voucher Number With Amount': setOff,
-                    'Discount Account': v.discountAmount > 0 ? (isReceipt ? 'Discount Allowed' : 'Discount Received') : '',
-                    'Discount Amount': v.discountAmount || '',
+                    'Discount Account': v.discountAmount > 0 ? 'Discount on Sale' : '',
+                    'Discount Amount': v.discountAmount > 0 ? v.discountAmount : '',
                     'Tax Deduction Account': v.tdsAmount > 0 ? 'Tax Deducted Receivable' : '',
-                    'Tax Deduction Amount': v.tdsAmount || '',
-                    'Payment Mode': v.paymentMode || '',
-                    'Debit/Credit/Cheque/Transection/Reference Number': v.referenceId || '',
+                    'Tax Deduction Amount': v.tdsAmount > 0 ? v.tdsAmount : '',
+                    'Payment Mode': paymentModeCol,
+                    'Debit/Credit/Cheque/Transection/Reference Number': refCol,
                     'Bank Name': '',
                     'Remarks': ''
                 };
@@ -1153,7 +1556,49 @@ const VouchersUI = {
 
     async deleteVoucher(id) {
         if (!confirm('Are you sure you want to delete this voucher?')) return;
+
+        // Before deleting, check which invoices this voucher was linked to
+        const voucher = VoucherManager.getVoucher(id);
+        const linkedInvoiceIds = [];
+        if (voucher) {
+            if (voucher.linkedInvoices && Array.isArray(voucher.linkedInvoices)) {
+                voucher.linkedInvoices.forEach(link => {
+                    const lid = typeof link === 'object' ? link.id : link;
+                    if (lid) linkedInvoiceIds.push(lid);
+                });
+            } else if (voucher.linkedInvoiceId) {
+                linkedInvoiceIds.push(voucher.linkedInvoiceId);
+            }
+        }
+
         await VoucherManager.deleteVoucher(id);
+
+        // After deletion, recalculate the status of linked invoices
+        if (linkedInvoiceIds.length > 0 && typeof InvoiceManager !== 'undefined') {
+            const allVouchers = DataManager.getData('vouchers') || [];
+            for (const invId of linkedInvoiceIds) {
+                const invoice = InvoiceManager.getInvoice(invId);
+                if (!invoice) continue;
+
+                const totalPaid = allVouchers
+                    .filter(v => v.linkedInvoices?.some(link => {
+                        const lid = typeof link === 'object' ? link.id : link;
+                        return lid === invId;
+                    }) || v.linkedInvoiceId === invId)
+                    .reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0);
+
+                let newStatus = 'pending';
+                const invoiceTotal = parseFloat(invoice.total) || 0;
+                if (totalPaid >= invoiceTotal && invoiceTotal > 0) {
+                    newStatus = 'paid';
+                } else if (totalPaid > 0) {
+                    newStatus = 'partial';
+                }
+
+                await InvoiceManager.updateInvoice(invId, { status: newStatus });
+            }
+        }
+
         this.updateTable();
     },
 
@@ -1166,14 +1611,20 @@ const VouchersUI = {
         const address = settings.registeredAddress || settings.address || '';
 
         const element = document.createElement('div');
-        element.style.width = '600px';
+        element.style.width = '1000px';
         element.style.padding = '30px';
         element.style.background = 'white';
         element.style.color = 'black';
         element.style.fontFamily = "'Inter', sans-serif";
         element.style.border = '1px solid #ddd';
 
-        const typeLabel = voucher.type === 'receipt' ? 'Receipt Voucher' : (voucher.type === 'payment' ? 'Payment Voucher' : 'Contra Voucher');
+        const typeLabels = {
+            'receipt': 'Receipt Voucher',
+            'payment': 'Payment Voucher',
+            'contra': 'Contra Voucher',
+            'purchase': 'Purchase Voucher'
+        };
+        const typeLabel = typeLabels[voucher.type] || 'Voucher';
 
         element.innerHTML = `
             <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
@@ -1196,6 +1647,7 @@ const VouchersUI = {
                 <div style="margin-bottom: 10px;">
                     <span style="color: #666; font-size: 12px; text-transform: uppercase;">${voucher.type === 'receipt' ? 'Received From' : 'Paid To'}</span><br>
                     <strong style="font-size: 18px;">${voucher.customerName || 'Unknown Party'}</strong>
+                    ${voucher.billNo ? `<div style="font-size: 12px; color: #666;">Bill No: ${voucher.billNo}</div>` : ''}
                 </div>
                 <div style="display: flex; gap: 30px;">
                     <div style="margin-bottom: 10px;">
@@ -1243,15 +1695,28 @@ const VouchersUI = {
     },
 
     renderLinkedDocuments(voucher) {
-        const linked = voucher.linkedInvoices || [];
-        if (linked.length === 0) return '';
+        let linked = voucher.linkedInvoices || [];
+        
+        // Fallback: If no linkedInvoices, try allocations (common in some imported formats)
+        if (linked.length === 0 && voucher.allocations && Array.isArray(voucher.allocations)) {
+            linked = voucher.allocations;
+        }
 
+        if (linked.length === 0) return '';
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
 
         const rows = linked.map(link => {
             const docId = typeof link === 'object' ? link.id : link;
-            const amount = typeof link === 'object' ? (parseFloat(link.amount) || 0) : voucher.amount;
+            
+            // Priority: Use specific allocation amount if available
+            let amount = voucher.amount;
+            if (voucher.allocations && Array.isArray(voucher.allocations)) {
+                const alloc = voucher.allocations.find(a => a.id === docId);
+                if (alloc) amount = parseFloat(alloc.amount) || 0;
+            } else if (typeof link === 'object') {
+                amount = parseFloat(link.amount) || 0;
+            }
 
             // Try to find the document for extra details
             const doc = invoices.find(i => i.id === docId) || expenses.find(e => e.id === docId);
@@ -1320,6 +1785,110 @@ const VouchersUI = {
 
         const modal = new bootstrap.Modal(document.getElementById('pdfPreviewModal'));
         modal.show();
+    },
+
+    async showEditVoucherModal(voucherId) {
+        const voucher = VoucherManager.getVoucher(voucherId);
+        if (!voucher) { alert('Voucher not found.'); return; }
+
+        // Set current mode based on voucher
+        if (voucher.isPurchase) {
+            this.currentMode = 'purchase';
+        } else if (voucher.hasGst === false) {
+            this.currentMode = 'non-gst';
+        } else {
+            this.currentMode = 'gst';
+        }
+
+        // Open the generic create modal pre-filled
+        this.showCreateModal(voucher.type || 'receipt');
+
+        // Wait for modal to render (reduced from 300ms to 50ms for snappiness)
+        await new Promise(r => setTimeout(r, 50));
+
+        const form = document.getElementById('createVoucherForm');
+        if (!form) return;
+
+        // Update title 
+        const modalTitle = document.querySelector('#createVoucherModal .modal-title');
+        if (modalTitle) modalTitle.innerHTML = `<i class="bi bi-pencil-square me-2"></i>Edit Voucher – ${voucher.id}`;
+
+        // Pre-fill fields
+        const setField = (id, val) => { const el = form.querySelector(`#${id}`) || form.querySelector(`[name="${id}"]`); if (el) el.value = val ?? ''; };
+        setField('voucherIdField', voucher.id);
+        setField('date', voucher.date);
+        setField('voucherType', voucher.type);
+        setField('amount', voucher.amount);
+        setField('tdsAmount', voucher.tdsAmount || 0);
+        setField('discountAmount', voucher.discountAmount || 0);
+        setField('remarks', voucher.remarks || '');
+        setField('refNo', voucher.referenceId || '');
+
+        // Payment mode
+        const modeEl = form.querySelector('[name="paymentMode"]');
+        if (modeEl) {
+            modeEl.value = voucher.paymentMode || 'cash';
+            this.onPaymentModeChange(modeEl);
+        }
+
+        // Party name
+        const partyInput = document.getElementById('voucherPartySearch');
+        const hiddenId = document.getElementById('voucherCustomerId');
+        if (partyInput) partyInput.value = voucher.customerName || '';
+        if (hiddenId) hiddenId.value = voucher.customerId || '';
+
+        // Override save button
+        const saveBtn = document.querySelector('#createVoucherModal .btn-primary[onclick*="saveVoucher"]');
+        if (saveBtn) {
+            saveBtn.removeAttribute('onclick');
+            saveBtn.onclick = () => this.saveEditedVoucher(voucherId);
+            saveBtn.textContent = 'Update Voucher';
+        }
+    },
+
+    async saveEditedVoucher(voucherId) {
+        const form = document.getElementById('createVoucherForm');
+        if (!form || !form.checkValidity()) { form?.reportValidity(); return; }
+
+        const formData = new FormData(form);
+        const name = formData.get('customerName');
+        const customers = DataManager.getData('customers') || [];
+        const found = customers.find(c => c.name === name);
+
+        const updates = {
+            type: formData.get('type'),
+            date: formData.get('date'),
+            customerName: name,
+            customerId: found ? found.id : formData.get('customerId'),
+            customerAddress: formData.get('customerAddress') || '',
+            amount: parseFloat(formData.get('amount')) || 0,
+            paymentMode: formData.get('paymentMode'),
+            referenceId: formData.get('refNo'),
+            tdsAmount: parseFloat(formData.get('tdsAmount') || 0),
+            discountAmount: parseFloat(formData.get('discountAmount') || 0),
+            remarks: formData.get('remarks'),
+            hasGst: this.currentMode === 'gst',
+            isPurchase: this.currentMode === 'purchase'
+        };
+
+        try {
+            // Update by directly patching the voucher in storage
+            const vouchers = DataManager.getData('vouchers') || [];
+            const idx = vouchers.findIndex(v => v.id === voucherId);
+            if (idx === -1) throw new Error('Voucher not found');
+            vouchers[idx] = { ...vouchers[idx], ...updates, updatedAt: new Date().toISOString() };
+            await DataManager.saveData('vouchers', vouchers);
+
+            const modalEl = document.getElementById('createVoucherModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+
+            this.updateTable();
+            App.showNotification('Voucher updated successfully!', 'success');
+        } catch (e) {
+            console.error(e);
+            alert('Error updating voucher: ' + e.message);
+        }
     },
 };
 

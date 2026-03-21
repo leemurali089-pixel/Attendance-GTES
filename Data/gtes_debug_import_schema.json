@@ -42,39 +42,39 @@
     "loyalty"
   ],
   "stats": {
-    "startTime": "2026-03-10T15:13:18.883Z",
+    "startTime": "2026-03-13T14:45:41.459Z",
     "company": {
       "name": "Gas Tech Engineering Service",
       "financialYear": "2022-04-01"
     },
     "customers": {
-      "imported": 0,
-      "skipped": 603,
+      "imported": 603,
+      "skipped": 0,
       "total": 603
     },
     "inventory": {
-      "imported": 0,
+      "imported": 552,
       "skipped": 2,
       "total": 555
     },
     "services": {
-      "imported": 0,
+      "imported": 72,
       "skipped": 0,
       "total": 72
     },
     "vouchers": {
-      "imported": 0,
-      "skipped": 1383,
-      "total": 1383
+      "imported": 1410,
+      "skipped": 0,
+      "total": 1410
     },
     "sales": {
-      "imported": 0,
-      "updated": 2294,
-      "total": 2294
+      "imported": 2185,
+      "updated": 111,
+      "total": 2296
     },
     "purchases": {
-      "imported": 0,
-      "updated": 453,
+      "imported": 453,
+      "updated": 0,
       "total": 453
     },
     "batches": null,

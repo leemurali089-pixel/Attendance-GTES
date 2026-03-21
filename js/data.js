@@ -44,9 +44,12 @@ const DataManager = {
         JOURNAL_ENTRIES: 'gtes_journal_entries',
 
         INVENTORY: 'inventory',
+        TASKS: 'gtes_tasks',
+        BANK_ALIAS: 'gtes_bank_alias',
         // Raw Data Storage (Bookkeeper Import)
         IMPORT_COLUMNS: 'gtes_import_columns',
-        IMPORT_RAW: 'gtes_import_raw'
+        IMPORT_RAW: 'gtes_import_raw',
+        RECYCLE_BIN: 'gtes_recycle_bin'
     },
 
     // Default Settings
@@ -170,6 +173,10 @@ const DataManager = {
         }
         if (!(await this.loadData(this.KEYS.RECURRING_INVOICES))) {
             await this.saveData(this.KEYS.RECURRING_INVOICES, []);
+        }
+
+        if (!(await this.loadData(this.KEYS.RECYCLE_BIN))) {
+            await this.saveData(this.KEYS.RECYCLE_BIN, []);
         }
 
         // Phase 2: Migrate employees to new schema

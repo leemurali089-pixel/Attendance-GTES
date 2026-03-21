@@ -15,26 +15,28 @@ const InvoiceManager = {
      * Without Bill: INV-NB-0001
      */
     generateInvoiceNumber(type) {
-        const prefix = type === 'with-bill' ? 'INV-WB' : 'INV-NB';
+        const isGST = type === 'with-bill' || type === 'gst-invoice' || type === 'sales-gst';
+        const prefix = isGST ? 'INV-WB' : 'INV-NB';
         const invoices = DataManager.getData('invoices') || [];
-        const typeInvoices = invoices.filter(inv => inv.type === type);
+        
+        let maxNum = 0;
+        invoices.forEach(inv => {
+            const invIsGST = inv.type === 'with-bill' || inv.type === 'gst-invoice' || inv.type === 'sales-gst';
+            if (invIsGST === isGST) {
+                // Check both internal ID and display invoiceNo for the maximum number
+                [inv.id, inv.invoiceNo].forEach(val => {
+                    if (val && val.startsWith(prefix)) {
+                        const parts = val.split('-');
+                        const lastNumStr = parts[parts.length - 1];
+                        if (lastNumStr && !isNaN(parseInt(lastNumStr))) {
+                            maxNum = Math.max(maxNum, parseInt(lastNumStr));
+                        }
+                    }
+                });
+            }
+        });
 
-        if (typeInvoices.length === 0) return `${prefix}-0001`;
-
-        // Get the last invoice ID and extract the numeric part more robustly
-        const lastInvoice = typeInvoices[typeInvoices.length - 1];
-        const lastId = lastInvoice.id || '';
-        const parts = lastId.split('-');
-        const lastNumStr = parts[parts.length - 1];
-
-        let nextNum = 1;
-        if (lastNumStr && !isNaN(parseInt(lastNumStr))) {
-            nextNum = parseInt(lastNumStr) + 1;
-        } else {
-            // Fallback: count total invoices of this type
-            nextNum = typeInvoices.length + 1;
-        }
-
+        const nextNum = maxNum + 1;
         return `${prefix}-${nextNum.toString().padStart(4, '0')}`;
     },
 
@@ -52,13 +54,42 @@ const InvoiceManager = {
             }
         }
 
+        let finalId = invoiceData.id || invoiceData.invoiceNo || this.generateInvoiceNumber(invoiceData.type);
+        
+        // Ensure perfect uniqueness of ID
+        let collisionCount = 1;
+        while (invoices.some(i => i.id === finalId)) {
+            console.warn(`Invoice ID ${finalId} already exists in database. Generating a new ID...`);
+            // Attempt to fetch a new number
+            let proposedId = this.generateInvoiceNumber(invoiceData.type);
+            
+            // If the generator also suggested an existing one (which shouldn't happen, but safely guard against it)
+            if (finalId === proposedId || invoices.some(i => i.id === proposedId)) {
+                proposedId = `${proposedId}-${collisionCount++}`;
+            }
+            
+            finalId = proposedId;
+        }
+
+        console.log('InvoiceManager.createInvoice - Final ID:', finalId, 'Source ID:', invoiceData.id, 'Source No:', invoiceData.invoiceNo);
+        
+        let normalizedType = invoiceData.type;
+        if (normalizedType === 'sales-gst' || normalizedType === 'gst-invoice') normalizedType = 'with-bill';
+        if (normalizedType === 'sales-non-gst' || normalizedType === 'non-gst-invoice') normalizedType = 'without-bill';
+
         const invoice = {
-            id: invoiceData.id || this.generateInvoiceNumber(invoiceData.type),
-            type: invoiceData.type, // 'with-bill' or 'without-bill'
+            id: finalId,
+            invoiceNo: invoiceData.invoiceNo && invoiceData.invoiceNo !== invoiceData.id ? invoiceData.invoiceNo : finalId, // Preserve custom display numbers if explicitly set, else sync
+            type: normalizedType, 
             challanId: invoiceData.challanId || null,
+            jobCardId: invoiceData.jobCardId || null,
             date: invoiceData.date || new Date().toISOString().split('T')[0],
             customerId: invoiceData.customerId,
             customerName: invoiceData.customerName,
+            customerAddress: invoiceData.customerAddress || null,
+            poNumber: invoiceData.poNumber || null,
+            narration: invoiceData.narration || null,
+            dispatchDetails: invoiceData.dispatchDetails || null,
             items: invoiceData.items || [],
 
             // Financials
@@ -100,6 +131,7 @@ const InvoiceManager = {
             throw new Error('Invoice not found');
         }
 
+        console.log('InvoiceManager.updateInvoice - ID:', invoiceId, 'Updates:', updates);
         invoices[index] = {
             ...invoices[index],
             ...updates,
@@ -130,7 +162,12 @@ const InvoiceManager = {
      */
     getInvoicesByType(type) {
         const invoices = this.getAllInvoices();
-        return invoices.filter(inv => inv.type === type);
+        // Normalize search type
+        let searchType = type;
+        if (searchType === 'sales-gst' || searchType === 'gst-invoice') searchType = 'with-bill';
+        if (searchType === 'sales-non-gst' || searchType === 'non-gst-invoice') searchType = 'without-bill';
+        
+        return invoices.filter(inv => inv.type === searchType);
     },
 
     /**
@@ -140,21 +177,98 @@ const InvoiceManager = {
         const invoices = DataManager.getData('invoices') || [];
         const invoice = invoices.find(inv => inv.id === invoiceId);
 
-        if (invoice && invoice.challanId && typeof DeliveryManager !== 'undefined') {
-            if (deleteChallanToo) {
-                // Delete the linked challan
-                await DeliveryManager.deleteChallan(invoice.challanId);
-            } else {
-                // Instead of deleting the challan, we simply unlink it and reset its status
-                await DeliveryManager.updateChallan(invoice.challanId, {
-                    invoiceId: null,
-                    status: 'pending'
-                });
+        if (invoice) {
+            if (typeof DeliveryManager !== 'undefined') {
+                // Robust check: find any challan that points to this invoiceId
+                const allChallans = DeliveryManager.getAllChallans();
+                const linkedChallans = allChallans.filter(c => c.invoiceId === invoiceId || (c.id === invoice.challanId));
+
+                for (const challan of linkedChallans) {
+                    if (deleteChallanToo) {
+                        await DeliveryManager.deleteChallan(challan.id);
+                    } else {
+                        await DeliveryManager.updateChallan(challan.id, {
+                            invoiceId: null,
+                            status: 'pending'
+                        });
+                    }
+                }
             }
+
+            // Move to Recycle Bin
+            const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+            bin.push({
+                ...invoice,
+                _deletedAt: new Date().toISOString(),
+                _recordType: 'invoice'
+            });
+            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
         }
 
         const filtered = invoices.filter(inv => inv.id !== invoiceId);
         await DataManager.saveData('invoices', filtered);
+    },
+
+    /**
+     * Restore invoice from recycle bin
+     */
+    async restoreInvoice(invoiceId) {
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const index = bin.findIndex(item => item.id === invoiceId && item._recordType === 'invoice');
+        
+        if (index === -1) throw new Error('Invoice not found in Recycle Bin');
+
+        const invoice = { ...bin[index] };
+        delete invoice._deletedAt;
+        delete invoice._recordType;
+
+        const invoices = DataManager.getData('invoices') || [];
+        invoices.push(invoice);
+        
+        const newBin = bin.filter((_, i) => i !== index);
+
+        await DataManager.saveData('invoices', invoices);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin);
+        
+        return invoice;
+    },
+
+    _balanceCache: null,
+    _lastInvoiceCount: 0,
+    _lastVoucherCount: 0,
+
+    /**
+     * NEW: Get invoices with current balance (Calculated via VoucherManager)
+     */
+    getInvoicesWithBalance() {
+        const invoices = this.getAllInvoices();
+        const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
+
+        // Cache hit check
+        if (this._balanceCache && 
+            this._lastInvoiceCount === invoices.length && 
+            this._lastVoucherCount === voucherCount) {
+            return this._balanceCache;
+        }
+
+        if (typeof VoucherManager === 'undefined') return invoices.map(inv => ({ ...inv, balance: inv.total }));
+
+        const allocationsMap = VoucherManager.getVoucherAllocationsMap();
+
+        const result = invoices.map(inv => {
+            const balance = VoucherManager.getDocumentBalance(inv.id, inv.total, allocationsMap);
+            return {
+                ...inv,
+                balance: balance,
+                isPaid: balance <= 0.05,
+                isPartial: balance > 0.05 && balance < (inv.total - 0.05)
+            };
+        });
+
+        this._balanceCache = result;
+        this._lastInvoiceCount = invoices.length;
+        this._lastVoucherCount = voucherCount;
+        return result;
     }
 };
 

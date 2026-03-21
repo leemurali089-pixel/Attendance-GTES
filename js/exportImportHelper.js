@@ -672,6 +672,9 @@ const ExportImportHelper = {
                     type: "Transactions Only"
                 },
                 // inventory: DataManager.getData(DataManager.KEYS.INVENTORY) || [], // Excluded by user request
+                employees: DataManager.getData(DataManager.KEYS.EMPLOYEES) || [],
+                attendance: DataManager.getData(DataManager.KEYS.ATTENDANCE) || [],
+                advances: DataManager.getData(DataManager.KEYS.ADVANCES) || [],
                 accounts: DataManager.getData('gtes_accounts') || [],
                 invoices: DataManager.getData('invoices') || [],
                 vouchers: DataManager.getData(DataManager.KEYS.VOUCHERS) || [],
@@ -803,6 +806,9 @@ const ExportImportHelper = {
 
             let importCount = 0;
             const modules = [
+                { key: DataManager.KEYS.EMPLOYEES, data: backupData.employees, name: 'Employees' },
+                { key: DataManager.KEYS.ATTENDANCE, data: backupData.attendance, name: 'Attendance' },
+                { key: DataManager.KEYS.ADVANCES, data: backupData.advances, name: 'Advances' },
                 { key: DataManager.KEYS.INVENTORY, data: backupData.inventory, name: 'Inventory' },
                 { key: 'gtes_accounts', data: backupData.accounts, name: 'Accounts' },
                 { key: 'invoices', data: backupData.invoices, name: 'Invoices' },

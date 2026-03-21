@@ -214,6 +214,13 @@ const UserManager = {
             throw new Error('User not found');
         }
 
+        // If changing username, check it's not already taken by another user
+        if (updates.username && updates.username !== users[index].username) {
+            if (users.some(u => u.id !== userId && u.username === updates.username)) {
+                throw new Error('Username already exists. Please choose a different username.');
+            }
+        }
+
         // If updating password, hash it
         if (updates.password && window.electronAPI) {
             updates.password = await window.electronAPI.hashPassword(updates.password);

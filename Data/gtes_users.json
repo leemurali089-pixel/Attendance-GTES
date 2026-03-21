@@ -11,20 +11,5 @@
       "view_dashboard",
       "VIEW_DASHBOARD"
     ]
-  },
-  {
-    "id": "1764530017506",
-    "username": "user1",
-    "password": "a4c6180fb2e3baba8ca61fdba8c7876d:12f3c7c829c5ae4ddef9b273bc1d6566b0bc9c9ef898fee5c0759b877000ad99415441a8dd9c6cb2784c549ee77094cd13074ad812956a996f75143ee6c90284",
-    "role": "user",
-    "fullName": "Karthikeyan",
-    "permissions": [
-      "MANAGE_ATTENDANCE",
-      "MANAGE_HOLIDAYS",
-      "VIEW_REPORTS",
-      "VIEW_DASHBOARD"
-    ],
-    "createdAt": "2025-11-30T19:13:37.506Z",
-    "isActive": true
   }
 ]

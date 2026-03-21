@@ -1,5 +1,19 @@
 [
   {
+    "id": "1774073387442",
+    "timestamp": "2026-03-21T06:09:47.442Z",
+    "user": "GTES67",
+    "action": "BACKUP_IMPORT",
+    "details": "Imported full backup from backup_full_2026-03-21T06-07-44.json"
+  },
+  {
+    "id": "1773220374279",
+    "timestamp": "2026-03-11T09:12:54.279Z",
+    "user": "GTES67",
+    "action": "USER_DELETE",
+    "details": "Deleted user ID 1764530017506"
+  },
+  {
     "id": "1772990626976",
     "timestamp": "2026-03-08T17:23:46.976Z",
     "user": "GTES67",

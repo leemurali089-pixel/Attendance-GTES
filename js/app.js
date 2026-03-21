@@ -75,6 +75,14 @@ const App = {
             if (typeof AnalyticsUI !== 'undefined') {
                 AnalyticsUI.init();
             }
+
+            // Initialize Payment Follow-up & Tasks
+            if (typeof PaymentsUI !== 'undefined') {
+                PaymentsUI.init();
+            }
+            if (typeof TasksUI !== 'undefined') {
+                TasksUI.init();
+            }
         } catch (error) {
             console.error('App initialization error:', error);
             alert('Application failed to initialize: ' + error.message);
@@ -550,9 +558,6 @@ const App = {
         } else if (moduleName === 'payments') {
             if (nav) nav.style.display = 'flex';
             this.showView('payments');
-        } else if (moduleName === 'delivery') {
-            if (nav) nav.style.display = 'flex';
-            this.showView('delivery');
         } else if (moduleName === 'analytics') {
             if (nav) nav.style.display = 'flex';
             this.showView('analytics');
@@ -808,13 +813,35 @@ const App = {
                 await AdvancesModule.load();
                 break;
             case 'invoices':
-                if (window.InvoicesUI) await InvoicesUI.load();
+                if (window.InvoicesUI) await InvoicesUI.load(params);
                 break;
             case 'accounting':
-                if (window.AccountingUI) await AccountingUI.load();
+                if (window.AccountingUI) await AccountingUI.load(params);
                 break;
             case 'vouchers':
-                if (window.VouchersUI) await VouchersUI.load();
+                if (window.VouchersUI) await VouchersUI.load(params);
+                break;
+            case 'challans':
+            case 'jobcard':
+            case 'customers':
+                try {
+                    await DeliveryUI.initManagersOnly();
+                    const dView = document.getElementById('deliveryView');
+                    if (dView) {
+                        document.querySelectorAll('.view-section').forEach(el => el.classList.add('d-none'));
+                        dView.classList.remove('d-none');
+                        DeliveryUI.showLanding();
+                    } else {
+                        // Fallback if deliveryView is missing
+                        if (viewName === 'challans') DeliveryUI.loadHistory('challansView');
+                        else if (viewName === 'jobcard') DeliveryUI.loadJobCards('jobcardView');
+                        else DeliveryUI.loadCustomers('customersView');
+                    }
+                } catch (error) {
+                    const v = document.getElementById(viewName + 'View');
+                    if (v) v.innerHTML = `<div class="alert alert-danger m-4">Error loading ${viewName}: ${error.message}</div>`;
+                    console.error(`${viewName} Load Error:`, error);
+                }
                 break;
             case 'purchases':
                 if (window.InvoicesUI) {
@@ -852,6 +879,12 @@ const App = {
                 break;
             case 'analytics':
                 AnalyticsUI.renderDashboard();
+                break;
+            case 'payments':
+                if (window.PaymentsUI) await PaymentsUI.load(params);
+                break;
+            case 'tasks':
+                if (window.TasksUI) await TasksUI.load(params);
                 break;
         }
     },

@@ -1,0 +1,17 @@
+{
+  "name": "MJS PrimeLogic",
+  "short_name": "PrimeLogic",
+  "description": "Attendance & Salary Management System",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#00d2ff",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

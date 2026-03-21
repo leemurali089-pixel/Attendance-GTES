@@ -1152,6 +1152,58 @@ const BookKeeperImport = {
                 }
             }
 
+            // HYPER-ROBUST ALLOCATION RECOVERY
+            let linkedInvoices = [];
+            let allocations = [];
+
+            if (this.getTables().includes('bill_receipt_payment')) {
+                try {
+                    const brCols = this.getColumns('bill_receipt_payment');
+                    // b_v_id = Bill ID, v_id = Receipt ID (usually)
+                    const billIdCol = brCols.includes('b_v_id') ? 'b_v_id' : (brCols.includes('bill_id') ? 'bill_id' : '');
+                    const receiptIdCol = brCols.includes('v_id') ? 'v_id' : (brCols.includes('r_p_v_id') ? 'r_p_v_id' : '');
+                    const amtCol = brCols.includes('amount') ? 'amount' : 'adjusted_amount';
+
+                    if (billIdCol && receiptIdCol && amtCol) {
+                        const allocationsRes = this.query(`SELECT ${billIdCol} as bill_v_id, ${amtCol} as alloc_amt FROM bill_receipt_payment WHERE ${receiptIdCol} = '${v.v_id}' OR ${receiptIdCol} = ${v.v_id}`);
+                        allocationsRes.forEach(alloc => {
+                            const billVid = alloc.bill_v_id;
+                            const amt = parseFloat(alloc.alloc_amt) || 0;
+                            if (billVid && amt > 0) {
+                                // Try to find the actual bill/invoice number
+                                let billNo = billVid;
+                                try {
+                                    const billLookup = this.query(`SELECT vch_no, bill_no FROM vouchers WHERE v_id = ${billVid} LIMIT 1`);
+                                    if (billLookup.length > 0) {
+                                        billNo = (billLookup[0].vch_no || billLookup[0].bill_no || billVid).trim();
+                                    }
+                                } catch (e) { }
+
+                                linkedInvoices.push(billNo);
+                                allocations.push({
+                                    id: billNo,
+                                    no: billNo,
+                                    amount: amt
+                                });
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[Import] Error fetching allocations:', e);
+                }
+            }
+
+            // Fallback for single link column
+            const singleLink = (v.ref_no || v.reference_no || v.payment_reference || v.bill_no || '').trim();
+            if (singleLink && !linkedInvoices.includes(singleLink)) {
+                linkedInvoices.push(singleLink);
+                allocations.push({
+                    id: singleLink,
+                    no: singleLink,
+                    amount: parseFloat(v.amount) || 0
+                });
+            }
+
             const voucher = {
                 id: v.vch_no || `VCH-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 bookkeeperId: bkId,
@@ -1165,7 +1217,9 @@ const BookKeeperImport = {
                 narration: v.narration || '',
                 voucherNo: v.vch_no || '',
                 // Capture reference/invoice link
-                linkedInvoiceId: v.ref_no || v.reference_no || v.payment_reference || v.bill_no || '',
+                linkedInvoiceId: linkedInvoices[0] || '',
+                linkedInvoices: linkedInvoices,
+                allocations: allocations,
                 referenceId: v.cheque_no || v.payment_ref_no || '',
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper'
@@ -2525,10 +2579,11 @@ const BookKeeperImport = {
 
             // Heuristic Checks for Orphans
             if (i.id) {
-                if (i.id.startsWith('SVC-')) return false;
-                if (i.id.startsWith('SRV-')) return false;
-                if (i.id.startsWith('MAT-SEED-')) return false; // NEW: Explicit Seed IDs
-                if (i.id.startsWith('MAT-') && i.id.length > 10) return false;
+                const idStr = String(i.id);
+                if (idStr.startsWith('SVC-')) return false;
+                if (idStr.startsWith('SRV-')) return false;
+                if (idStr.startsWith('MAT-SEED-')) return false; // NEW: Explicit Seed IDs
+                if (idStr.startsWith('MAT-') && idStr.length > 10) return false;
             }
             return true;
         });

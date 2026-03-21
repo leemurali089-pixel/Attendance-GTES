@@ -1,6 +1,6 @@
 {
     "name": "attendance-gtes",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "MJS PrimeLogic - Attendance & Salary Management System",
     "main": "main.js",
     "author": "Murali D",
@@ -21,7 +21,12 @@
             "!.git/**/*",
             "!*.md",
             "!test*.html",
-            "!test*.csv"
+            "!test*.csv",
+            "!Data/**/*",
+            "!Backups/**/*",
+            "!ChallanOutput/**/*",
+            "!Salary Payout/**/*",
+            "!.agent/**/*"
         ],
         "win": {
             "target": [

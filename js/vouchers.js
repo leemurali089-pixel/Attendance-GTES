@@ -19,11 +19,11 @@ const VoucherManager = {
     async createVoucher(data) {
         const vouchers = DataManager.getData('vouchers') || [];
 
-        // Generate ID
-        const datePart = data.date.replace(/-/g, '').substring(2); // YYMMDD
-        const count = vouchers.filter(v => v.date === data.date).length + 1;
-        const typeCode = data.type === 'receipt' ? 'RCT' : (data.type === 'payment' ? 'PMT' : 'CNT');
-        const id = `${typeCode}-${datePart}-${String(count).padStart(3, '0')}`;
+        // Generate ID if not provided manually
+        let id = data.id;
+        if (!id) {
+            id = this.getNextVoucherNumber(data.type, data.date);
+        }
 
         const voucher = {
             id: id,
@@ -31,6 +31,7 @@ const VoucherManager = {
             type: data.type, // 'receipt', 'payment', 'contra'
             customerName: data.customerName,
             customerId: data.customerId,
+            customerAddress: data.customerAddress || null,
             amount: parseFloat(data.amount),
             tdsAmount: parseFloat(data.tdsAmount || 0),
             discountAmount: parseFloat(data.discountAmount || 0),
@@ -39,6 +40,8 @@ const VoucherManager = {
             linkedInvoices: data.linkedInvoices || [], // Array of invoice IDs being paid
             allocations: data.allocations || [], // NEW: Detailed allocations [{id, no, amount}]
             remarks: data.remarks || '',
+            hasGst: data.hasGst,
+            isPurchase: data.isPurchase,
             createdAt: new Date().toISOString()
         };
 
@@ -57,36 +60,67 @@ const VoucherManager = {
      * update linked documents status
      */
     async updateLinkedInvoices(invoiceIds, voucherType) {
-        // This is a simplified status update. Ideally we track partial payments.
-        // For now, if a voucher pays an invoice, we mark it as 'paid' or adjust balance.
-        // Since we don't have partial tracking fully defined in InvoiceManager yet,
-        // we will leave this logic minimal or delegate.
-
         // Load Invoices and Expenses
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const purchases = DataManager.getData('purchases') || [];
+        
         let modifiedInv = false;
         let modifiedExp = false;
+        let modifiedPur = false;
 
         for (const id of invoiceIds) {
-            // Check Sales Invoices
+            // 1. Check Sales Invoices
             const invIndex = invoices.findIndex(i => i.id === id);
             if (invIndex !== -1) {
-                invoices[invIndex].status = 'paid'; // Simple mark as paid
+                const doc = invoices[invIndex];
+                const total = parseFloat(doc.total || doc.amount || 0);
+                const balance = this.getDocumentBalance(id, total);
+                
+                if (balance <= 0.05) { 
+                    invoices[invIndex].status = 'paid';
+                } else {
+                    invoices[invIndex].status = 'partial';
+                }
                 modifiedInv = true;
                 continue;
             }
 
-            // Check Purchase Bills
+            // 2. Check Expenses
             const expIndex = expenses.findIndex(e => e.id === id);
             if (expIndex !== -1) {
-                expenses[expIndex].status = 'paid';
+                const doc = expenses[expIndex];
+                const total = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
+                const balance = this.getDocumentBalance(id, total);
+                
+                if (balance <= 0.05) {
+                    expenses[expIndex].status = 'paid';
+                } else {
+                    expenses[expIndex].status = 'partial';
+                }
                 modifiedExp = true;
+                continue;
+            }
+
+            // 3. Check Purchases
+            const purIndex = purchases.findIndex(p => p.id === id);
+            if (purIndex !== -1) {
+                const doc = purchases[purIndex];
+                const total = parseFloat(doc.total || doc.amount || 0);
+                const balance = this.getDocumentBalance(id, total);
+                
+                if (balance <= 0.05) {
+                    purchases[purIndex].status = 'paid';
+                } else {
+                    purchases[purIndex].status = 'partial';
+                }
+                modifiedPur = true;
             }
         }
 
         if (modifiedInv) await DataManager.saveData('invoices', invoices);
         if (modifiedExp) await DataManager.saveData(DataManager.KEYS.EXPENSES, expenses);
+        if (modifiedPur) await DataManager.saveData('purchases', purchases);
     },
 
     /**
@@ -94,7 +128,22 @@ const VoucherManager = {
      */
     getVoucher(id) {
         const vouchers = DataManager.getData('vouchers') || [];
-        return vouchers.find(v => v.id === id);
+        let v = vouchers.find(v => v.id === id);
+        if (v) return v;
+
+        // Fallback: Check Expenses (for Purchase Vouchers)
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const exp = expenses.find(e => e.id === id);
+        if (exp) {
+            return {
+                ...exp,
+                type: 'purchase',
+                amount: exp.amount || exp.total || exp.vch_amt || 0,
+                customerName: exp.vendor || exp.partyName || exp.supplier || exp.customerName,
+                date: exp.date || exp.vch_date
+            };
+        }
+        return null;
     },
 
     /**
@@ -116,12 +165,50 @@ const VoucherManager = {
         const voucher = vouchers[index];
         const linkedInvoices = voucher.linkedInvoices || [];
 
-        // Remove the voucher first
+        // Move to Recycle Bin BEFORE removing
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        bin.push({
+            ...voucher,
+            _deletedAt: new Date().toISOString(),
+            _recordType: 'voucher'
+        });
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
+
+        // Remove the voucher
         vouchers.splice(index, 1);
         await DataManager.saveData('vouchers', vouchers);
 
         // Revert linked invoice/bill statuses
         await this.revertLinkedInvoices(linkedInvoices, voucher, vouchers);
+    },
+
+    /**
+     * Restore voucher from recycle bin
+     */
+    async restoreVoucher(id) {
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const index = bin.findIndex(item => item.id === id && item._recordType === 'voucher');
+
+        if (index === -1) throw new Error('Voucher not found in Recycle Bin');
+
+        const voucher = { ...bin[index] };
+        delete voucher._deletedAt;
+        delete voucher._recordType;
+
+        const vouchers = DataManager.getData('vouchers') || [];
+        vouchers.push(voucher);
+
+        const newBin = bin.filter((_, i) => i !== index);
+
+        await DataManager.saveData('vouchers', vouchers);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin);
+
+        // Re-run linked invoice status updates
+        if (voucher.linkedInvoices && voucher.linkedInvoices.length > 0) {
+            await this.updateLinkedInvoices(voucher.linkedInvoices, voucher.type);
+        }
+
+        return voucher;
     },
 
     /**
@@ -216,18 +303,30 @@ const VoucherManager = {
     cleanBankDescription(description) {
         if (!description) return '';
         let cleaned = description.toUpperCase();
-        // Remove common prefixes
-        cleaned = cleaned.replace(/^(TO\s*:?\s*|BY\s*:?\s*)/, '');
+        
+        // Remove common transaction codes and technical noise
+        cleaned = cleaned.replace(/\b(IMPS|RTGS|NEFT|TRTR|TRF|UPI|CHQ|CHEQUE|CLG|NFT|CMS|NET|BANK|TRANS|TRANSFER)\b/g, ' ');
+        cleaned = cleaned.replace(/\b(HDFC|ICICI|IDIB|IDBI|SBI|KOTAK|AXIS|BARB|UTIB|YESB|PUNB|CNRB)\b/g, ' ');
+
         // Remove long alphanumeric IDs (like IOBA00000005037217, TRTR/400311394255/IMPS)
-        cleaned = cleaned.replace(/[A-Z0-9]{10,}/g, ' ');
-        // Remove pure numbers
-        cleaned = cleaned.replace(/\b\d+\b/g, ' ');
-        // Remove typical bank terms
-        cleaned = cleaned.replace(/\b(IMPS|RTGS|NEFT|TRTR|TRF|UPI)\b/g, ' ');
-        // Remove dates (DD-MM-YYYY)
+        // We keep items that are primarily alphabetic or are meaningful names
+        cleaned = cleaned.replace(/\b[A-Z0-9]{8,}\b/g, match => {
+            // If it has too many digits, it's likely a reference number
+            const digitCount = (match.match(/\d/g) || []).length;
+            return digitCount > 3 ? ' ' : match;
+        });
+
+        // Remove pure numeric dates or transaction IDs
+        cleaned = cleaned.replace(/\b\d{4,}\b/g, ' ');
         cleaned = cleaned.replace(/\b\d{2}-\d{2}-\d{4}\b/g, ' ');
+        cleaned = cleaned.replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, ' ');
+
         // Remove special characters, keep alphanumeric and spaces
         cleaned = cleaned.replace(/[^A-Z0-9\s]/g, ' ');
+        
+        // Final cleaning: remove single characters and tiny words that are usually noise (CO, EN, etc. if isolated)
+        cleaned = cleaned.replace(/\b[A-Z0-9]{1,2}\b/g, ' ');
+
         // Compress multiple spaces
         cleaned = cleaned.replace(/\s+/g, ' ').trim();
         return cleaned;
@@ -257,12 +356,18 @@ const VoucherManager = {
 
         if (!cleaned || cleaned.length < 3) return null;
 
-        // 1. Direct Match of cleaned description
+        // 1. Direct Exact Match (Highest Priority)
         if (mappings[cleaned]) return mappings[cleaned];
 
-        // 2. Contains Match (useful if alias is a subset of the description)
-        for (const [key, val] of Object.entries(mappings)) {
-            if (cleaned.includes(key) || key.includes(cleaned)) {
+        // 2. Strict Substring Match
+        // We only match if the alias is a meaningful part of the description
+        const entries = Object.entries(mappings);
+        for (const [key, val] of entries) {
+            if (key.length < 4) continue; // Skip very short alias keys for substring matching
+            
+            // Check if key is a whole word within cleaned description
+            const regex = new RegExp(`\\b${key}\\b`, 'i');
+            if (regex.test(cleaned)) {
                 return val;
             }
         }
@@ -289,5 +394,114 @@ const VoucherManager = {
                    Math.abs(parseFloat(v.amount) - d_amount) < 0.01 && 
                    v_date === d_date_str;
         });
+    },
+
+    /**
+     * NEW: Get next sequential voucher number for a type
+     * Intelligently detects numeric suffixes to follow manual patterns.
+     */
+    getNextVoucherNumber(type, date = null) {
+        const vouchers = DataManager.getData('vouchers') || [];
+        const year = DataManager.getFinancialYear(date || new Date());
+        const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : 'CNT');
+        
+        // Filter by type
+        const typeVouchers = vouchers.filter(v => v.type === type && v.id);
+        
+        if (typeVouchers.length === 0) {
+            return `${typeCode}-${year}-001`;
+        }
+
+        // Get the latest voucher of this type (last added)
+        const latest = typeVouchers[typeVouchers.length - 1];
+        const lastId = latest.id;
+
+        // Try to match numeric part at the end
+        // Matches: Prefix-Number (e.g. RCT-2026-001 -> 001, 01228 -> 01228)
+        const match = lastId.match(/^(.*?)(\d+)$/);
+        
+        if (match) {
+            const prefix = match[1];
+            const numberStr = match[2];
+            const nextNumber = parseInt(numberStr) + 1;
+            
+            // Re-pad to same length
+            const paddedNext = String(nextNumber).padStart(numberStr.length, '0');
+            return prefix + paddedNext;
+        }
+
+        // Fallback for non-numeric or complex IDs
+        return `${typeCode}-${year}-001`;
+    },
+
+    /**
+    _allocationsCache: null,
+    _lastVoucherCount: 0,
+
+    /**
+     * NEW: Get a map of all document allocations for fast lookup
+     * Returns: Map { docId => totalAllocatedAmount }
+     */
+    getVoucherAllocationsMap() {
+        const vouchers = this.getAllVouchers();
+        
+        // Simple cache: if count hasn't changed, return cached map
+        // Note: For full robustness, a checksum would be better, but count is usually enough for UI performance
+        if (this._allocationsCache && this._lastVoucherCount === vouchers.length) {
+            return this._allocationsCache;
+        }
+
+        const map = new Map();
+
+        vouchers.forEach(v => {
+            // 1. Check explicit allocations
+            if (v.allocations && v.allocations.length > 0) {
+                v.allocations.forEach(a => {
+                    const id = a.id || a.no;
+                    if (id) {
+                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
+                        map.set(id, (map.get(id) || 0) + amount);
+                    }
+                });
+            } 
+            // 2. Check legacy/imported linkedInvoices
+            else if (v.linkedInvoices && Array.isArray(v.linkedInvoices)) {
+                v.linkedInvoices.forEach(link => {
+                    let id, amount;
+                    if (typeof link === 'string') {
+                        id = link;
+                        const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
+                        amount = totalSettlement / v.linkedInvoices.length;
+                    } else if (link && typeof link === 'object') {
+                        id = link.id || link.invoiceNo || link.billNo;
+                        amount = parseFloat(link.amount) || 0;
+                    }
+
+                    if (id) {
+                        map.set(id, (map.get(id) || 0) + amount);
+                    }
+                });
+            }
+        });
+
+        this._allocationsCache = map;
+        this._lastVoucherCount = vouchers.length;
+        return map;
+    },
+
+    /**
+     * Updated: Get the remaining balance for a specific document
+     */
+    getDocumentBalance(docId, totalAmount, allocationsMap = null) {
+        let allocated = 0;
+        if (allocationsMap) {
+            allocated = allocationsMap.get(docId) || 0;
+        } else {
+            // Fallback to slow method if map not provided
+            const tempMap = this.getVoucherAllocationsMap();
+            allocated = tempMap.get(docId) || 0;
+        }
+        
+        return Math.max(0, totalAmount - allocated);
     }
 };

@@ -125,6 +125,7 @@ const CustomerManager = {
      * Get customer by ID
      */
     getCustomer(customerId) {
+        if (!customerId || customerId === 'undefined') return undefined;
         const customers = DataManager.getData('customers') || [];
         return customers.find(c => c.id === customerId);
     },

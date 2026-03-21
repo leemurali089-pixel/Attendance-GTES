@@ -60,11 +60,25 @@ const JobCardManager = {
             throw new Error('Job card not found');
         }
 
+        const now = new Date();
+        const displayTime = this.formatDateTime(now);
+
+        // Track history
+        const currentJC = jobCards[index];
+        const historyEntry = {
+            date: now.toISOString(),
+            displayDate: displayTime,
+            status: updates.status || currentJC.status,
+            note: updates.workDone && updates.workDone !== currentJC.workDone ? 'Work details updated' : 'Status/Details updated',
+            materialsCount: updates.materials ? updates.materials.length : (currentJC.materials ? currentJC.materials.length : 0)
+        };
+
         jobCards[index] = {
-            ...jobCards[index],
+            ...currentJC,
             ...updates,
-            updatedAt: new Date().toISOString(),
-            lastUpdateDate: this.formatDateTime(new Date())
+            history: [...(currentJC.history || []), historyEntry],
+            updatedAt: now.toISOString(),
+            lastUpdateDate: displayTime
         };
 
         DataManager.saveDataSync('jobcards', jobCards);
@@ -129,8 +143,45 @@ const JobCardManager = {
      */
     async deleteJobCard(jobCardId) {
         const jobCards = DataManager.getData('jobcards') || [];
+        const jobCard = jobCards.find(jc => jc.id === jobCardId);
+
+        if (jobCard) {
+            // Move to Recycle Bin BEFORE removing
+            const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+            bin.push({
+                ...jobCard,
+                _deletedAt: new Date().toISOString(),
+                _recordType: 'jobcard'
+            });
+            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
+        }
+
         const filtered = jobCards.filter(jc => jc.id !== jobCardId);
         DataManager.saveDataSync('jobcards', filtered);
+    },
+
+    /**
+     * Restore job card from recycle bin
+     */
+    async restoreJobCard(jobCardId) {
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const index = bin.findIndex(item => item.id === jobCardId && item._recordType === 'jobcard');
+
+        if (index === -1) throw new Error('Job Card not found in Recycle Bin');
+
+        const jobCard = { ...bin[index] };
+        delete jobCard._deletedAt;
+        delete jobCard._recordType;
+
+        const jobCards = DataManager.getData('jobcards') || [];
+        jobCards.push(jobCard);
+
+        const newBin = bin.filter((_, i) => i !== index);
+
+        DataManager.saveDataSync('jobcards', jobCards);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin);
+
+        return jobCard;
     },
 
     /**

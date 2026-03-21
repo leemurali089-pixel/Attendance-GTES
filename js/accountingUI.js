@@ -54,17 +54,19 @@ const AccountingUI = {
                 </div>
                 <!-- Navigation Cards -->
                 <div class="row g-4 mb-4">
-                     <div class="col-md-3">
-                        <div class="card bg-dark border-secondary h-100" onclick="App.showView('invoices')" style="cursor:pointer">
+                    <!-- Invoices (Consolidated) -->
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="App.showView('invoices')" style="cursor:pointer">
                              <div class="card-body text-center p-4">
                                 <i class="bi bi-receipt text-success fs-1 mb-3"></i>
                                 <h4 class="card-title">Invoices</h4>
-                                <p class="text-muted small">Sales Invoices</p>
+                                <p class="text-muted small">GST & Plain Invoices</p>
                             </div>
                         </div>
                     </div>
-                     <div class="col-md-3">
-                        <div class="card bg-dark border-secondary h-100" onclick="App.showView('purchases')" style="cursor:pointer">
+                    <!-- Purchases -->
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="App.showView('purchases')" style="cursor:pointer">
                              <div class="card-body text-center p-4">
                                 <i class="bi bi-cart-check text-warning fs-1 mb-3"></i>
                                 <h4 class="card-title">Purchases</h4>
@@ -72,19 +74,31 @@ const AccountingUI = {
                             </div>
                         </div>
                     </div>
-                     <div class="col-md-3">
-                        <div class="card bg-dark border-secondary h-100" onclick="App.showView('vouchers')" style="cursor:pointer">
+                    <!-- Vouchers (Consolidated) -->
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="App.showView('vouchers')" style="cursor:pointer">
                              <div class="card-body text-center p-4">
                                 <i class="bi bi-cash-stack text-info fs-1 mb-3"></i>
                                 <h4 class="card-title">Vouchers</h4>
-                                <p class="text-muted small">Payments/Receipts</p>
+                                <p class="text-muted small">GST, Plain & Purchase Vouchers</p>
                             </div>
                         </div>
                     </div>
-                     <div class="col-md-3">
-                        <div class="card bg-dark border-secondary h-100" onclick="AccountingUI.showTrialBalance()" style="cursor:pointer">
+                    <!-- Challans -->
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="App.showView('challans')" style="cursor:pointer">
                              <div class="card-body text-center p-4">
-                                <i class="bi bi-calculator text-primary fs-1 mb-3"></i>
+                                <i class="bi bi-truck text-primary fs-1 mb-3"></i>
+                                <h4 class="card-title">Challans</h4>
+                                <p class="text-muted small">DC & SC History</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Trial Balance/Reports -->
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="AccountingUI.showTrialBalance()" style="cursor:pointer">
+                             <div class="card-body text-center p-4">
+                                <i class="bi bi-calculator text-danger fs-1 mb-3"></i>
                                 <h4 class="card-title">Reports</h4>
                                 <p class="text-muted small">Trial Balance</p>
                             </div>
