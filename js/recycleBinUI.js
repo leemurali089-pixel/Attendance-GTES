@@ -76,20 +76,21 @@ const RecycleBinUI = {
 
         const rows = bin.map((item, idx) => {
             const type = item._recordType || 'unknown';
-            const typeLabel = type === 'invoice' ? 'Invoice' : type === 'voucher' ? 'Voucher' : type === 'challan' ? (item.type === 'delivery' ? 'DC' : 'SC') : 'Job Card';
+            const typeLabel = type === 'invoice' ? 'Invoice' : type === 'voucher' ? 'Voucher' : type === 'challan' ? (item.type === 'delivery' ? 'DC' : 'SC') : type === 'task' ? 'Task' : 'Job Card';
 
             let typeBadge = '';
             if (type === 'invoice') typeBadge = `<span class="badge" style="background:#1a56db">Invoice</span>`;
             else if (type === 'voucher') typeBadge = `<span class="badge" style="background:#7e3af2">Voucher</span>`;
             else if (type === 'challan') typeBadge = `<span class="badge" style="background:#047857">${item.type === 'delivery' ? 'DC' : 'SC'}</span>`;
+            else if (type === 'task') typeBadge = `<span class="badge" style="background:#0d6efd">Task</span>`;
             else typeBadge = `<span class="badge" style="background:#d97706">Job Card</span>`;
 
             const idNo = item.invoiceNo || item.id || '-';
-            const customer = item.customerName || '-';
-            const amount = (type === 'jobcard' || type === 'challan')
+            const customer = item.customerName || item.partyName || '-';
+            const amount = (type === 'jobcard' || type === 'challan' || type === 'task')
                 ? (item.id || '-')
                 : parseFloat(item.total || item.amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
-            const deletedAt = item._deletedAt ? new Date(item._deletedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+            const deletedAt = item.deletedAt || item._deletedAt ? new Date(item.deletedAt || item._deletedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
             return `
 <tr style="border-color:rgba(255,255,255,0.07)">
@@ -138,6 +139,8 @@ const RecycleBinUI = {
                 await JobCardManager.restoreJobCard(id);
             } else if (type === 'challan') {
                 await DeliveryManager.restoreChallan(id);
+            } else if (type === 'task') {
+                await TasksUI.restoreTask(id);
             }
             App.showNotification('Record restored successfully!', 'success');
             this._render();

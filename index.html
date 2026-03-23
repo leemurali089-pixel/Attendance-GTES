@@ -394,10 +394,28 @@
                         </label>
                     </div>
 
-                    <!-- Backup -->
-                    <button class="btn btn-outline-info btn-sm rounded-pill px-3 me-2" onclick="DeepCloudMigrator.syncAll()">
-                        <i class="bi bi-cloud-arrow-up-fill me-1"></i> Force Cloud Sync
+                    <!-- Refresh & Cloud Sync -->
+                    <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 me-2 shadow-sm" onclick="window.location.reload(true)" title="Hard Refresh App">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Refresh
                     </button>
+
+                    <div class="dropdown d-inline-block me-2">
+                        <button class="btn btn-outline-info btn-sm rounded-pill px-3 dropdown-toggle shadow-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-cloud-sync-fill me-1"></i> Cloud Sync
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end bg-dark border-secondary shadow-lg">
+                            <li>
+                                <a class="dropdown-item text-white" href="#" onclick="DeepCloudMigrator.importAll()">
+                                    <i class="bi bi-cloud-arrow-down-fill text-primary me-2"></i> Import from Cloud
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item text-white" href="#" onclick="DeepCloudMigrator.exportAll()">
+                                    <i class="bi bi-cloud-arrow-up-fill text-warning me-2"></i> Export to Cloud
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
 
                     <div class="dropdown d-inline-block me-2" id="landingBackupDropdown">
                         <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 dropdown-toggle shadow-sm"

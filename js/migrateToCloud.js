@@ -28,95 +28,101 @@ const DeepCloudMigrator = {
         'gtes_recycle_bin'
     ],
 
-    async syncAll() {
-        console.log("🚀 Starting Deep Cloud Migration...");
-        App.showNotification("Starting Cloud Sync...", "info");
+    async importAll() {
+        if (!confirm("⚠️ WARNING: This will overwrite ALL your current local data with the data from the Cloud.\n\nAre you sure you want to IMPORT?")) return;
+        
+        console.log("🚀 Starting Cloud Import (Pull)...");
+        App.showNotification("Importing from Cloud...", "info");
 
         let successCount = 0;
         let failCount = 0;
 
         for (const key of this.DB_FILES) {
-            const success = await this.syncFile(key);
+            const success = await this.importFile(key);
             if (success) successCount++;
             else failCount++;
         }
 
         if (failCount === 0) {
-            App.showNotification(`✅ Cloud Synchronized: ${successCount} modules updated.`, "success");
+            App.showNotification(`✅ Cloud Import Complete: ${successCount} modules downloaded.`, "success");
+            setTimeout(() => window.location.reload(), 1500); // Reload to reflect changes
         } else {
-            App.showNotification(`⚠️ Cloud Sync partial: ${successCount} ok, ${failCount} failed.`, "warning");
+            App.showNotification(`⚠️ Import partial: ${successCount} ok, ${failCount} failed.`, "warning");
         }
     },
 
-    async syncFile(key) {
+    async importFile(key) {
         try {
-            console.log(`[Migrator]: Fetching data for ${key}...`);
+            console.log(`[Migrator]: Fetching Cloud data for ${key}...`);
+            const cloudData = await FileStorage.loadData(key);
+            
+            if (cloudData !== null && cloudData !== undefined) {
+                if (typeof window.electronAPI !== 'undefined') {
+                    // Update main process DB
+                    await DataManager.saveData(key, cloudData);
+                    // Update renderer cache
+                    await DataManager.saveDataSync(key, cloudData); 
+                } else {
+                    // Overwrite Web App LocalStorage
+                    await DataManager.saveData(key, cloudData);
+                }
+                console.log(`[Migrator]: ✅ Imported ${key} successfully.`);
+                return true;
+            } else {
+                console.log(`[Migrator]: ☁️ No cloud data for ${key}. Skipped.`);
+                return true;
+            }
+        } catch (error) {
+            console.error(`[Migrator]: ❌ Import failed for ${key}:`, error);
+            return false;
+        }
+    },
+
+    async exportAll() {
+        if (!confirm("⚠️ WARNING: This will overwrite ALL Cloud data with your current local machine's data.\n\nAre you sure you want to EXPORT?")) return;
+
+        console.log("🚀 Starting Cloud Export (Push)...");
+        App.showNotification("Exporting to Cloud...", "info");
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const key of this.DB_FILES) {
+            const success = await this.exportFile(key);
+            if (success) successCount++;
+            else failCount++;
+        }
+
+        if (failCount === 0) {
+            App.showNotification(`✅ Cloud Export Complete: ${successCount} modules uploaded.`, "success");
+        } else {
+            App.showNotification(`⚠️ Export partial: ${successCount} ok, ${failCount} failed.`, "warning");
+        }
+    },
+
+    async exportFile(key) {
+        try {
+            console.log(`[Migrator]: Pushing Local data for ${key}...`);
             let localData = DataManager.getData(key) || [];
             
             // Check if special handling is needed for large files via main process direct sync
-            // For now, we only push large files from desktop as they are mostly desktop-managed
             if (this.LARGE_FILES.includes(key) && typeof window.electronAPI !== 'undefined' && window.electronAPI.syncToCloud) {
-                console.log(`[Migrator]: ⚡ Using Direct-to-Cloud Sync for large file: ${key}`);
+                console.log(`[Migrator]: ⚡ Using Direct-to-Cloud Export for large file: ${key}`);
                 const result = await window.electronAPI.syncToCloud(key, localData);
                 if (result.success) {
-                    console.log(`[Migrator]: ✅ ${key} synced via Main Process.`);
+                    console.log(`[Migrator]: ✅ ${key} exported via Main Process.`);
                     return true;
                 } else {
                     throw new Error(result.error || "Main process sync failed");
                 }
             }
 
-            // Normal file two-way sync (merge cloud and local arrays by ID)
-            let cloudData = await FileStorage.loadData(key); // Fetches from Firebase
-            let mergedData = localData;
-
-            if (Array.isArray(localData) && Array.isArray(cloudData)) {
-                console.log(`[Migrator]: 🔄 Merging arrays for ${key}...`);
-                const map = new Map();
-                // Add cloud data first
-                cloudData.forEach(item => { if (item && item.id) map.set(item.id, item); });
-                // Add/Overwrite with local data (assuming local is most recent, or just merging)
-                // Note: Real CRDT merge needs timestamps. For now, local overrides if conflicts, 
-                // but crucially, this PRESERVES cloud items that desktop doesn't have!
-                localData.forEach(item => { if (item && item.id) map.set(item.id, item); });
-                
-                mergedData = Array.from(map.values());
-
-                // PREVENT RESURRECTION: Filter out items that are in the Recycle Bin
-                // We fetch the cloud and local recycle bins just for this comparison
-                if (key !== 'gtes_recycle_bin') {
-                    const localRB = DataManager.getData('gtes_recycle_bin') || [];
-                    const cloudRB = await FileStorage.loadData('gtes_recycle_bin') || [];
-                    const recycleBinIds = new Set([
-                        ...localRB.map(r => r.id),
-                        ...cloudRB.map(r => r.id)
-                    ].filter(Boolean));
-
-                    if (recycleBinIds.size > 0) {
-                        mergedData = mergedData.filter(item => !recycleBinIds.has(item.id));
-                    }
-                }
-            } else if ((!localData || localData.length === 0) && cloudData) {
-                mergedData = cloudData;
-            } else if (localData && typeof localData === 'object' && !Array.isArray(localData) && cloudData) {
-                // Merge objects (like gtes_settings)
-                mergedData = { ...cloudData, ...localData };
-            }
-
-            // 1. Save merged data locally so Desktop sees Mobile's new data
-            if (typeof window.electronAPI !== 'undefined' && mergedData && mergedData !== localData) {
-                await DataManager.saveDataSync(key, mergedData); 
-                // We use saveDataSync to update local cache immediately so views can render
-                await DataManager.saveData(key, mergedData);
-            }
-
-            // 2. Push merged data back to Cloud so Mobile sees Desktop's data
-            console.log(`[Migrator]: ☁️ Pushing merged ${key} to Cloud...`);
-            const success = await FileStorage.saveData(key, mergedData);
+            // Normal file export
+            const success = await FileStorage.saveData(key, localData);
             return success;
 
         } catch (error) {
-            console.error(`[Migrator]: ❌ Sync failed for ${key}:`, error);
+            console.error(`[Migrator]: ❌ Export failed for ${key}:`, error);
             return false;
         }
     }

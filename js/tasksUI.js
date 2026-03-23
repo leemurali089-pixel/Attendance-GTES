@@ -974,7 +974,7 @@ const TasksUI = {
             // Add to Recycle Bin
             const recycleBin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
             taskToDelete.deletedAt = new Date().toISOString();
-            taskToDelete.originalType = 'task';
+            taskToDelete._recordType = 'task'; // Changed from originalType so Recycle Bin UI finds it
             recycleBin.push(taskToDelete);
             await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, recycleBin);
         }
@@ -986,6 +986,27 @@ const TasksUI = {
             bootstrap.Modal.getInstance(document.getElementById('taskDetailModal')).hide();
         }
         this.renderTasks();
+    },
+
+    async restoreTask(taskId) {
+        const recycleBin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const itemIdx = recycleBin.findIndex(r => r.id === taskId && r._recordType === 'task');
+        if (itemIdx === -1) throw new Error("Task not found in recycle bin");
+        
+        const taskToRestore = recycleBin.splice(itemIdx, 1)[0];
+        delete taskToRestore.deletedAt;
+        delete taskToRestore._recordType;
+        
+        const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+        tasks.push(taskToRestore);
+        
+        await DataManager.saveData(DataManager.KEYS.TASKS, tasks);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, recycleBin);
+        
+        // Refresh UI if task view is active
+        if (App.currentView === 'tasks') {
+            this.renderTasks();
+        }
     },
 
     formatDateTime(dateStr, timeStr) {
