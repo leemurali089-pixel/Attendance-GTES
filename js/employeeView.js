@@ -322,12 +322,13 @@ const EmployeeViewModule = {
             perDaySalary = baseSalary / daysInMonth;
         }
 
-        // Calculate H-Working Pay (double pay for working on holidays)
-        // H-Working days get 2x pay: 1 day already in paidDays + 1 extra day
-        const hWorkingDaysPay = hWorking * perDaySalary; // Extra day pay for H-Working (the second day of double pay)
+        // H-Working Pay is handled by standard daily pay + special OT hours pay
+        // Not adding extra 2x multiplier as per new requirement
+        const hWorkingDaysPay = 0; // Removed extra day's double pay mapping
 
         const paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5);
-        const basePay = paidDays * perDaySalary + hWorkingDaysPay; // Include H-Working extra pay in base pay
+        const basePay = paidDays * perDaySalary; // Standard 1-day pay for H-Working + OT
+
 
         // Calculate OT Pay
         const otBreakdown = DataManager.calculateOTPay(

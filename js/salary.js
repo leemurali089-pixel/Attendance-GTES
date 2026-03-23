@@ -359,10 +359,7 @@ const SalaryModule = {
                 case 'H-Working':
                     hWorking++; // Count H-Working separately
 
-                    // H-Working payment logic:
-                    // Always add 1 extra day for working on holiday (Double Pay default)
-                    extraPaidDaysFromHWorking += 1;
-
+                    // H-Working payment logic: Only 1 base day + OT, no extra double-pay
                     // OT Logic is handled below via hWorkingSpecialOtHours or standardOtHours
                     break;
             }
@@ -415,9 +412,8 @@ const SalaryModule = {
             // H-Working base pay (1 day) + extra days for double pay scenarios
             perDaySalary = baseSalary / context.daysInMonth;
 
-            // FIX: H-Working count needs to be explicitly added for the base day worked
-            // Total = (Present...) + 1 (Base H-Working) + 1 (Extra H-Working) = 2 Days Pay
-            paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5) + extraPaidDaysFromHWorking;
+            // H-Working count is explicitly added for the base day worked (1 day pay)
+            paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5);
             basePay = paidDays * perDaySalary;
         }
 
