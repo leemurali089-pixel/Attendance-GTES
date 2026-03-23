@@ -179,6 +179,35 @@ const DataManager = {
             await this.saveData(this.KEYS.RECYCLE_BIN, []);
         }
 
+        // --- NEW: Load essential cloud keys that were missing from initial cache fetch ---
+        const additionalKeys = [
+            'gtes_tasks', 
+            'customers', 
+            'invoices', 
+            'vouchers', 
+            'inventory', 
+            'gtes_users', 
+            'gtes_services', 
+            'inventoryTransactions'
+        ];
+        
+        // Fetch missing keys in parallel for speed on PWA Mobile
+        if (typeof window.electronAPI === 'undefined' && FileStorage && FileStorage.isCloudReady) {
+            console.log("[DataManager]: Web Mode - Prefetching essential cloud modules...");
+            await Promise.all(additionalKeys.map(async (key) => {
+                if (!(await this.loadData(key))) {
+                    await this.saveData(key, []);
+                }
+            }));
+        } else {
+            // Desktop mode sequential
+            for (const key of additionalKeys) {
+                if (!(await this.loadData(key))) {
+                    await this.saveData(key, []);
+                }
+            }
+        }
+
         // Phase 2: Migrate employees to new schema
         await this.migrateEmployeesToV2();
 
