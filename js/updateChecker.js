@@ -3,7 +3,7 @@
  * Checks for application updates and notifies users
  */
 const UpdateChecker = {
-    currentVersion: '1.0.0', // Match package.json version
+    currentVersion: '1.1.0', // Match package.json version
     
     /**
      * Get current application version
