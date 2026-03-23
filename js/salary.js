@@ -267,8 +267,9 @@ const SalaryModule = {
                 if (!attendanceMap.has(record.employee)) {
                     attendanceMap.set(record.employee, new Map());
                 }
-                // Use ISO date string (YYYY-MM-DD) as key to prevent duplicate day counts
-                const dateKey = new Date(record.date).toISOString().split('T')[0];
+                // Use local date string (YYYY-MM-DD) as key to prevent duplicate day counts and avoid Timezone UTC bleed
+                const d = new Date(record.date);
+                const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                 attendanceMap.get(record.employee).set(dateKey, record);
             });
 
@@ -791,9 +792,12 @@ const SalaryModule = {
                         const attendance = await DataManager.getAttendanceByMonth(startYear, startMonth);
                         let empAttendance = Array.isArray(attendance) ? attendance.filter(a => a.employee === employeeName) : [];
 
-                        // Deduplicate
+                        // Deduplicate (Safe local date)
                         const uniqueMap = new Map();
-                        empAttendance.forEach(r => uniqueMap.set(new Date(r.date).toISOString().split('T')[0], r));
+                        empAttendance.forEach(r => {
+                            const d = new Date(r.date);
+                            uniqueMap.set(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, r);
+                        });
                         empAttendance = Array.from(uniqueMap.values());
 
                         console.log(`Month ${i} Attendance (Unique):`, empAttendance.length);
@@ -811,9 +815,12 @@ const SalaryModule = {
                     const attendance = await DataManager.getAttendanceByMonth(this.currentYear, this.currentMonth);
                     let empAttendance = Array.isArray(attendance) ? attendance.filter(a => a.employee === employeeName) : [];
 
-                    // Deduplicate
+                    // Deduplicate (Safe local date)
                     const uniqueMap = new Map();
-                    empAttendance.forEach(r => uniqueMap.set(new Date(r.date).toISOString().split('T')[0], r));
+                    empAttendance.forEach(r => {
+                        const d = new Date(r.date);
+                        uniqueMap.set(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, r);
+                    });
                     empAttendance = Array.from(uniqueMap.values());
 
                     const filteredAttendance = this._filterAttendanceByStatus(empAttendance, statusType);
@@ -824,9 +831,12 @@ const SalaryModule = {
                 const attendance = await DataManager.getAttendanceByMonth(this.currentYear, this.currentMonth);
                 let empAttendance = Array.isArray(attendance) ? attendance.filter(a => a.employee === employeeName) : [];
 
-                // Deduplicate
+                // Deduplicate (Safe local date)
                 const uniqueMap = new Map();
-                empAttendance.forEach(r => uniqueMap.set(new Date(r.date).toISOString().split('T')[0], r));
+                empAttendance.forEach(r => {
+                    const d = new Date(r.date);
+                    uniqueMap.set(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, r);
+                });
                 empAttendance = Array.from(uniqueMap.values());
 
                 const filteredAttendance = this._filterAttendanceByStatus(empAttendance, statusType);
@@ -1165,7 +1175,10 @@ const SalaryModule = {
 
             // Deduplicate monthAttendance by date
             const uniqueMonthAttendanceMap = new Map();
-            monthAttendance.forEach(r => uniqueMonthAttendanceMap.set(new Date(r.date).toISOString().split('T')[0], r));
+            monthAttendance.forEach(r => {
+                const d = new Date(r.date);
+                uniqueMonthAttendanceMap.set(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, r);
+            });
             const uniqueMonthAttendance = Array.from(uniqueMonthAttendanceMap.values());
 
             let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeave = 0, halfDays = 0, holidays = 0, hWorking = 0, standardOtHours = 0, hWorkingSpecialOtHours = 0;
