@@ -340,14 +340,22 @@ const EmployeeViewModule = {
         const otPay = otBreakdown.totalPay;
         const standardOtPay = otBreakdown.standardPay || 0;
         const hWorkingOtPay = otBreakdown.hWorkingPay || 0;
-        // OT rate always uses fixed 30 days
-        const standardPerHour = salaryType === 'daily'
-            ? baseSalary / 8
-            : (baseSalary / 30) / 8;
-        const hWorkingPerHour = DataManager.calculateHWorkingPerHour(perDaySalary);
-        const otPerHourDisplay = hWorkingOtHours > 0
-            ? `${this.formatCurrency(standardPerHour)} (Std) / ${this.formatCurrency(hWorkingPerHour)} (H-Working)`
-            : this.formatCurrency(standardPerHour);
+        // Format OT Rates properly based on settings and fixed 30 days
+        const fixedDaySalary = salaryType === 'daily' ? baseSalary : baseSalary / 30;
+        
+        let standardPerHour = 0;
+        const sOtMethod = settings.otCalculationMethod || 'salaryBased8';
+        if (sOtMethod === 'fixedRate') standardPerHour = settings.otRate || DataManager.DEFAULT_SETTINGS.otRate;
+        else if (sOtMethod === 'salaryBased9') standardPerHour = fixedDaySalary / 9;
+        else standardPerHour = fixedDaySalary / 8;
+
+        let hWorkingPerHour = 0;
+        const hOtMethod = settings.hOtCalculationMethod || 'salaryBased8';
+        if (hOtMethod === 'fixedRate') hWorkingPerHour = settings.otRate || DataManager.DEFAULT_SETTINGS.otRate;
+        else if (hOtMethod === 'salaryBased9') hWorkingPerHour = fixedDaySalary / 9;
+        else hWorkingPerHour = fixedDaySalary / 8;
+
+        const otPerHourDisplay = `${this.formatCurrency(standardPerHour)} (Std) / ${this.formatCurrency(hWorkingPerHour)} (H-Working)`;
 
         const totalAdvance = await DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
         const finalSalary = basePay + otPay - totalAdvance;
