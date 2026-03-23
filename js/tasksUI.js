@@ -968,6 +968,17 @@ const TasksUI = {
         if (!confirm('Are you sure you want to delete this task?')) return;
         
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+        const taskToDelete = tasks.find(t => t.id === taskId);
+        
+        if (taskToDelete) {
+            // Add to Recycle Bin
+            const recycleBin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+            taskToDelete.deletedAt = new Date().toISOString();
+            taskToDelete.originalType = 'task';
+            recycleBin.push(taskToDelete);
+            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, recycleBin);
+        }
+
         const filtered = tasks.filter(t => t.id !== taskId);
         await DataManager.saveData(DataManager.KEYS.TASKS, filtered);
         

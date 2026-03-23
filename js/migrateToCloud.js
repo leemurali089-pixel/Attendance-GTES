@@ -24,7 +24,8 @@ const DeepCloudMigrator = {
         'gtes_advances',
         'gtes_holidays',
         'gtes_services',
-        'vouchers'
+        'vouchers',
+        'gtes_recycle_bin'
     ],
 
     async syncAll() {
@@ -49,15 +50,11 @@ const DeepCloudMigrator = {
 
     async syncFile(key) {
         try {
-            console.log(`[Migrator]: Fetching local data for ${key}...`);
-            const localData = DataManager.getData(key);
+            console.log(`[Migrator]: Fetching data for ${key}...`);
+            let localData = DataManager.getData(key) || [];
             
-            if (!localData || (Array.isArray(localData) && localData.length === 0)) {
-                console.log(`[Migrator]: Skipped ${key} (Empty)`);
-                return true;
-            }
-
-            // Check if special handling is needed for large files
+            // Check if special handling is needed for large files via main process direct sync
+            // For now, we only push large files from desktop as they are mostly desktop-managed
             if (this.LARGE_FILES.includes(key) && typeof window.electronAPI !== 'undefined' && window.electronAPI.syncToCloud) {
                 console.log(`[Migrator]: ⚡ Using Direct-to-Cloud Sync for large file: ${key}`);
                 const result = await window.electronAPI.syncToCloud(key, localData);
@@ -69,9 +66,53 @@ const DeepCloudMigrator = {
                 }
             }
 
-            // Standard Sync for other files
-            console.log(`[Migrator]: ☁️ Syncing ${key} via FileStorage...`);
-            const success = await FileStorage.saveData(key, localData);
+            // Normal file two-way sync (merge cloud and local arrays by ID)
+            let cloudData = await FileStorage.loadData(key); // Fetches from Firebase
+            let mergedData = localData;
+
+            if (Array.isArray(localData) && Array.isArray(cloudData)) {
+                console.log(`[Migrator]: 🔄 Merging arrays for ${key}...`);
+                const map = new Map();
+                // Add cloud data first
+                cloudData.forEach(item => { if (item && item.id) map.set(item.id, item); });
+                // Add/Overwrite with local data (assuming local is most recent, or just merging)
+                // Note: Real CRDT merge needs timestamps. For now, local overrides if conflicts, 
+                // but crucially, this PRESERVES cloud items that desktop doesn't have!
+                localData.forEach(item => { if (item && item.id) map.set(item.id, item); });
+                
+                mergedData = Array.from(map.values());
+
+                // PREVENT RESURRECTION: Filter out items that are in the Recycle Bin
+                // We fetch the cloud and local recycle bins just for this comparison
+                if (key !== 'gtes_recycle_bin') {
+                    const localRB = DataManager.getData('gtes_recycle_bin') || [];
+                    const cloudRB = await FileStorage.loadData('gtes_recycle_bin') || [];
+                    const recycleBinIds = new Set([
+                        ...localRB.map(r => r.id),
+                        ...cloudRB.map(r => r.id)
+                    ].filter(Boolean));
+
+                    if (recycleBinIds.size > 0) {
+                        mergedData = mergedData.filter(item => !recycleBinIds.has(item.id));
+                    }
+                }
+            } else if ((!localData || localData.length === 0) && cloudData) {
+                mergedData = cloudData;
+            } else if (localData && typeof localData === 'object' && !Array.isArray(localData) && cloudData) {
+                // Merge objects (like gtes_settings)
+                mergedData = { ...cloudData, ...localData };
+            }
+
+            // 1. Save merged data locally so Desktop sees Mobile's new data
+            if (typeof window.electronAPI !== 'undefined' && mergedData && mergedData !== localData) {
+                await DataManager.saveDataSync(key, mergedData); 
+                // We use saveDataSync to update local cache immediately so views can render
+                await DataManager.saveData(key, mergedData);
+            }
+
+            // 2. Push merged data back to Cloud so Mobile sees Desktop's data
+            console.log(`[Migrator]: ☁️ Pushing merged ${key} to Cloud...`);
+            const success = await FileStorage.saveData(key, mergedData);
             return success;
 
         } catch (error) {
