@@ -524,9 +524,19 @@ const VouchersUI = {
     },
 
     showStatementProcessingModal(transactions) {
+        // Remove existing to avoid duplicate IDs in DOM
+        const existing = document.getElementById('bankStatementModal');
+        let isFullscreen = false;
+        if (existing) {
+            isFullscreen = existing.querySelector('.modal-dialog')?.classList.contains('modal-fullscreen');
+            const modalInstance = bootstrap.Modal.getInstance(existing);
+            if (modalInstance) modalInstance.dispose();
+            existing.remove();
+        }
+
         const modalHtml = `
             <div class="modal fade" id="bankStatementModal" tabindex="-1">
-                <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-dialog modal-xl modal-dialog-scrollable ${isFullscreen ? 'modal-fullscreen' : ''}">
                     <div class="modal-content bg-dark text-white border-secondary">
                         <div class="modal-header border-secondary">
                             <h5 class="modal-title"><i class="bi bi-bank me-2"></i>Process Bank Statement</h5>
@@ -631,14 +641,6 @@ const VouchersUI = {
                 </div>
             </div>
         `;
-
-        // Remove existing to avoid duplicate IDs in DOM
-        const existing = document.getElementById('bankStatementModal');
-        if (existing) {
-            const modalInstance = bootstrap.Modal.getInstance(existing);
-            if (modalInstance) modalInstance.dispose();
-            existing.remove();
-        }
         
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
@@ -702,8 +704,8 @@ const VouchersUI = {
         let visible = 0;
 
         rows.forEach(row => {
-            const desc = (row.querySelector('td:nth-child(2)')?.textContent || '').toLowerCase();
-            const isDebit = row.querySelector('td:nth-child(3)')?.textContent.trim() !== '';
+            const desc = (row.querySelector('td:nth-child(3)')?.textContent || '').toLowerCase();
+            const isDebit = row.querySelector('td:nth-child(4)')?.textContent.trim() !== '';
             const isImported = row.classList.contains('table-active');
             const hasMatch = row.querySelector('.badge.bg-primary') !== null;
 
@@ -1004,6 +1006,7 @@ const VouchersUI = {
         const isChecked = headerCheckbox.checked;
         const rows = document.querySelectorAll('#bankStatementModal tbody tr');
         rows.forEach(row => {
+            // Only toggle checkboxes that are VISIBLE (not filtered out)
             if (row.style.display !== 'none') {
                 const cb = row.querySelector('.bs-row-checkbox');
                 if (cb) cb.checked = isChecked;
@@ -1013,20 +1016,30 @@ const VouchersUI = {
     },
 
     updateBankSelectionStatus() {
-        const checkboxes = document.querySelectorAll('.bs-row-checkbox');
-        const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-        const totalVisible = Array.from(checkboxes).filter(cb => cb.closest('tr').style.display !== 'none').length;
+        const allCheckboxes = Array.from(document.querySelectorAll('.bs-row-checkbox'));
+        // Filter to only those in VISIBLE rows
+        const visibleCheckboxes = allCheckboxes.filter(cb => {
+            const row = cb.closest('tr');
+            return row && row.style.display !== 'none';
+        });
+
+        const checkedVisibleCount = visibleCheckboxes.filter(cb => cb.checked).length;
+        const totalVisible = visibleCheckboxes.length;
         
         const selectAllCb = document.getElementById('bsSelectAll');
         if (selectAllCb) {
-            selectAllCb.checked = checkedCount > 0 && checkedCount === totalVisible;
-            selectAllCb.indeterminate = checkedCount > 0 && checkedCount < totalVisible;
+            selectAllCb.checked = totalVisible > 0 && checkedVisibleCount === totalVisible;
+            selectAllCb.indeterminate = checkedVisibleCount > 0 && checkedVisibleCount < totalVisible;
         }
+
+        // Count ALL checked for the delete button (even hidden ones, or we can restrict to visible)
+        // User said "delete the selected transaction", usually implies visible ones if following the filter focus.
+        const totalCheckedAnywhere = allCheckboxes.filter(cb => cb.checked).length;
 
         const deleteBtn = document.getElementById('btnDeleteSelectedBankTx');
         if (deleteBtn) {
-            deleteBtn.disabled = checkedCount === 0;
-            deleteBtn.innerHTML = `<i class="bi bi-trash"></i> Delete Selected (${checkedCount})`;
+            deleteBtn.disabled = totalCheckedAnywhere === 0;
+            deleteBtn.innerHTML = `<i class="bi bi-trash"></i> Delete Selected (${totalCheckedAnywhere})`;
         }
     },
 
