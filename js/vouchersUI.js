@@ -613,11 +613,11 @@ const VouchersUI = {
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-0">
-                            <div class="alert alert-info m-3 py-2 small">
-                                <i class="bi bi-info-circle me-1"></i> Click on a transaction to create a voucher.
+                        <div class="modal-body p-0 d-flex flex-column" style="height: ${isFullscreen ? 'calc(100vh - 120px)' : 'auto'};">
+                            <div class="alert alert-info mx-3 my-2 py-1 small">
+                                <i class="bi bi-info-circle me-1"></i> Click on a transaction to create a voucher or use checkboxes for bulk actions.
                             </div>
-                            <div class="table-responsive" style="max-height: 60vh;">
+                            <div class="table-responsive flex-grow-1" style="max-height: ${isFullscreen ? 'calc(100vh - 200px)' : '75vh'};">
                                 <table class="table table-dark table-hover table-sm mb-0 align-middle">
                                     <thead class="sticky-top">
                                         <tr style="background-color: #212529;">
