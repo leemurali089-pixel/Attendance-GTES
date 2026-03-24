@@ -1095,9 +1095,24 @@ const VouchersUI = {
         const tx = this.currentBankTransactions[index];
         if (!tx) return;
 
-        // Fetch vouchers to find matches
-        const allVouchers = VoucherManager.getAllVouchers() || [];
+        const resolvedParty = VoucherManager.resolveBankParty(tx.description) || '';
         
+        // Fetch all potential documents
+        let allVouchers = VoucherManager.getAllVouchers() || [];
+        const purchases = DataManager.getData('purchases') || [];
+        
+        // Combine with purchases if it's a debit (payment)
+        if (tx.type === 'debit') {
+            const transformedPurchases = purchases.map(p => ({
+                voucherId: p.id || p.invoiceNo || p.billNo,
+                date: p.date,
+                customerName: p.vendor || p.customerName || p.partyName,
+                amount: parseFloat(p.amount || p.total || 0),
+                type: 'purchase'
+            }));
+            allVouchers = [...allVouchers, ...transformedPurchases];
+        }
+
         const oldModal = document.getElementById('assignToVoucherModal');
         if (oldModal) { bootstrap.Modal.getInstance(oldModal)?.dispose(); oldModal.remove(); }
 
@@ -1107,45 +1122,65 @@ const VouchersUI = {
                 <div class="modal-content border-0 shadow-lg bg-dark text-white">
                     <div class="modal-header border-secondary p-4">
                         <h5 class="modal-title fw-bold">
-                            <i class="bi bi-link-45deg me-2 text-primary"></i>Link to Existing Voucher
+                            <i class="bi bi-link-45deg me-2 text-primary"></i>Link to Existing ${tx.type === 'debit' ? 'Purchase/Payment' : 'Receipt'}
                         </h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body p-4">
-                        <div class="alert alert-warning py-2 small mb-4">
-                            <i class="bi bi-exclamation-triangle me-2"></i> This will mark the bank transaction as processed against an existing voucher. No new voucher will be created.
-                        </div>
-                        
-                        <div class="bg-black bg-opacity-25 rounded p-3 mb-4 border border-secondary">
+                        <div class="bg-black bg-opacity-25 rounded p-3 mb-4 border border-secondary shadow-sm">
                             <div class="row g-2 small text-muted text-uppercase mb-2">
-                                <div class="col-6">Description</div>
+                                <div class="col-6">Bank Transaction</div>
                                 <div class="col-3 text-end">Amount</div>
                                 <div class="col-3 text-end">Date</div>
                             </div>
                             <div class="row g-2 align-items-center fw-bold">
                                 <div class="col-6 text-truncate" title="${tx.description}">${tx.description}</div>
-                                <div class="col-3 text-end text-${tx.type === 'debit' ? 'danger' : 'success'}">₹${tx.amount.toFixed(2)}</div>
+                                <div class="col-3 text-end text-${tx.type === 'debit' ? 'danger' : 'success'}" id="linkBankAmount">₹${tx.amount.toFixed(2)}</div>
                                 <div class="col-3 text-end">${new Date(tx.date).toLocaleDateString()}</div>
                             </div>
                         </div>
 
+                        <!-- Adjustment Section (initially hidden) -->
+                        <div id="linkAdjustmentContainer" class="mb-4 p-3 bg-secondary bg-opacity-25 rounded border border-info d-none">
+                            <h6 class="text-info mb-2 small fw-bold text-uppercase">Amount Difference Detected</h6>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="small">Difference to account for:</span>
+                                <span class="fw-bold text-warning" id="linkDiffAmount">₹0.00</span>
+                            </div>
+                            <div class="row g-3 align-items-end">
+                                <div class="col-md-5">
+                                    <label class="form-label small text-muted">Identify Difference As:</label>
+                                    <select id="linkDiffType" class="form-select form-select-sm bg-dark text-white border-secondary">
+                                        <option value="discount">Discount Given/Received</option>
+                                        <option value="tds">Tax (TDS) Deducted</option>
+                                        <option value="other">Other/Ignore</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-7">
+                                    <button class="btn btn-sm btn-info w-100" id="btnConfirmWithAdjustment">
+                                        <i class="bi bi-check-circle me-1"></i> Apply Adjustment & Link
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div class="mb-3">
                             <label class="form-label small text-muted">Select an existing voucher to link:</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-secondary border-secondary text-white"><i class="bi bi-search"></i></span>
-                                <input type="text" id="voucherLinkSearch" class="form-control bg-dark border-secondary text-white" placeholder="Search by Voucher No, Party Name or Amount...">
+                                <input type="text" id="voucherLinkSearch" class="form-control bg-dark border-secondary text-white" placeholder="Search by Voucher No, Party Name or Amount..." value="${resolvedParty}">
                             </div>
                         </div>
 
-                        <div class="table-responsive" style="max-height: 300px;">
+                        <div class="table-responsive" style="max-height: 250px;">
                             <table class="table table-dark table-hover table-sm border-secondary mb-0">
                                 <thead class="sticky-top bg-dark">
-                                    <tr>
-                                        <th>Voucher No</th>
+                                    <tr class="small text-muted">
+                                        <th>No</th>
                                         <th>Date</th>
+                                        <th>Type</th>
                                         <th>Party</th>
                                         <th class="text-end">Amount</th>
-                                        <th class="text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="voucherLinkResults">
@@ -1167,50 +1202,106 @@ const VouchersUI = {
         
         const searchInput = document.getElementById('voucherLinkSearch');
         const resultsTable = document.getElementById('voucherLinkResults');
+        const adjContainer = document.getElementById('linkAdjustmentContainer');
+        const diffText = document.getElementById('linkDiffAmount');
+        const btnAdjust = document.getElementById('btnConfirmWithAdjustment');
+
+        let selectedVoucher = null;
 
         const renderResults = (query) => {
             const q = (query || '').toLowerCase();
-            const matches = allVouchers.filter(v => 
-                v.voucherId.toLowerCase().includes(q) || 
-                v.customerName.toLowerCase().includes(q) || 
-                v.amount.toString().includes(q)
-            ).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 50);
+            const matches = allVouchers.filter(v => {
+                // Filter by type matching bank transaction direction
+                const typeMatches = tx.type === 'debit' ? 
+                    (v.type === 'payment' || v.type === 'purchase' || v.isPurchase) : 
+                    (v.type === 'receipt');
+                
+                if (!typeMatches) return false;
+
+                return v.voucherId.toLowerCase().includes(q) || 
+                       (v.customerName || '').toLowerCase().includes(q) || 
+                       v.amount.toString().includes(q);
+            }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 50);
 
             if (matches.length === 0) {
-                resultsTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No matching vouchers found.</td></tr>';
+                resultsTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted small">No matching vouchers found for this type.</td></tr>';
                 return;
             }
 
             resultsTable.innerHTML = matches.map(v => `
-                <tr style="cursor: pointer" onclick="VouchersUI.confirmAssignToVoucher(${index}, '${v.voucherId}')">
-                    <td><span class="badge bg-secondary">${v.voucherId}</span></td>
-                    <td>${new Date(v.date).toLocaleDateString()}</td>
-                    <td>${v.customerName}</td>
-                    <td class="text-end fw-bold">₹${parseFloat(v.amount).toFixed(2)}</td>
-                    <td class="text-center">
-                        <button class="btn btn-xs btn-outline-info p-1 px-2" style="font-size: 0.7rem;">
-                            <i class="bi bi-link-45deg"></i> Link
-                        </button>
-                    </td>
+                <tr style="cursor: pointer" class="link-row" data-vid="${v.voucherId}" data-amt="${v.amount}">
+                    <td class="small opacity-75">${v.voucherId}</td>
+                    <td class="small">${new Date(v.date).toLocaleDateString()}</td>
+                    <td class="small"><span class="badge bg-outline-secondary border border-secondary text-uppercase" style="font-size:0.6rem;">${v.type || 'VCH'}</span></td>
+                    <td class="small text-truncate" style="max-width:150px;">${v.customerName}</td>
+                    <td class="text-end fw-bold">₹${v.amount.toFixed(2)}</td>
                 </tr>
             `).join('');
+
+            // Add click handlers for selection behavior
+            resultsTable.querySelectorAll('.link-row').forEach(row => {
+                row.onclick = () => {
+                    resultsTable.querySelectorAll('.link-row').forEach(r => r.classList.remove('table-primary'));
+                    row.classList.add('table-primary');
+                    
+                    const vAmt = parseFloat(row.dataset.amt);
+                    const vId = row.dataset.vid;
+                    selectedVoucher = matches.find(m => m.voucherId === vId);
+
+                    const diff = vAmt - tx.amount;
+                    if (Math.abs(diff) > 0.05) {
+                        adjContainer.classList.remove('d-none');
+                        diffText.textContent = `₹${diff.toFixed(2)} (${diff > 0 ? 'Less received' : 'Over received'})`;
+                        adjContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    } else {
+                        adjContainer.classList.add('d-none');
+                        // If tiny difference, just confirm immediately
+                        VouchersUI.confirmAssignToVoucher(index, vId);
+                    }
+                };
+            });
+        };
+
+        btnAdjust.onclick = () => {
+            if (!selectedVoucher) return;
+            const diffType = document.getElementById('linkDiffType').value;
+            const diffAmt = selectedVoucher.amount - tx.amount;
+            
+            VouchersUI.confirmAssignToVoucher(index, selectedVoucher.voucherId, {
+                type: diffType,
+                amount: diffAmt
+            });
         };
 
         searchInput.addEventListener('input', (e) => renderResults(e.target.value));
-        renderResults(''); // Initial load
+        renderResults(searchInput.value); // Initial load with pre-filled party
 
         modal.show();
         modalEl.addEventListener('hidden.bs.modal', () => modalEl.remove());
     },
 
-    confirmAssignToVoucher(txIndex, voucherId) {
-        if (!confirm(`Are you sure you want to link this transaction to Voucher ${voucherId}?`)) return;
-
+    async confirmAssignToVoucher(txIndex, voucherId, adjustment = null) {
         const tx = this.currentBankTransactions[txIndex];
         if (!tx) return;
 
-        // Logic: Just mark it as converted locally to clear it from the import list
-        // and optionally add a mapping in VoucherManager if we want to track this link.
+        if (adjustment) {
+            const reason = adjustment.type === 'tds' ? 'Tax (TDS)' : (adjustment.type === 'discount' ? 'Discount' : 'Adjustment');
+            if (!confirm(`Linking to ${voucherId} with ${reason} of ₹${adjustment.amount.toFixed(2)}. Correct?`)) return;
+            
+            try {
+                await VoucherManager.updateVoucherAdjustment(voucherId, {
+                    tdsAmount: adjustment.type === 'tds' ? adjustment.amount : 0,
+                    discountAmount: adjustment.type === 'discount' ? adjustment.amount : 0,
+                    remarks: `Linked to bank transaction on ${new Date(tx.date).toLocaleDateString()} (${tx.description})`
+                });
+            } catch (e) {
+                console.error(e);
+                App.showNotification('Error updating voucher adjustments.', 'danger');
+            }
+        } else {
+            if (!confirm(`Are you sure you want to link this transaction to Voucher ${voucherId}?`)) return;
+        }
+
         tx.converted = true;
         tx.linkedVoucherId = voucherId;
         

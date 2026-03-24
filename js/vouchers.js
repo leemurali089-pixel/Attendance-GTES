@@ -503,5 +503,46 @@ const VoucherManager = {
         }
         
         return Math.max(0, totalAmount - allocated);
+    },
+
+    /**
+     * Update an existing voucher's adjustments (TDS/Discount)
+     */
+    async updateVoucherAdjustment(id, adjustments) {
+        const vouchers = DataManager.getData('vouchers') || [];
+        const index = vouchers.findIndex(v => v.id === id);
+
+        if (index !== -1) {
+            const voucher = vouchers[index];
+            if (adjustments.tdsAmount !== undefined) {
+                voucher.tdsAmount = parseFloat(voucher.tdsAmount || 0) + parseFloat(adjustments.tdsAmount);
+            }
+            if (adjustments.discountAmount !== undefined) {
+                voucher.discountAmount = parseFloat(voucher.discountAmount || 0) + parseFloat(adjustments.discountAmount);
+            }
+            if (adjustments.remarks) {
+                voucher.remarks = (voucher.remarks ? voucher.remarks + ' | ' : '') + adjustments.remarks;
+            }
+            
+            vouchers[index] = voucher;
+            await DataManager.saveData('vouchers', vouchers);
+            return voucher;
+        }
+
+        // Also check Expenses/Purchases if it's a purchase record
+        const purchases = DataManager.getData('purchases') || [];
+        const purIndex = purchases.findIndex(p => p.id === id);
+        if (purIndex !== -1) {
+            const pur = purchases[purIndex];
+            // Purchases/Expenses might store these differently, but we follow the same pattern
+            if (adjustments.tdsAmount !== undefined) pur.tdsAmount = (parseFloat(pur.tdsAmount || 0) + parseFloat(adjustments.tdsAmount)).toFixed(2);
+            if (adjustments.discountAmount !== undefined) pur.discountAmount = (parseFloat(pur.discountAmount || 0) + parseFloat(adjustments.discountAmount)).toFixed(2);
+            
+            purchases[purIndex] = pur;
+            await DataManager.saveData('purchases', purchases);
+            return pur;
+        }
+
+        throw new Error('Voucher not found for adjustment');
     }
 };
