@@ -1098,15 +1098,19 @@ const VouchersUI = {
         const resolvedParty = VoucherManager.resolveBankParty(tx.description) || '';
         
         // Fetch all potential documents
-        let allVouchers = VoucherManager.getAllVouchers() || [];
+        let allVouchers = (VoucherManager.getAllVouchers() || []).map(v => ({
+            ...v,
+            voucherId: v.voucherId || v.id || 'N/A' // Standarize ID field
+        }));
+        
         const purchases = DataManager.getData('purchases') || [];
         
         // Combine with purchases if it's a debit (payment)
         if (tx.type === 'debit') {
             const transformedPurchases = purchases.map(p => ({
-                voucherId: p.id || p.invoiceNo || p.billNo,
+                voucherId: p.id || p.invoiceNo || p.billNo || 'EXP-N/A',
                 date: p.date,
-                customerName: p.vendor || p.customerName || p.partyName,
+                customerName: p.vendor || p.customerName || p.partyName || 'Unknown Party',
                 amount: parseFloat(p.amount || p.total || 0),
                 type: 'purchase'
             }));
@@ -1218,9 +1222,11 @@ const VouchersUI = {
                 
                 if (!typeMatches) return false;
 
-                return v.voucherId.toLowerCase().includes(q) || 
-                       (v.customerName || '').toLowerCase().includes(q) || 
-                       v.amount.toString().includes(q);
+                const vId = String(v.voucherId || '').toLowerCase();
+                const vName = String(v.customerName || '').toLowerCase();
+                const vAmt = String(v.amount || '').toLowerCase();
+
+                return vId.includes(q) || vName.includes(q) || vAmt.includes(q);
             }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 50);
 
             if (matches.length === 0) {
@@ -1273,7 +1279,10 @@ const VouchersUI = {
             });
         };
 
-        searchInput.addEventListener('input', (e) => renderResults(e.target.value));
+        searchInput.addEventListener('input', (e) => {
+            if (this._linkSearchTimeout) clearTimeout(this._linkSearchTimeout);
+            this._linkSearchTimeout = setTimeout(() => renderResults(e.target.value), 200);
+        });
         renderResults(searchInput.value); // Initial load with pre-filled party
 
         modal.show();

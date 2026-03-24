@@ -4,7 +4,8 @@
  * Including special handling for large files (Employees, Inventory Transactions).
  */
 
-const DeepCloudMigrator = {
+if (!window.DeepCloudMigrator) {
+    const DeepCloudMigrator = {
     // Files that are too large for standard IPC (10MB+ or close)
     LARGE_FILES: ['gtes_employees', 'inventoryTransactions'],
     
@@ -129,3 +130,4 @@ const DeepCloudMigrator = {
 };
 
 window.DeepCloudMigrator = DeepCloudMigrator;
+}
