@@ -545,6 +545,9 @@ const VouchersUI = {
                                 <table class="table table-dark table-hover table-sm mb-0 align-middle">
                                     <thead class="sticky-top">
                                         <tr style="background-color: #212529;">
+                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40; width: 40px;" class="text-center">
+                                                <input type="checkbox" class="form-check-input" id="bsSelectAll" onchange="VouchersUI.toggleAllBankRows(this)">
+                                            </th>
                                             <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Date</th>
                                             <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Description</th>
                                             <th class="text-end" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Debit</th>
@@ -578,14 +581,25 @@ const VouchersUI = {
                             ${isDebit ? 'Payment' : 'Receipt'}
                         </button>
                         <button class="btn btn-sm btn-outline-secondary" 
-                                onclick="VouchersUI.assignBankParty(${index})" title="Link this transaction to a party name for future auto-matching (no voucher created)">
+                                onclick="VouchersUI.assignBankParty(${index})" title="Link to party name for future auto-matching">
                             <i class="bi bi-person-plus"></i> Assign Party
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" 
+                                onclick="VouchersUI.showAssignToVoucherModal(${index})" title="Link to an existing voucher (allows amount differences)">
+                            <i class="bi bi-link-45deg"></i> Link Voucher
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" 
+                                onclick="VouchersUI.deleteBankRow(${index})" title="Delete this transaction">
+                            <i class="bi bi-trash"></i> Delete
                         </button>
                     </div>`;
             }
 
             return `
-                                            <tr class="${tx.converted ? 'table-active opacity-50' : ''}">
+                                            <tr class="${tx.converted ? 'table-active opacity-50' : ''}" data-index="${index}">
+                                                <td class="text-center align-middle">
+                                                    <input type="checkbox" class="form-check-input bs-row-checkbox" value="${index}" onchange="VouchersUI.updateBankSelectionStatus()">
+                                                </td>
                                                 <td class="small">${new Date(tx.date).toLocaleDateString()}</td>
                                                 <td class="small" style="max-width: 300px;">
                                                     <div class="text-truncate" title="${tx.description}">${tx.description}</div>
@@ -605,6 +619,9 @@ const VouchersUI = {
                         </div>
                         <div class="modal-footer border-secondary">
                             <span class="text-muted small me-auto"><i class="bi bi-info-circle me-1"></i> New vouchers created here can be exported to Excel.</span>
+                            <button type="button" class="btn btn-outline-danger me-2" id="btnDeleteSelectedBankTx" onclick="VouchersUI.deleteSelectedBankRows()" disabled>
+                                <i class="bi bi-trash"></i> Delete Selected
+                            </button>
                             <button type="button" class="btn btn-outline-success" onclick="VouchersUI.exportVouchersToExcel()">
                                 <i class="bi bi-file-earmark-excel"></i> Export Vouchers as Excel
                             </button>
@@ -704,6 +721,9 @@ const VouchersUI = {
 
         const counter = document.getElementById('bsRowCount');
         if (counter) counter.textContent = `${visible} of ${rows.length} transactions`;
+
+        // Sync Select All checkbox with visible rows
+        this.updateBankSelectionStatus();
     },
 
     convertBankTx(index) {
@@ -975,6 +995,196 @@ const VouchersUI = {
         bootstrap.Modal.getInstance(modalEl)?.hide();
 
         App.showNotification(`"${partyName}" assigned. Future imports will auto-match this description.`, 'success');
+        this.showStatementProcessingModal(this.currentBankTransactions);
+    },
+
+    // --- Bulk Selection and Deletion Methods ---
+
+    toggleAllBankRows(headerCheckbox) {
+        const isChecked = headerCheckbox.checked;
+        const rows = document.querySelectorAll('#bankStatementModal tbody tr');
+        rows.forEach(row => {
+            if (row.style.display !== 'none') {
+                const cb = row.querySelector('.bs-row-checkbox');
+                if (cb) cb.checked = isChecked;
+            }
+        });
+        this.updateBankSelectionStatus();
+    },
+
+    updateBankSelectionStatus() {
+        const checkboxes = document.querySelectorAll('.bs-row-checkbox');
+        const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+        const totalVisible = Array.from(checkboxes).filter(cb => cb.closest('tr').style.display !== 'none').length;
+        
+        const selectAllCb = document.getElementById('bsSelectAll');
+        if (selectAllCb) {
+            selectAllCb.checked = checkedCount > 0 && checkedCount === totalVisible;
+            selectAllCb.indeterminate = checkedCount > 0 && checkedCount < totalVisible;
+        }
+
+        const deleteBtn = document.getElementById('btnDeleteSelectedBankTx');
+        if (deleteBtn) {
+            deleteBtn.disabled = checkedCount === 0;
+            deleteBtn.innerHTML = `<i class="bi bi-trash"></i> Delete Selected (${checkedCount})`;
+        }
+    },
+
+    deleteBankRow(index) {
+        if (!confirm('Are you sure you want to delete this transaction from the import list?')) return;
+        
+        this.currentBankTransactions.splice(index, 1);
+        this.showStatementProcessingModal(this.currentBankTransactions);
+        App.showNotification('Transaction removed.', 'info');
+    },
+
+    deleteSelectedBankRows() {
+        const checkboxes = document.querySelectorAll('.bs-row-checkbox:checked');
+        if (checkboxes.length === 0) return;
+
+        if (!confirm(`Are you sure you want to delete ${checkboxes.length} selected transactions?`)) return;
+
+        // Get indices to delete, sort descending to splice correctly
+        const indices = Array.from(checkboxes).map(cb => parseInt(cb.value)).sort((a, b) => b - a);
+        
+        indices.forEach(idx => {
+            this.currentBankTransactions.splice(idx, 1);
+        });
+
+        this.showStatementProcessingModal(this.currentBankTransactions);
+        App.showNotification(`${indices.length} transactions removed.`, 'info');
+    },
+
+    // --- Assign to Existing Voucher Logic ---
+
+    showAssignToVoucherModal(index) {
+        const tx = this.currentBankTransactions[index];
+        if (!tx) return;
+
+        // Fetch vouchers to find matches
+        const allVouchers = VoucherManager.getAllVouchers() || [];
+        
+        const oldModal = document.getElementById('assignToVoucherModal');
+        if (oldModal) { bootstrap.Modal.getInstance(oldModal)?.dispose(); oldModal.remove(); }
+
+        const modalHtml = `
+        <div class="modal fade" id="assignToVoucherModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content border-0 shadow-lg bg-dark text-white">
+                    <div class="modal-header border-secondary p-4">
+                        <h5 class="modal-title fw-bold">
+                            <i class="bi bi-link-45deg me-2 text-primary"></i>Link to Existing Voucher
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div class="alert alert-warning py-2 small mb-4">
+                            <i class="bi bi-exclamation-triangle me-2"></i> This will mark the bank transaction as processed against an existing voucher. No new voucher will be created.
+                        </div>
+                        
+                        <div class="bg-black bg-opacity-25 rounded p-3 mb-4 border border-secondary">
+                            <div class="row g-2 small text-muted text-uppercase mb-2">
+                                <div class="col-6">Description</div>
+                                <div class="col-3 text-end">Amount</div>
+                                <div class="col-3 text-end">Date</div>
+                            </div>
+                            <div class="row g-2 align-items-center fw-bold">
+                                <div class="col-6 text-truncate" title="${tx.description}">${tx.description}</div>
+                                <div class="col-3 text-end text-${tx.type === 'debit' ? 'danger' : 'success'}">₹${tx.amount.toFixed(2)}</div>
+                                <div class="col-3 text-end">${new Date(tx.date).toLocaleDateString()}</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Select an existing voucher to link:</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-secondary border-secondary text-white"><i class="bi bi-search"></i></span>
+                                <input type="text" id="voucherLinkSearch" class="form-control bg-dark border-secondary text-white" placeholder="Search by Voucher No, Party Name or Amount...">
+                            </div>
+                        </div>
+
+                        <div class="table-responsive" style="max-height: 300px;">
+                            <table class="table table-dark table-hover table-sm border-secondary mb-0">
+                                <thead class="sticky-top bg-dark">
+                                    <tr>
+                                        <th>Voucher No</th>
+                                        <th>Date</th>
+                                        <th>Party</th>
+                                        <th class="text-end">Amount</th>
+                                        <th class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="voucherLinkResults">
+                                    <!-- Search results here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary p-3">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modalEl = document.getElementById('assignToVoucherModal');
+        const modal = new bootstrap.Modal(modalEl);
+        
+        const searchInput = document.getElementById('voucherLinkSearch');
+        const resultsTable = document.getElementById('voucherLinkResults');
+
+        const renderResults = (query) => {
+            const q = (query || '').toLowerCase();
+            const matches = allVouchers.filter(v => 
+                v.voucherId.toLowerCase().includes(q) || 
+                v.customerName.toLowerCase().includes(q) || 
+                v.amount.toString().includes(q)
+            ).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 50);
+
+            if (matches.length === 0) {
+                resultsTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No matching vouchers found.</td></tr>';
+                return;
+            }
+
+            resultsTable.innerHTML = matches.map(v => `
+                <tr style="cursor: pointer" onclick="VouchersUI.confirmAssignToVoucher(${index}, '${v.voucherId}')">
+                    <td><span class="badge bg-secondary">${v.voucherId}</span></td>
+                    <td>${new Date(v.date).toLocaleDateString()}</td>
+                    <td>${v.customerName}</td>
+                    <td class="text-end fw-bold">₹${parseFloat(v.amount).toFixed(2)}</td>
+                    <td class="text-center">
+                        <button class="btn btn-xs btn-outline-info p-1 px-2" style="font-size: 0.7rem;">
+                            <i class="bi bi-link-45deg"></i> Link
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        };
+
+        searchInput.addEventListener('input', (e) => renderResults(e.target.value));
+        renderResults(''); // Initial load
+
+        modal.show();
+        modalEl.addEventListener('hidden.bs.modal', () => modalEl.remove());
+    },
+
+    confirmAssignToVoucher(txIndex, voucherId) {
+        if (!confirm(`Are you sure you want to link this transaction to Voucher ${voucherId}?`)) return;
+
+        const tx = this.currentBankTransactions[txIndex];
+        if (!tx) return;
+
+        // Logic: Just mark it as converted locally to clear it from the import list
+        // and optionally add a mapping in VoucherManager if we want to track this link.
+        tx.converted = true;
+        tx.linkedVoucherId = voucherId;
+        
+        // Close modal
+        const modalEl = document.getElementById('assignToVoucherModal');
+        bootstrap.Modal.getInstance(modalEl)?.hide();
+
+        App.showNotification(`Transaction linked to Voucher ${voucherId}.`, 'success');
         this.showStatementProcessingModal(this.currentBankTransactions);
     },
 
