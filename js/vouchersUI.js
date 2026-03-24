@@ -523,9 +523,75 @@ const VouchersUI = {
         fileInput.click();
     },
 
+    renderBankRow(tx, index) {
+        const isDebit = tx.type === 'debit';
+        const match = VoucherManager.resolveBankParty(tx.description);
+        const matchHtml = match ? `<span class="badge bg-primary ms-1"><i class="bi bi-magic"></i> ${match}</span>` : '';
+
+        let actionHtml = '';
+        const alreadyVouchered = match && VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date);
+
+        if (tx.converted || alreadyVouchered) {
+            actionHtml = `<span class="badge bg-success p-2"><i class="bi bi-check-circle-fill me-1"></i> ${alreadyVouchered ? 'Already Exists' : 'Imported'}</span>`;
+            tx.converted = true;
+        } else {
+            actionHtml = `
+                <div class="d-flex gap-1 justify-content-center flex-wrap">
+                    <button class="btn btn-sm btn-${isDebit ? 'outline-warning' : 'outline-info'}" 
+                            onclick="VouchersUI.convertBankTx(${index})">
+                        <i class="bi bi-${isDebit ? 'arrow-up-right' : 'arrow-down-left'}"></i>
+                        ${isDebit ? 'Payment' : 'Receipt'}
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" 
+                            onclick="VouchersUI.assignBankParty(${index})" title="Link to party name for future auto-matching">
+                        <i class="bi bi-person-plus"></i> Assign Party
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" 
+                            onclick="VouchersUI.showAssignToVoucherModal(${index})" title="Link to an existing voucher (allows amount differences)">
+                        <i class="bi bi-link-45deg"></i> Link Voucher
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" 
+                            onclick="VouchersUI.deleteBankRow(${index})" title="Delete this transaction">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                </div>`;
+        }
+
+        return `
+            <tr class="${tx.converted ? 'table-active opacity-50' : ''}" data-index="${index}">
+                <td class="text-center align-middle">
+                    <input type="checkbox" class="form-check-input bs-row-checkbox" value="${index}" onchange="VouchersUI.updateBankSelectionStatus()">
+                </td>
+                <td class="small">${new Date(tx.date).toLocaleDateString()}</td>
+                <td class="small" style="max-width: 300px;">
+                    <div class="text-truncate" title="${tx.description}">${tx.description}</div>
+                    ${matchHtml}
+                </td>
+                <td class="text-end text-danger fw-bold">${isDebit ? tx.amount.toFixed(2) : ''}</td>
+                <td class="text-end text-success fw-bold">${!isDebit ? tx.amount.toFixed(2) : ''}</td>
+                <td class="text-center">
+                    ${actionHtml}
+                </td>
+            </tr>
+        `;
+    },
+
     showStatementProcessingModal(transactions) {
+        this.currentBankTransactions = transactions;
+        
         // Remove existing to avoid duplicate IDs in DOM
         const existing = document.getElementById('bankStatementModal');
+        
+        if (existing) {
+            // Partial refresh: update only the tbody if modal already open
+            const tbody = existing.querySelector('tbody');
+            if (tbody) {
+                tbody.innerHTML = transactions.map((tx, index) => this.renderBankRow(tx, index)).join('');
+                this.filterBankRows();
+                return;
+            }
+        }
+
         let isFullscreen = false;
         if (existing) {
             isFullscreen = existing.querySelector('.modal-dialog')?.classList.contains('modal-fullscreen');
@@ -566,63 +632,7 @@ const VouchersUI = {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${transactions.map((tx, index) => {
-            const isDebit = tx.type === 'debit';
-
-            // Check for match
-            const match = VoucherManager.resolveBankParty(tx.description);
-            const matchHtml = match ? `<span class="badge bg-primary ms-1"><i class="bi bi-magic"></i> ${match}</span>` : '';
-
-            // Render Action Button or Imported Status
-            let actionHtml = '';
-            
-            // Duplicate Check: if party is resolved, check if already imported
-            const alreadyVouchered = match && VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date);
-
-            if (tx.converted || alreadyVouchered) {
-                actionHtml = `<span class="badge bg-success p-2"><i class="bi bi-check-circle-fill me-1"></i> ${alreadyVouchered ? 'Already Exists' : 'Imported'}</span>`;
-                tx.converted = true; // Mark as converted locally for row styling
-            } else {
-                actionHtml = `
-                    <div class="d-flex gap-1 justify-content-center flex-wrap">
-                        <button class="btn btn-sm btn-${isDebit ? 'outline-warning' : 'outline-info'}" 
-                                onclick="VouchersUI.convertBankTx(${index})">
-                            <i class="bi bi-${isDebit ? 'arrow-up-right' : 'arrow-down-left'}"></i>
-                            ${isDebit ? 'Payment' : 'Receipt'}
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" 
-                                onclick="VouchersUI.assignBankParty(${index})" title="Link to party name for future auto-matching">
-                            <i class="bi bi-person-plus"></i> Assign Party
-                        </button>
-                        <button class="btn btn-sm btn-outline-primary" 
-                                onclick="VouchersUI.showAssignToVoucherModal(${index})" title="Link to an existing voucher (allows amount differences)">
-                            <i class="bi bi-link-45deg"></i> Link Voucher
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" 
-                                onclick="VouchersUI.deleteBankRow(${index})" title="Delete this transaction">
-                            <i class="bi bi-trash"></i> Delete
-                        </button>
-                    </div>`;
-            }
-
-            return `
-                                            <tr class="${tx.converted ? 'table-active opacity-50' : ''}" data-index="${index}">
-                                                <td class="text-center align-middle">
-                                                    <input type="checkbox" class="form-check-input bs-row-checkbox" value="${index}" onchange="VouchersUI.updateBankSelectionStatus()">
-                                                </td>
-                                                <td class="small">${new Date(tx.date).toLocaleDateString()}</td>
-                                                <td class="small" style="max-width: 300px;">
-                                                    <div class="text-truncate" title="${tx.description}">${tx.description}</div>
-                                                    ${matchHtml}
-                                                </td>
-                                                <td class="text-end text-danger fw-bold">${isDebit ? tx.amount.toFixed(2) : ''}</td>
-                                                <td class="text-end text-success fw-bold">${!isDebit ? tx.amount.toFixed(2) : ''}</td>
-                                                <td class="text-center">
-                                                    ${actionHtml}
-                                                </td>
-                                            </tr>
-                                            `;
-        }).join('')}
+                                        ${transactions.map((tx, index) => this.renderBankRow(tx, index)).join('')}
                                     </tbody>
                                 </table>
                             </div>
@@ -652,7 +662,7 @@ const VouchersUI = {
         const filters = this.bsFilters || { party: '', type: '', status: '' };
         const filterBarHtml = `
             <div class="d-flex gap-2 align-items-center flex-wrap px-3 pb-2 pt-0">
-                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRows()" value="${filters.party}">
+                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRowsDebounced()" value="${filters.party}">
                 <select id="bsTypeFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
                     <option value="" ${filters.type === '' ? 'selected' : ''}>All Types</option>
                     <option value="debit" ${filters.type === 'debit' ? 'selected' : ''}>Debit (Payments)</option>
@@ -684,6 +694,13 @@ const VouchersUI = {
         this.currentBankTransactions = transactions;
     },
 
+    filterBankRowsDebounced() {
+        if (this.bsFilterTimeout) clearTimeout(this.bsFilterTimeout);
+        this.bsFilterTimeout = setTimeout(() => {
+            this.filterBankRows();
+        }, 150); // Small delay to catch fast typers
+    },
+
     cleanupBackdrops() {
         document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
         document.body.classList.remove('modal-open');
@@ -704,10 +721,14 @@ const VouchersUI = {
         let visible = 0;
 
         rows.forEach(row => {
-            const desc = (row.querySelector('td:nth-child(3)')?.textContent || '').toLowerCase();
-            const isDebit = row.querySelector('td:nth-child(4)')?.textContent.trim() !== '';
+            // Using .cells for slightly better performance than querySelector
+            const descTd = row.cells[2];
+            const debitTd = row.cells[3];
+            
+            const desc = (descTd?.textContent || '').toLowerCase();
+            const isDebit = debitTd?.textContent.trim() !== '';
             const isImported = row.classList.contains('table-active');
-            const hasMatch = row.querySelector('.badge.bg-primary') !== null;
+            const hasMatch = descTd?.querySelector('.badge.bg-primary') !== null;
 
             const partyOk = !partyQ || desc.includes(partyQ);
             const typeOk = !typeQ || (typeQ === 'debit' && isDebit) || (typeQ === 'credit' && !isDebit);
