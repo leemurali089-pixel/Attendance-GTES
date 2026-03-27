@@ -126,7 +126,7 @@ const AIAssistant = {
     },
 
     async processGlobalAI(transcript) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
         let prompt = `You are an omnipotent AI controller for the "MJS PrimeLogic" ERP system. 
