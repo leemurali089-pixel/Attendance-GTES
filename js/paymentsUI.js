@@ -7,7 +7,8 @@ const PaymentsUI = {
     currentFilters: {
         type: 'all', // 'all', 'gst', 'plain'
         customer: '',
-        financialYear: ''
+        financialYear: '',
+        status: 'pending' // 'all', 'pending', 'partial', 'paid'
     },
     dataCache: null,
     selectedCustomers: new Set(),
@@ -67,7 +68,7 @@ const PaymentsUI = {
                 <div class="card glass-panel border-secondary mb-4">
                     <div class="card-body">
                         <div class="row g-3 align-items-end">
-                            <div class="col-md-4 position-relative">
+                            <div class="col-md-3 position-relative">
                                 <label class="text-white-50 small mb-1">Filter by Customer</label>
                                 <input type="text" id="payFollowCustomerFilter" class="form-control bg-dark border-secondary text-white" 
                                     placeholder="Search customer..." value="${this.currentFilters.customer}"
@@ -83,18 +84,32 @@ const PaymentsUI = {
                                     ${this.getYearOptions()}
                                 </select>
                             </div>
-                            <div class="col-md-6 text-end">
-                                <div class="btn-group" role="group">
-                                    <button type="button" class="btn ${this.currentFilters.type === 'all' ? 'btn-info' : 'btn-outline-info'}" 
-                                        onclick="PaymentsUI.setTypeFilter('all')">All Invoices</button>
-                                    <button type="button" class="btn ${this.currentFilters.type === 'gst' ? 'btn-info' : 'btn-outline-info'}" 
-                                        onclick="PaymentsUI.setTypeFilter('gst')">GST Invoice</button>
-                                    <button type="button" class="btn ${this.currentFilters.type === 'plain' ? 'btn-info' : 'btn-outline-info'}" 
-                                        onclick="PaymentsUI.setTypeFilter('plain')">Plain Invoice</button>
+                            <div class="col-md-7 text-end">
+                                <div class="d-flex flex-wrap gap-2 justify-content-end">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn ${this.currentFilters.type === 'all' ? 'btn-info' : 'btn-outline-info'}" 
+                                            onclick="PaymentsUI.setTypeFilter('all')">All Invoices</button>
+                                        <button type="button" class="btn ${this.currentFilters.type === 'gst' ? 'btn-info' : 'btn-outline-info'}" 
+                                            onclick="PaymentsUI.setTypeFilter('gst')">GST</button>
+                                        <button type="button" class="btn ${this.currentFilters.type === 'plain' ? 'btn-info' : 'btn-outline-info'}" 
+                                            onclick="PaymentsUI.setTypeFilter('plain')">Plain</button>
+                                    </div>
+
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn ${this.currentFilters.status === 'all' ? 'btn-warning' : 'btn-outline-warning'}" 
+                                            onclick="PaymentsUI.setStatusFilter('all')">All Status</button>
+                                        <button type="button" class="btn ${this.currentFilters.status === 'pending' ? 'btn-warning' : 'btn-outline-warning'}" 
+                                            onclick="PaymentsUI.setStatusFilter('pending')" title="Zero payment">Pending</button>
+                                        <button type="button" class="btn ${this.currentFilters.status === 'partial' ? 'btn-warning' : 'btn-outline-warning'}" 
+                                            onclick="PaymentsUI.setStatusFilter('partial')" title="Some payment received">Partial</button>
+                                        <button type="button" class="btn ${this.currentFilters.status === 'paid' ? 'btn-warning' : 'btn-outline-warning'}" 
+                                            onclick="PaymentsUI.setStatusFilter('paid')" title="Fully paid">Paid</button>
+                                    </div>
+
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="PaymentsUI.refreshData()" title="Refresh Data">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </div>
-                                <button class="btn btn-outline-secondary btn-sm ms-2" onclick="PaymentsUI.refreshData()" title="Refresh Data">
-                                    <i class="bi bi-arrow-clockwise"></i>
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -347,6 +362,11 @@ const PaymentsUI = {
         this.renderPaymentFollowup();
     },
 
+    setStatusFilter(status) {
+        this.currentFilters.status = status;
+        this.renderPaymentFollowup();
+    },
+
     // Debounce filter input for performance
     filterTimeout: null,
     updateFiltersDebounced() {
@@ -383,10 +403,18 @@ const PaymentsUI = {
             });
         }
 
+        // Status Filter
+        if (this.currentFilters.status === 'pending') {
+            filtered = filtered.filter(inv => !inv.isPaid && !inv.isPartial);
+        } else if (this.currentFilters.status === 'partial') {
+            filtered = filtered.filter(inv => inv.isPartial);
+        } else if (this.currentFilters.status === 'paid') {
+            filtered = filtered.filter(inv => inv.isPaid);
+        }
+
         // Customer Search - Filter the whole group if a match is found
         if (this.currentFilters.customer) {
             const search = this.currentFilters.customer.toLowerCase();
-            // We apply this filter AFTER grouping or by ensuring we keep all bills for matching names
             filtered = filtered.filter(inv => (inv.customerName || '').toLowerCase().includes(search));
         }
 
@@ -520,9 +548,13 @@ const PaymentsUI = {
             dropdown.classList.remove('d-none');
         };
 
+        let searchTimeout = null;
         input.addEventListener('input', (e) => {
-            renderDropdown(e.target.value);
-            activeIdx = -1;
+            if (searchTimeout) clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                renderDropdown(e.target.value);
+                activeIdx = -1;
+            }, 150);
         });
 
         input.addEventListener('focus', () => renderDropdown(input.value));

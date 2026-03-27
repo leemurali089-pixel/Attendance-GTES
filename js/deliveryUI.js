@@ -4267,53 +4267,51 @@ const DeliveryUI = {
                             </div>
                         </div>
                         <div class="modal-body p-0 bg-secondary-subtle overflow-auto" style="max-height: 90vh;">
-                            <div id="purchasePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 10pt; box-sizing: border-box; border: 1px solid #dee2e6;">
+                            <div id="purchasePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 9pt; box-sizing: border-box; border: 1px solid #dee2e6; color: #000 !important; background-color: #fff !important;">
                                 <!-- Company Header -->
-                                <div class="text-center border-bottom pb-3 mb-4">
-                                    <h2 class="fw-bold mb-1">${companyName.toUpperCase()}</h2>
-                                    <p class="mb-0 small">No.232/233, Nageshwara Road, Athipet, Chennai - 600058</p>
-                                    <p class="mb-0 small">Work Address: ${workAddress}</p>
-                                    <p class="mb-0 small fw-bold">GSTIN: ${gstin} | PAN: ${pan} | IEC: ${iec}</p>
+                                <div class="text-center border-bottom pb-3 mb-4" style="color: #000 !important;">
+                                    <h2 class="fw-bold mb-1" style="color: #000 !important;">${companyName.toUpperCase()}</h2>
+                                    <p class="mb-0 small" style="color: #000 !important;">No.232/233, Nageshwara Road, Athipet, Chennai - 600058</p>
+                                    <p class="mb-0 small" style="color: #000 !important;">Work Address: ${workAddress}</p>
+                                    <p class="mb-0 small fw-bold" style="color: #000 !important;">GSTIN: ${gstin} | PAN: ${pan} | IEC: ${iec}</p>
                                 </div>
 
                                 <!-- Purchase Title -->
-                                <h3 class="text-center fw-bold text-uppercase mb-4">PURCHASE</h3>
+                                <h3 class="text-center fw-bold text-uppercase mb-4" style="color: #000 !important;">PURCHASE</h3>
 
                                 <!-- Bill Details -->
-                                <div class="row mb-4">
+                                <div class="row mb-4" style="color: #000 !important;">
                                     <div class="col-7">
-                                        <h6 class="text-uppercase text-muted small fw-bold mb-2">BILL FROM:</h6>
-                                        <h5 class="fw-bold mb-1">${expense.vendorName || (expense.description ? expense.description.split(':')[0] : 'Unknown Vendor')}</h5>
-                                        ${expense.vendorAddress ? `<p class="mb-0 small">${expense.vendorAddress}</p>` : ''}
-                                        ${expense.supplierInvoiceNo ? `<p class="mb-0 small mt-2"><strong>Supplier Invoice No:</strong> ${expense.supplierInvoiceNo}</p>` : ''}
-                                        ${expense.vendorGSTIN ? `<p class="mb-0 small"><strong>GSTIN:</strong> ${expense.vendorGSTIN}</p>` : ''}
+                                        <h6 class="text-uppercase text-muted small fw-bold mb-2" style="color: #6c757d !important;">BILL FROM:</h6>
+                                        <h5 class="fw-bold mb-1" style="color: #000 !important;">${expense.vendorName || (expense.description ? expense.description.split(':')[0] : 'Unknown Vendor')}</h5>
+                                        ${expense.vendorAddress ? `<p class="mb-0 small" style="color: #000 !important;">${expense.vendorAddress}</p>` : ''}
+                                        ${expense.supplierInvoiceNo ? `<p class="mb-0 small mt-2" style="color: #000 !important;"><strong>Supplier Invoice No:</strong> ${expense.supplierInvoiceNo}</p>` : ''}
+                                        ${expense.vendorGSTIN ? `<p class="mb-0 small" style="color: #000 !important;"><strong>GSTIN:</strong> ${expense.vendorGSTIN}</p>` : ''}
                                     </div>
                                     <div class="col-5 text-end">
-                                        <table class="table table-sm table-borderless mb-0 w-auto ms-auto">
-                                            <tr><td class="text-muted pe-3 py-1">Purchase No:</td><td class="fw-bold py-1">${expense.id}</td></tr>
-                                            <tr><td class="text-muted pe-3 py-1">Date:</td><td class="fw-bold py-1">${DataManager.formatDateDisplay(expense.date)}</td></tr>
-                                            <tr><td class="text-muted pe-3 py-1">Status:</td><td class="fw-bold py-1"><span class="badge bg-${expense.status === 'Paid' ? 'success' : 'warning'}">${expense.status || 'Pending'}</span></td></tr>
-                                            ${expense.supplierInvoiceNo ? `<tr><td class="text-muted pe-3 py-1">Supplier Invoice No:</td><td class="fw-bold py-1">${expense.supplierInvoiceNo}</td></tr>` : ''}
+                                        <table class="table table-sm table-borderless mb-0 w-auto ms-auto" style="color: #000 !important;">
+                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Purchase No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.id}</td></tr>
+                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Date:</td><td class="fw-bold py-1" style="color: #000 !important;">${DataManager.formatDateDisplay(expense.date)}</td></tr>
+                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Status:</td><td class="fw-bold py-1" style="color: #000 !important;"><span class="badge bg-${expense.status === 'Paid' ? 'success' : 'warning'}">${expense.status || 'Pending'}</span></td></tr>
+                                            ${expense.supplierInvoiceNo ? `<tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Supplier Invoice No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.supplierInvoiceNo}</td></tr>` : ''}
                                         </table>
                                     </div>
                                 </div>
 
                                 <!-- Items Table -->
-                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%;">
-                                    <thead style="background-color: #eee;" class="text-dark">
-                                        <tr class="text-center align-middle extra-small fw-bold">
-                                            <th style="width: 3%">#</th>
-                                            <th style="width: 16%">DESCRIPTION</th>
-                                            <th style="width: 8%">HSN</th>
-                                            <th style="width: 5%">QTY</th>
-                                            <th style="width: 5%">UNIT</th>
-                                            <th style="width: 10%">RATE</th>
-                                            <th style="width: 5%">DISC</th>
-                                            <th style="width: 7%">CGST%</th>
-                                            <th style="width: 9.5%">CGST AMT</th>
-                                            <th style="width: 7%">SGST%</th>
-                                            <th style="width: 9.5%">SGST AMT</th>
-                                            <th style="width: 15%">TOTAL</th>
+                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%; color: #000 !important; background-color: #fff !important;">
+                                    <thead style="background-color: #eee !important;" class="text-dark">
+                                        <tr class="text-center align-middle extra-small fw-bold" style="color: #000 !important; background-color: #eee !important; font-size: 8pt !important;">
+                                            <th style="width: 4%; color: #000 !important; background-color: #eee !important;">#</th>
+                                            <th style="width: 25%; color: #000 !important; background-color: #eee !important;">DESCRIPTION</th>
+                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">HSN</th>
+                                            <th style="width: 7%; color: #000 !important; background-color: #eee !important;">QTY</th>
+                                            <th style="width: 7%; color: #000 !important; background-color: #eee !important;">UNIT</th>
+                                            <th style="width: 12%; color: #000 !important; background-color: #eee !important;">RATE</th>
+                                            <th style="width: 8%; color: #000 !important; background-color: #eee !important;">DISC</th>
+                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">CGST%</th>
+                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">SGST%</th>
+                                            <th style="width: 10%; color: #000 !important; background-color: #eee !important;">TOTAL</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -4325,72 +4323,68 @@ const DeliveryUI = {
                                             const sAmt = (it.amount * sRate / 100);
                                             
                                             return `
-                                            <tr class="align-middle text-dark">
-                                                <td class="text-center extra-small">${idx + 1}</td>
-                                                <td>
-                                                    <div class="fw-bold extra-small">${it.name || it.description}</div>
+                                            <tr class="align-middle text-dark" style="color: #000 !important; background-color: #fff !important; font-size: 8pt !important;">
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${idx + 1}</td>
+                                                <td style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">
+                                                    <div class="fw-bold" style="color: #000 !important;">${it.name || it.description}</div>
                                                 </td>
-                                                <td class="text-center extra-small">${it.hsn || '-'}</td>
-                                                <td class="text-center extra-small">${it.quantity || 1}</td>
-                                                <td class="text-center extra-small">nos</td>
-                                                <td class="text-end extra-small">${(it.rate || 0).toFixed(2)}</td>
-                                                <td class="text-center extra-small">0%</td>
-                                                <td class="text-center extra-small">${cRate.toFixed(1)}%</td>
-                                                <td class="text-end extra-small">${cAmt.toFixed(2)}</td>
-                                                <td class="text-center extra-small">${sRate.toFixed(1)}%</td>
-                                                <td class="text-end extra-small">${sAmt.toFixed(2)}</td>
-                                                <td class="text-end fw-bold extra-small">${(it.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${it.hsn || '-'}</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${it.quantity || 1}</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">nos</td>
+                                                <td class="text-end" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${(it.rate || 0).toFixed(2)}</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">0%</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${cRate.toFixed(1)}%</td>
+                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${sRate.toFixed(1)}%</td>
+                                                <td class="text-end fw-bold" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${(it.amount || 0).toFixed(2)}</td>
                                             </tr>
                                             `;
                                         }).join('') : `
-                                            <tr class="align-middle text-dark">
-                                                <td class="text-center extra-small">1</td>
-                                                <td>
-                                                    <div class="fw-bold extra-small">${expense.description}</div>
+                                            <tr class="align-middle text-dark" style="color: #000 !important; background-color: #fff !important; font-size: 8pt !important;">
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">1</td>
+                                                <td style="color: #000 !important; border: 1px solid #000 !important;">
+                                                    <div class="fw-bold" style="color: #000 !important;">${expense.description}</div>
                                                 </td>
-                                                <td class="text-center extra-small">-</td>
-                                                <td class="text-center extra-small">1</td>
-                                                <td class="text-center extra-small">unit</td>
-                                                <td class="text-end extra-small">${(expense.amount || 0).toFixed(2)}</td>
-                                                <td class="text-center extra-small">0%</td>
-                                                <td class="text-center extra-small">0%</td>
-                                                <td class="text-end extra-small">0.00</td>
-                                                <td class="text-center extra-small">0%</td>
-                                                <td class="text-end extra-small">0.00</td>
-                                                <td class="text-end fw-bold extra-small">${(expense.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">-</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">1</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">unit</td>
+                                                <td class="text-end" style="color: #000 !important; border: 1px solid #000 !important;">${(expense.amount || 0).toFixed(2)}</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
+                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
+                                                <td class="text-end fw-bold" style="color: #000 !important; border: 1px solid #000 !important;">${(expense.amount || 0).toFixed(2)}</td>
                                             </tr>
                                         `}
                                     </tbody>
                                     <tfoot>
-                                        <tr>
-                                            <td colspan="11" class="text-end border-0 pt-3 fw-bold extra-small">Subtotal:</td>
-                                            <td class="text-end border-0 pt-3 fw-bold extra-small">₹${(expense.subtotal || expense.amount || 0).toFixed(2)}</td>
+                                        <tr style="color: #000 !important;">
+                                            <td colspan="9" class="text-end border-0 pt-3 fw-bold small" style="color: #000 !important;">Subtotal:</td>
+                                            <td class="text-end border-0 pt-3 fw-bold small" style="color: #000 !important;">₹${(expense.subtotal || expense.amount || 0).toFixed(2)}</td>
                                         </tr>
                                         ${(expense.cgst && expense.cgst > 0) ? `
-                                        <tr>
-                                            <td colspan="11" class="text-end border-0 py-1 extra-small">CGST Amt:</td>
-                                            <td class="text-end border-0 py-1 extra-small">₹${expense.cgst.toFixed(2)}</td>
+                                        <tr style="color: #000 !important;">
+                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">CGST Amt:</td>
+                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.cgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         ${(expense.sgst && expense.sgst > 0) ? `
-                                        <tr>
-                                            <td colspan="11" class="text-end border-0 py-1 extra-small">SGST Amt:</td>
-                                            <td class="text-end border-0 py-1 extra-small">₹${expense.sgst.toFixed(2)}</td>
+                                        <tr style="color: #000 !important;">
+                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">SGST Amt:</td>
+                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.sgst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
                                         ${(expense.igst && expense.igst > 0) ? `
-                                        <tr>
-                                            <td colspan="11" class="text-end border-0 py-1 extra-small">IGST Amt:</td>
-                                            <td class="text-end border-0 py-1 extra-small">₹${expense.igst.toFixed(2)}</td>
+                                        <tr style="color: #000 !important;">
+                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">IGST Amt:</td>
+                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.igst.toFixed(2)}</td>
                                         </tr>
                                         ` : ''}
-                                        <tr>
-                                            <td colspan="11" class="text-end border-0 py-1 extra-small">Total Tax:</td>
-                                            <td class="text-end border-0 py-1 extra-small">₹${((expense.cgst || 0) + (expense.sgst || 0) + (expense.igst || 0)).toFixed(2)}</td>
+                                        <tr style="color: #000 !important;">
+                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">Total Tax:</td>
+                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${((expense.cgst || 0) + (expense.sgst || 0) + (expense.igst || 0)).toFixed(2)}</td>
                                         </tr>
-                                         <tr style="border: 2px solid #000; background-color: #f8f9fa !important;">
-                                              <td colspan="11" class="text-end text-uppercase py-3 extra-small fw-bold" style="color: #000 !important;">Total Amount</td>
-                                              <td class="text-end py-3 extra-small fs-6 fw-bold" style="color: #000 !important; padding-right: 15px !important;">₹${(expense.amount || 0).toFixed(2)}</td>
+                                         <tr style="border: 2px solid #000; background-color: #f8f9fa !important; color: #000 !important;">
+                                              <td colspan="9" class="text-end text-uppercase py-3 fw-bold" style="color: #000 !important; background-color: #f8f9fa !important;">Total Amount</td>
+                                              <td class="text-end py-3 fs-6 fw-bold" style="color: #000 !important; background-color: #f8f9fa !important; padding-right: 15px !important;">₹${(expense.amount || 0).toFixed(2)}</td>
                                          </tr>
                                     </tfoot>
                                 </table>

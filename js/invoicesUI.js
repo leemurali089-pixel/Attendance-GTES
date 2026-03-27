@@ -6,6 +6,9 @@
 const InvoicesUI = {
     currentMode: 'gst', // 'gst' or 'non-gst'
 
+    currentStatusFilter: 'all',
+    searchTimeout: null,
+
     async init() {
         console.log('Invoices UI Initialized');
         if (App.currentView === 'invoices') {
@@ -77,57 +80,97 @@ const InvoicesUI = {
         const customers = [...new Set(invoices.map(i => i.customerName).filter(Boolean))].sort();
         const customerOptions = customers.map(c => `<option value="${c}">${c}</option>`).join('');
 
+        // Add summary cards for financial overview
+        const summaryHtml = `
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary shadow-sm">
+                        <div class="card-body p-3 text-center">
+                            <div class="text-white-50 fw-bold small text-uppercase mb-1">Total Pending Amount</div>
+                            <h3 class="mb-0 text-danger" id="summaryPendingAmount">₹0.00</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary shadow-sm">
+                        <div class="card-body p-3 text-center">
+                            <div class="text-white-50 fw-bold small text-uppercase mb-1">Total Pending Bills</div>
+                            <h3 class="mb-0 text-warning" id="summaryPendingBills">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary shadow-sm">
+                        <div class="card-body p-3 text-center">
+                            <div class="text-white-50 fw-bold small text-uppercase mb-1">Parties with Outstanding</div>
+                            <h3 class="mb-0 text-info" id="summaryPendingParties">0</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
         view.innerHTML = `
             <div class="container-fluid">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi ${titleIcon} me-2"></i> ${titleText}</h2>
-                    <div>
-                        <button class="btn btn-primary btn-sm me-2" onclick="InvoicesUI.showCreateModal('${isGST ? 'sales-gst' : 'sales-non-gst'}')">
-                            <i class="bi bi-plus-lg"></i> New ${isGST ? 'GST' : 'Plain'} Invoice
+                    <h2><i class="bi bi-file-earmark-text text-info me-2"></i> ${titleText}</h2>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-info" onclick="InvoicesUI.showCreateModal('${isGST ? 'sales-gst' : 'sales-non-gst'}')">
+                            <i class="bi bi-plus-circle me-1"></i> Create New
                         </button>
-                        <button class="btn btn-outline-light btn-sm" onclick="AccountingUI.renderDashboard()">
-                            <i class="bi bi-arrow-left"></i> Back to Accounting
+                        <button class="btn btn-outline-light" onclick="App.showView('accounting')">
+                            <i class="bi bi-arrow-left"></i> Back
                         </button>
                     </div>
                 </div>
                 
+                ${summaryHtml}
+
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
-                         <div class="row g-2 mb-3">
+                        <div class="row g-2 mb-3">
                             <div class="col-md-4">
-                                <label class="form-label small text-muted">Financial Year</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterYear" onchange="InvoicesUI.filterInvoices()">
+                                <label class="form-label small text-white-50">Financial Year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterYear" onchange="InvoicesUI.updateTable()">
                                     <option value="">All Year</option>
                                     ${yearOptions}
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label small text-muted">Customer</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterCustomer" onchange="InvoicesUI.filterInvoices()">
+                                <label class="form-label small text-white-50">Customer</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterCustomer" onchange="InvoicesUI.updateTable()">
                                     <option value="">All Customers</option>
                                     ${customerOptions}
                                 </select>
                             </div>
-                            <div class="col-md-4">
-                                <label class="form-label small text-muted">Status</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterStatus" onchange="InvoicesUI.filterInvoices()">
-                                    <option value="">All Status</option>
-                                    <option value="paid">Paid</option>
-                                    <option value="pending">Pending</option>
-                                    <option value="cancelled">Cancelled</option>
-                                </select>
+                            <div class="col-md-4 text-end">
+                                <label class="form-label small text-white-50 d-block">Filter by Status</label>
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="statusFilter" id="statusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
+                                    <label class="btn btn-outline-secondary btn-sm" for="statusAll">All</label>
+                                    
+                                    <input type="radio" class="btn-check" name="statusFilter" id="statusPending" value="pending" ${this.currentStatusFilter === 'pending' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('pending')">
+                                    <label class="btn btn-outline-danger btn-sm" for="statusPending">Pending</label>
+
+                                    <input type="radio" class="btn-check" name="statusFilter" id="statusPartial" value="partial" ${this.currentStatusFilter === 'partial' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('partial')">
+                                    <label class="btn btn-outline-warning btn-sm" for="statusPartial">Partial</label>
+                                    
+                                    <input type="radio" class="btn-check" name="statusFilter" id="statusPaid" value="paid" ${this.currentStatusFilter === 'paid' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('paid')">
+                                    <label class="btn btn-outline-success btn-sm" for="statusPaid">Paid</label>
+                                </div>
                             </div>
                         </div>
-                         <div class="input-group">
+                        <div class="input-group">
                             <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control bg-dark text-light border-secondary" id="invoiceSearch" placeholder="Search GST invoices by number or customer..." onkeyup="InvoicesUI.filterInvoices()">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="invoiceSearch" 
+                                placeholder="Search invoices by number, customer or items..." onkeyup="InvoicesUI.debouncedFilter()">
                         </div>
                     </div>
                 </div>
 
                 <div class="table-responsive" id="invoicesTableContainer">
                     <div class="text-center py-5">
-                        <div class="spinner-border text-primary" role="status"></div>
+                        <div class="spinner-border text-info" role="status"></div>
                     </div>
                 </div>
             </div>
@@ -136,73 +179,112 @@ const InvoicesUI = {
         this.updateTable();
     },
 
+    setStatusFilter(val) {
+        this.currentStatusFilter = val;
+        this.updateTable();
+        this.updatePurchasesTable();
+    },
+
+    debouncedFilter() {
+        if (this.searchTimeout) clearTimeout(this.searchTimeout);
+        this.searchTimeout = setTimeout(() => {
+            if (document.getElementById('invoiceSearch')) this.updateTable();
+            if (document.getElementById('purchaseSearch')) this.updatePurchasesTable();
+        }, 300);
+    },
+
     updateTable() {
-        const isGST = this.currentMode === 'gst';
-        // Fetch and filter invoices based on current mode
-        const allInvoices = DataManager.getData('invoices') || [];
-        const invoices = allInvoices.filter(i => isGST ? (i.type === 'gst-invoice' || i.type === 'with-bill' || !i.type) : (i.type === 'non-gst-invoice' || i.type === 'without-bill'));
-        // Sort by invoice number desc
-        invoices.sort((a, b) => {
-            const numA = parseInt((a.invoiceNo || '').replace(/\D/g, '')) || 0;
-            const numB = parseInt((b.invoiceNo || '').replace(/\D/g, '')) || 0;
-            return numB - numA;
+        const type = this.currentMode; // Use currentMode to determine GST/Non-GST
+        const isGST = type === 'gst'; 
+        
+        // High accuracy: data with balance calculation from InvoiceManager
+        let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
+        const typeFilter = isGST ? 'with-bill' : 'without-bill';
+        invoices = invoices.filter(inv => inv.type === typeFilter);
+
+        const yearFilter = document.getElementById('filterYear')?.value;
+        const customerFilter = document.getElementById('filterCustomer')?.value;
+        const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
+        const statusFilter = this.currentStatusFilter;
+
+        const filtered = invoices.filter(inv => {
+            const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
+            const customerMatch = !customerFilter || inv.customerName === customerFilter;
+            const statusMatch = statusFilter === 'all' || 
+                             (statusFilter === 'paid' && inv.isPaid) ||
+                             (statusFilter === 'pending' && !inv.isPaid && !inv.isPartial) ||
+                             (statusFilter === 'partial' && inv.isPartial);
+            const searchMatch = !query || 
+                               (inv.invoiceNo || '').toLowerCase().includes(query) || 
+                               (inv.customerName || '').toLowerCase().includes(query) ||
+                               (inv.items || []).some(item => item.name.toLowerCase().includes(query));
+
+            return yearMatch && customerMatch && statusMatch && searchMatch;
         });
+
+        // Summary Calculations (Based on filtered data)
+        const totalPending = filtered.reduce((sum, inv) => sum + (inv.balance || 0), 0);
+        const pendingCount = filtered.filter(inv => (inv.balance || 0) > 0.05).length;
+        const outstandingParties = new Set(filtered.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId)).size;
+
+        // Update Summary Cards if visible
+        const updateEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        updateEl('summaryPendingAmount', `₹${totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+        updateEl('summaryPendingBills', pendingCount);
+        updateEl('summaryPendingParties', outstandingParties);
 
         const container = document.getElementById('invoicesTableContainer');
         if (!container) return;
 
-        if (invoices.length === 0) {
-            container.innerHTML = `
-                <div class="text-center py-5 text-muted">
-                    <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-                    No invoices found. Sync with Book Keeper or create a new GST Invoice.
-                </div>
-            `;
+        if (filtered.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted">No invoices found matching current filters.</div>`;
             return;
         }
 
+        // Sort by date desc
+        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+
         const html = `
-            <table class="table table-dark table-hover align-middle">
+            <table class="table table-dark table-hover align-middle border-secondary">
                 <thead>
                     <tr>
-                         <th>Date</th>
+                        <th>Date</th>
                         <th>Invoice #</th>
                         <th>Customer</th>
-                        <th class="text-end">Amount</th>
+                        <th class="text-end">Total Amount</th>
+                        <th class="text-end">Balance</th>
                         <th class="text-center">Status</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${invoices.map(inv => {
-            const searchStr = `${inv.invoiceNo || inv.id} ${inv.customerName || ''}`.toLowerCase();
-            const yearStr = DataManager.getFinancialYear(inv.date);
-            const statusStr = (inv.status || 'pending').toLowerCase();
+                    ${filtered.map(inv => {
+            const statusBadge = inv.isPaid ? 
+                '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
+                (inv.isPartial ? 
+                    '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>' : 
+                    '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
+                    
             return `
-                        <tr data-search="${searchStr}" 
-                            data-year="${yearStr}" 
-                            data-customer="${(inv.customerName || '').replace(/"/g, '&quot;')}"
-                            data-status="${statusStr}">
-                            <td>${inv.date}</td>
-                            <td class="fw-bold text-primary">${inv.invoiceNo || inv.id}</td>
-                            <td>${inv.customerName || 'Unknown'}</td>
-                            <td class="text-end">₹${parseFloat(inv.total).toFixed(2)}</td>
-                            <td class="text-center">
-                                <span class="badge bg-${inv.status === 'paid' ? 'success' : 'warning'}">${inv.status || 'Pending'}</span>
-                            </td>
+                        <tr>
+                            <td>${DataManager.formatDateDisplay(inv.date)}</td>
+                            <td class="fw-bold text-info">${inv.invoiceNo}</td>
+                            <td>${inv.customerName}</td>
+                            <td class="text-end">₹${inv.total.toFixed(2)}</td>
+                            <td class="text-end fw-bold ${inv.balance > 0 ? 'text-danger' : 'text-success'}">₹${inv.balance.toFixed(2)}</td>
+                            <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-warning" onclick="InvoicesUI.showEditModal('${inv.id}')" title="Edit Invoice">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-info ms-1" onclick="InvoicesUI.previewInvoice('${inv.id}')" title="View Invoice">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-info ms-1" onclick="InvoicesUI.generatePDF('${inv.id}')" title="Download PDF">
-                                    <i class="bi bi-file-earmark-pdf"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-danger ms-1" onclick="InvoicesUI.deleteInvoice('${inv.id}')" title="Delete">
-                                    <i class="bi bi-trash"></i>
-                                </button>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewInvoice('${inv.id}')" title="View/Print">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-warning" onclick="InvoicesUI.showEditModal('${inv.id}')" title="Edit">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="InvoicesUI.deleteInvoice('${inv.id}')" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     `;
@@ -211,62 +293,15 @@ const InvoicesUI = {
             </table>
         `;
         container.innerHTML = html;
-
-        // Trigger filter in case values are already selected
-        this.performFilter();
-    },
-
-    debounce(func, wait) {
-        let timeout;
-        return function (...args) {
-            const context = this;
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(context, args), wait);
-        };
-    },
-
-
-    setupSearch() {
-        const input = document.getElementById('invoiceSearch');
-        if (input) {
-            input.onkeyup = this.debounce(() => {
-                this.performFilter();
-            }, 300);
-        }
-    },
-
-    performFilter() {
-        const query = document.getElementById('invoiceSearch').value.toLowerCase();
-        const yearFilter = document.getElementById('filterYear') ? document.getElementById('filterYear').value : '';
-        const customerFilter = document.getElementById('filterCustomer') ? document.getElementById('filterCustomer').value : '';
-        const statusFilter = document.getElementById('filterStatus') ? document.getElementById('filterStatus').value : '';
-
-        const rows = document.querySelectorAll('#invoicesTableContainer tbody tr');
-
-        // Use requestAnimationFrame for smoother UI during heavy filtering
-        requestAnimationFrame(() => {
-            rows.forEach(row => {
-                const searchMatch = !query || (row.dataset.search || '').includes(query);
-                const yearMatch = !yearFilter || (row.dataset.year === yearFilter);
-                const customerMatch = !customerFilter || (row.dataset.customer === customerFilter);
-                const statusMatch = !statusFilter || (row.dataset.status === statusFilter);
-
-                if (searchMatch && yearMatch && customerMatch && statusMatch) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-        });
     },
 
     // Legacy method redirection for existing onclicks
-    filterInvoices() {
-        if (!this.debouncedFilter) {
-            this.debouncedFilter = this.debounce(() => this.performFilter(), 300);
-        }
-        this.debouncedFilter();
-    },
+    // filterInvoices() {
+    //     if (!this.debouncedFilter) {
+    //         this.debouncedFilter = this.debounce(() => this.performFilter(), 300);
+    //     }
+    //     this.debouncedFilter();
+    // },
 
     showCreateModal(type = 'sales-gst') {
         const isSales = !type.includes('purchase');
@@ -311,6 +346,8 @@ const InvoicesUI = {
 
         // Generate next Invoice/Voucher number
         const nextNo = InvoiceManager ? InvoiceManager.generateInvoiceNumber(isGST ? 'with-bill' : 'without-bill') : '00001';
+        const dcLabel = isSales ? 'Customer DC / Ref No' : 'Supplier Bill No / Ref';
+        
         const modalHtml = `
             <div class="modal fade" id="createInvoiceModal" tabindex="-1">
                 <style>
@@ -388,8 +425,8 @@ const InvoicesUI = {
                                         <input type="text" class="bk-form-control w-100 highlight-input" name="invoiceNo" value="${nextNo}" required>
                                     </div>
                                     <div class="col-md-3">
-                                        <div class="bk-form-label">Customer DC / Ref No</div>
-                                        <input type="text" class="bk-form-control w-100" name="poNumber" placeholder="e.g. DC-1234">
+                                        <div class="bk-form-label">${dcLabel}</div>
+                                        <input type="text" class="bk-form-control w-100" name="poNumber" placeholder="No.">
                                     </div>
                                     <div class="col-md-3">
                                         <div class="bk-form-label">Date</div>
@@ -732,7 +769,7 @@ const InvoicesUI = {
         
         // Correctly read the type input which contains the actual invoice type
         const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-        const isGST = typeInput ? typeInput.value.includes('gst-invoice') : false;
+        const isGST = typeInput ? typeInput.value.includes('gst') : false;
         
         row.innerHTML = `
             <td class="ps-3 py-2">
@@ -865,7 +902,7 @@ const InvoicesUI = {
             const row = input.closest('tr');
             
             const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-            const isGST = typeInput ? typeInput.value.includes('gst-invoice') : false;
+            const isGST = typeInput ? typeInput.value.includes('gst') : false;
 
             row.querySelector('[name="rate[]"]').value = option.dataset.rate || 0;
             row.querySelector('[name="unit[]"]').value = option.dataset.unit || 'pcs';
@@ -902,7 +939,7 @@ const InvoicesUI = {
         const rows = document.querySelectorAll('#invoiceItemsBody tr');
         
         const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-        const isGST = typeInput ? typeInput.value.includes('gst-invoice') : false;
+        const isGST = typeInput ? typeInput.value.includes('gst') : false;
         
         let subTotal = 0;
         let taxTotal = 0;
@@ -1345,7 +1382,7 @@ const InvoicesUI = {
                             <tr><td style="width: 40%;"><strong>Invoice No</strong></td><td>: ${invoice.invoiceNo}</td></tr>
                             <tr><td><strong>Date</strong></td><td>: ${invoice.date}</td></tr>
                             <tr><td><strong>Due Date</strong></td><td>: ${invoice.date}</td></tr>
-                            <tr><td><strong>Purchase Order No</strong></td><td>: ${invoice.poNumber || '-'}</td></tr>
+                            <tr><td><strong>Customer DC / Ref No</strong></td><td>: ${invoice.poNumber || '-'}</td></tr>
                         </table>
                     </td>
                     <td style="width: 50%; border: 1px solid #000; padding: 5px;">
@@ -1514,38 +1551,75 @@ const InvoicesUI = {
                          <button class="btn btn-outline-light btn-sm" onclick="App.showView('accounting')">
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
-                    </div>
+                     </div>
                 </div>
                 
+                <!-- Financial Summary Cards -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary shadow-sm">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-white-50 fw-bold small text-uppercase mb-1">Total Outstanding</div>
+                                <h3 class="mb-0 text-danger" id="summaryPurchasePendingAmount">₹0.00</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary shadow-sm">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-white-50 fw-bold small text-uppercase mb-1">Pending Bills</div>
+                                <h3 class="mb-0 text-warning" id="summaryPurchasePendingBills">0</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary shadow-sm">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-white-50 fw-bold small text-uppercase mb-1">Suppliers with O/S</div>
+                                <h3 class="mb-0 text-info" id="summaryPurchasePendingParties">0</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                          <div class="row g-2 mb-3">
-                            <div class="col-md-4">
-                                <label class="form-label small text-muted">Financial Year</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseYear" onchange="InvoicesUI.filterPurchases()">
+                            <div class="col-md-3">
+                                <label class="form-label small text-white-50">Financial Year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseYear" onchange="InvoicesUI.updatePurchasesTable()">
                                     <option value="">All Year</option>
                                     ${yearOptions}
                                 </select>
                             </div>
-                            <div class="col-md-4">
-                                <label class="form-label small text-muted">Vendor</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseVendor" onchange="InvoicesUI.filterPurchases()">
+                            <div class="col-md-3">
+                                <label class="form-label small text-white-50">Vendor</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseVendor" onchange="InvoicesUI.updatePurchasesTable()">
                                     <option value="">All Vendors</option>
                                     ${vendorOptions}
                                 </select>
                             </div>
-                            <div class="col-md-4">
-                                <label class="form-label small text-muted">Status</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseStatus" onchange="InvoicesUI.filterPurchases()">
-                                    <option value="">All Status</option>
-                                    <option value="paid">Paid</option>
-                                    <option value="pending">Pending</option>
-                                </select>
+                            <div class="col-md-6 text-end">
+                                <label class="form-label small text-white-50 d-block">Status</label>
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
+                                    <label class="btn btn-outline-secondary btn-sm" for="purStatusAll">All</label>
+                                    
+                                    <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusPending" value="pending" ${this.currentStatusFilter === 'pending' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('pending')">
+                                    <label class="btn btn-outline-danger btn-sm" for="purStatusPending">Pending</label>
+
+                                    <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusPartial" value="partial" ${this.currentStatusFilter === 'partial' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('partial')">
+                                    <label class="btn btn-outline-warning btn-sm" for="purStatusPartial">Partial</label>
+                                    
+                                    <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusPaid" value="paid" ${this.currentStatusFilter === 'paid' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('paid')">
+                                    <label class="btn btn-outline-success btn-sm" for="purStatusPaid">Paid</label>
+                                </div>
                             </div>
                         </div>
                          <div class="input-group">
                             <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control bg-dark text-light border-secondary" id="purchaseSearch" placeholder="Search bills by number, vendor or items..." onkeyup="InvoicesUI.filterPurchases()">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="purchaseSearch" 
+                                placeholder="Search bills by number, vendor or items..." onkeyup="InvoicesUI.debouncedFilter()">
                         </div>
                     </div>
                 </div>
@@ -1562,76 +1636,94 @@ const InvoicesUI = {
     },
 
     updatePurchasesTable() {
-        const purchases = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
-        // Sort by bill number desc
-        purchases.sort((a, b) => {
-            const numA = parseInt((a.billNo || '').replace(/\D/g, '')) || 0;
-            const numB = parseInt((b.billNo || '').replace(/\D/g, '')) || 0;
-            return numB - numA;
+        const purchasesRaw = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap() : new Map();
+        
+        // Enhance with balance and status
+        const purchases = purchasesRaw.map(p => {
+            const balance = (typeof VoucherManager !== 'undefined') ? 
+                VoucherManager.getDocumentBalance(p.id, parseFloat(p.amount || 0), voucherMap) : 
+                parseFloat(p.amount || 0);
+            return {
+                ...p,
+                balance,
+                isPaid: balance <= 0.05,
+                isPartial: balance > 0.05 && balance < (parseFloat(p.amount || 0) - 0.05)
+            };
         });
+
+        // Filter UI states
+        const yearFilter = document.getElementById('filterPurchaseYear')?.value;
+        const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
+        const query = document.getElementById('purchaseSearch')?.value?.toLowerCase();
+        const statusFilter = this.currentStatusFilter;
+
+        const filtered = purchases.filter(p => {
+            const yearStr = DataManager.getFinancialYear(p.date);
+            const yearMatch = !yearFilter || yearStr === yearFilter;
+            const vendorMatch = !vendorFilter || p.vendor === vendorFilter;
+            const statusMatch = statusFilter === 'all' || 
+                             (statusFilter === 'paid' && p.isPaid) ||
+                             (statusFilter === 'pending' && !p.isPaid && !p.isPartial) ||
+                             (statusFilter === 'partial' && p.isPartial);
+            const searchMatch = !query || 
+                               (p.billNo || '').toLowerCase().includes(query) || 
+                               (p.vendor || '').toLowerCase().includes(query) ||
+                               (p.description || '').toLowerCase().includes(query);
+
+            return yearMatch && vendorMatch && statusMatch && searchMatch;
+        });
+
+        // Update Summary Cards
+        const totalPending = filtered.reduce((sum, p) => sum + p.balance, 0);
+        const pendingCount = filtered.filter(p => p.balance > 0.05).length;
+        const outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
+
+        const updateEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        updateEl('summaryPurchasePendingAmount', `₹${totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+        updateEl('summaryPurchasePendingBills', pendingCount);
+        updateEl('summaryPurchasePendingParties', outstandingParties);
 
         const container = document.getElementById('purchasesTableContainer');
         if (!container) return;
 
-        if (purchases.length === 0) {
-            container.innerHTML = `
-                <div class="text-center py-5 text-muted">
-                    <i class="bi bi-cart-x fs-1 d-block mb-3"></i>
-                    No purchase bills found. Sync with Book Keeper to import.
-                </div>
-            `;
+        if (filtered.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted">No purchase records found matching filters.</div>`;
             return;
         }
 
+        // Sort by date desc
+        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+
         const html = `
-            <table class="table table-dark table-hover align-middle">
+            <table class="table table-dark table-hover align-middle border-secondary">
                 <thead>
                     <tr>
                         <th>Date</th>
                         <th>Bill #</th>
                         <th>Vendor</th>
-                        <th>Description</th>
-                        <th class="text-end">Amount</th>
+                        <th class="text-end">Total Amount</th>
+                        <th class="text-end">Balance</th>
                         <th class="text-center">Status</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${purchases.map(p => {
-            const searchStr = `${p.billNo || ''} ${p.vendor || ''} ${p.description || ''}`.toLowerCase();
-            const yearStr = DataManager.getFinancialYear(p.date);
-
-            // Reconcile status dynamically for UI accuracy
-            let currentStatus = (p.status || 'pending').toLowerCase();
-            if (currentStatus !== 'paid') {
-                const allVouchers = DataManager.getData('vouchers') || [];
-                const totalPaid = allVouchers.filter(v =>
-                    v.type === 'payment' &&
-                    v.linkedInvoices &&
-                    v.linkedInvoices.some(link => link.id === p.id || link === p.id)
-                ).reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0);
-
-                if (totalPaid >= parseFloat(p.amount) && parseFloat(p.amount) > 0) {
-                    currentStatus = 'paid';
-                }
-            }
-
-            const badgeClass = currentStatus === 'paid' ? 'bg-success' : 'bg-warning';
-            const statusLabel = currentStatus === 'paid' ? 'Paid' : 'Pending';
+                    ${filtered.map(p => {
+            const statusBadge = p.isPaid ? 
+                '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
+                (p.isPartial ? 
+                    '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>' : 
+                    '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
 
             return `
-                        <tr data-search="${searchStr}" 
-                            data-year="${yearStr}" 
-                            data-vendor="${(p.vendor || '').replace(/"/g, '&quot;')}"
-                            data-status="${currentStatus}">
-                            <td>${p.date}</td>
+                        <tr>
+                            <td>${DataManager.formatDateDisplay(p.date)}</td>
                             <td class="fw-bold text-warning">${p.billNo || 'N/A'}</td>
                             <td>${p.vendor || 'Unknown'}</td>
-                            <td class="small text-muted text-truncate" style="max-width: 200px;">${p.description || ''}</td>
                             <td class="text-end">₹${parseFloat(p.amount).toFixed(2)}</td>
-                            <td class="text-center">
-                                <span class="badge ${badgeClass}">${statusLabel}</span>
-                            </td>
+                            <td class="text-end fw-bold ${p.balance > 0 ? 'text-danger' : 'text-success'}">₹${p.balance.toFixed(2)}</td>
+                            <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${p.id}')" title="View Purchase">
                                     <i class="bi bi-eye"></i>
@@ -1644,7 +1736,6 @@ const InvoicesUI = {
             </table>
         `;
         container.innerHTML = html;
-        this.filterPurchases();
     },
 
     filterPurchases() {
@@ -1753,12 +1844,21 @@ const InvoicesUI = {
                 <div style="width: 40%; text-align: right; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
                     <div style="margin-bottom: 6px;"><strong>Purchase No:</strong> <span style="font-weight: bold; min-width: 80px; display: inline-block;">${p.billNo}</span></div>
                     <div style="margin-bottom: 6px;"><strong>Date:</strong> <span style="min-width: 80px; display: inline-block;">${p.date}</span></div>
-                    <div style="margin-bottom: 6px;"><strong>Status:</strong> <span style="min-width: 80px; display: inline-block; color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'};">${p.status?.toUpperCase()}</span></div>
-                    <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
-                        <strong style="color: #666;">Supplier Invoice No:</strong><br>
-                        <span style="font-size: 15px; color: #2c3e50; font-weight: bold;">${p.supplierBillNo || '-'}</span>
+                    <div style="margin-bottom: 6px;"><strong>Status:</strong> <span style="min-width: 80px; display: inline-block; color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'}; font-weight: bold;">${p.status?.toUpperCase()}</span></div>
+                    
+                    <div style="margin-top: 10px; padding-top: 5px; border-top: 1px solid #eee; text-align: right;">
+                        <div style="font-size: 11px; color: #666;">Supplier Invoice No:</div>
+                        <div style="font-size: 14px; color: #2c3e50; font-weight: bold;">${p.supplierBillNo || '-'}</div>
                     </div>
+
+                    ${p.poNumber ? `
+                    <div style="margin-top: 5px; text-align: right;">
+                        <div style="font-size: 11px; color: #666;">Ref No / DC No:</div>
+                        <div style="font-size: 14px; color: #2c3e50; font-weight: bold;">${p.poNumber}</div>
+                    </div>
+                    ` : ''}
                 </div>
+v>
             </div>
 
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #ddd;">

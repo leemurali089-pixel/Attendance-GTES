@@ -111,7 +111,7 @@ const VouchersUI = {
                         </div>
                          <div class="input-group">
                             <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control bg-dark text-light border-secondary" id="voucherSearch" placeholder="Search vouchers by number, party, or remarks..." onkeyup="VouchersUI.filterVouchers()">
+                             <input type="text" class="form-control bg-dark text-light border-secondary" id="voucherSearch" placeholder="Search vouchers by number, party, or remarks..." oninput="VouchersUI.filterVouchersDebounced()">
                         </div>
                     </div>
                 </div>
@@ -131,23 +131,18 @@ const VouchersUI = {
         // Fetch vouchers
         let vouchers = DataManager.getData('vouchers') || [];
         
-        // If mode is purchase, we also want to show expenses/purchases
+        // Refactored logic based on user feedback:
+        // Purchase Vouchers Mode: Show Payments (Out)
+        // GST Vouchers Mode: Show Receipts (In)
+        
         if (this.currentMode === 'purchase') {
-            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
-            // Filter only purchase category expenses
-            const purchases = expenses.filter(e => 
-                (e.category || '').toLowerCase().includes('purchase')
-            ).map(e => ({
-                ...e,
-                id: e.id || e.billNo || e.vch_no || 'PUR-BK',
-                customerName: e.vendor || e.customerName || 'N/A',
-                isPurchase: true,
-                type: 'purchase'
-            }));
-            
-            // For purchase mode, we specifically want to see these
-            vouchers = purchases;
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'payment');
+        } else if (this.currentMode === 'gst') {
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst !== false);
+        } else if (this.currentMode === 'non-gst') {
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst === false);
         }
+
         // Sort by voucher number desc
         vouchers.sort((a, b) => {
             const numA = parseInt((a.id || '').replace(/\D/g, '')) || 0;
@@ -534,6 +529,14 @@ const VouchersUI = {
         if (tx.converted || alreadyVouchered) {
             actionHtml = `<span class="badge bg-success p-2"><i class="bi bi-check-circle-fill me-1"></i> ${alreadyVouchered ? 'Already Exists' : 'Imported'}</span>`;
             tx.converted = true;
+        } else if (tx.isReady) {
+            actionHtml = `
+                <div class="d-flex flex-column gap-1">
+                    <span class="badge bg-warning p-2 text-dark mb-1"><i class="bi bi-clock-history me-1"></i> Ready to Import</span>
+                    <button class="btn btn-sm btn-outline-info" onclick="VouchersUI.convertBankTx(${index})">
+                        <i class="bi bi-pencil"></i> Edit Details
+                    </button>
+                </div>`;
         } else {
             actionHtml = `
                 <div class="d-flex gap-1 justify-content-center flex-wrap">
@@ -558,7 +561,7 @@ const VouchersUI = {
         }
 
         return `
-            <tr class="${tx.converted ? 'table-active opacity-50' : ''}" data-index="${index}">
+            <tr class="${tx.converted ? 'table-active opacity-50' : (tx.isReady ? 'table-warning bg-opacity-10' : '')}" data-index="${index}">
                 <td class="text-center align-middle">
                     <input type="checkbox" class="form-check-input bs-row-checkbox" value="${index}" onchange="VouchersUI.updateBankSelectionStatus()">
                 </td>
@@ -641,6 +644,9 @@ const VouchersUI = {
                             <span class="text-muted small me-auto"><i class="bi bi-info-circle me-1"></i> New vouchers created here can be exported to Excel.</span>
                             <button type="button" class="btn btn-outline-danger me-2" id="btnDeleteSelectedBankTx" onclick="VouchersUI.deleteSelectedBankRows()" disabled>
                                 <i class="bi bi-trash"></i> Delete Selected
+                            </button>
+                            <button type="button" class="btn btn-primary me-2" id="btnImportSelectedBankTx" onclick="VouchersUI.importSelectedBankTransactions()" disabled>
+                                <i class="bi bi-cloud-arrow-down"></i> Import Saved
                             </button>
                             <button type="button" class="btn btn-outline-success" onclick="VouchersUI.exportVouchersToExcel()">
                                 <i class="bi bi-file-earmark-excel"></i> Export Vouchers as Excel
@@ -745,8 +751,27 @@ const VouchersUI = {
         const counter = document.getElementById('bsRowCount');
         if (counter) counter.textContent = `${visible} of ${rows.length} transactions`;
 
-        // Sync Select All checkbox with visible rows
+        // Sync Select All checkbox and Import button
         this.updateBankSelectionStatus();
+    },
+
+    updateBankSelectionStatus() {
+        const checkboxes = document.querySelectorAll('.bs-row-checkbox:checked');
+        const btnDelete = document.getElementById('btnDeleteSelectedBankTx');
+        const btnImport = document.getElementById('btnImportSelectedBankTx');
+        
+        if (btnDelete) btnDelete.disabled = checkboxes.length === 0;
+        
+        if (btnImport) {
+            // Only enable import if at least one selected row is "Ready"
+            let anyReady = false;
+            checkboxes.forEach(cb => {
+                const idx = parseInt(cb.value);
+                const tx = this.currentBankTransactions[idx];
+                if (tx && tx.isReady && !tx.converted) anyReady = true;
+            });
+            btnImport.disabled = !anyReady;
+        }
     },
 
     convertBankTx(index) {
@@ -949,7 +974,13 @@ const VouchersUI = {
                 dropdown.classList.remove('d-none');
             };
 
-            searchInput.addEventListener('input', (e) => renderDropdown(e.target.value));
+            let dropdownTimeout = null;
+            searchInput.addEventListener('input', (e) => {
+                if (dropdownTimeout) clearTimeout(dropdownTimeout);
+                dropdownTimeout = setTimeout(() => {
+                    renderDropdown(e.target.value);
+                }, 150);
+            });
             searchInput.addEventListener('focus', () => renderDropdown(searchInput.value));
 
             // Keyboard navigation
@@ -1511,8 +1542,17 @@ const VouchersUI = {
             const expenses = DataManager.getData('gtes_expenses') || []; 
             const purchases = DataManager.getData('purchases') || []; 
             
-            const allPurchaseLikeDocs = [...expenses, ...purchases];
-            pendingDocs = allPurchaseLikeDocs.filter(doc =>
+            // Deduplicate by ID to prevent same bill appearing twice
+            // Use same priority as line 1554 for the key to ensure consistency
+            const uniqueDocsMap = new Map();
+            [...expenses, ...purchases].forEach(doc => {
+                const key = (doc.invoiceNo || doc.billNo || doc.vch_no || doc.id || '').toString();
+                if (key && !uniqueDocsMap.has(key)) {
+                    uniqueDocsMap.set(key, doc);
+                }
+            });
+            
+            pendingDocs = Array.from(uniqueDocsMap.values()).filter(doc =>
                 (doc.vendor === name || doc.customerName === name || doc.partyName === name || doc.supplier === name) && 
                 (doc.status !== 'paid' && doc.status !== 'cancelled')
             );
@@ -1784,14 +1824,33 @@ const VouchersUI = {
         };
 
         try {
-            const newVoucher = await VoucherManager.createVoucher(data);
+            // If it's a bank import mapping, we only SAVE it to the session, not the database yet
+            if (txIndex !== null && txIndex !== '' && this.currentBankTransactions) {
+                const idx = parseInt(txIndex);
+                if (this.currentBankTransactions[idx]) {
+                    this.currentBankTransactions[idx].isReady = true;
+                    this.currentBankTransactions[idx].mappedData = data;
+                    
+                    // --- Learning Mapping ---
+                    const bankDesc = formData.get('bankDescription');
+                    if (bankDesc && name && (data.paymentMode === 'Bank' || data.paymentMode === 'bank' || data.paymentMode === 'cheque')) {
+                        VoucherManager.saveBankMapping(bankDesc, name); // Async update but don't await to block UI
+                    }
 
-            // --- NEW: Learn Bank Mapping ---
-            const bankDesc = formData.get('bankDescription');
-            // Only save if it came from bank import AND user selected a valid party
-            if (bankDesc && name && (data.paymentMode === 'Bank' || data.paymentMode === 'bank' || data.paymentMode === 'cheque')) {
-                await VoucherManager.saveBankMapping(bankDesc, name);
+                    const modalEl = document.getElementById('createVoucherModal');
+                    const modal = bootstrap.Modal.getInstance(modalEl);
+                    if (modalEl) {
+                        modalEl.addEventListener('hidden.bs.modal', () => {
+                            this.showStatementProcessingModal(this.currentBankTransactions);
+                        }, { once: true });
+                        modal.hide();
+                    }
+                    App.showNotification('Details saved to session. Use "Import Saved" or "Export" to finish.', 'info');
+                    return; 
+                }
             }
+
+            const newVoucher = await VoucherManager.createVoucher(data);
 
             const modalEl = document.getElementById('createVoucherModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
@@ -1799,19 +1858,7 @@ const VouchersUI = {
             if (modalEl) {
                 modalEl.addEventListener('hidden.bs.modal', () => {
                     this.updateTable();
-
-                    // --- NEW: Update Bank Statement Status ---
-                    if (txIndex !== null && txIndex !== '' && this.currentBankTransactions) {
-                        const idx = parseInt(txIndex);
-                        if (this.currentBankTransactions[idx]) {
-                            this.currentBankTransactions[idx].converted = true;
-                            this.currentBankTransactions[idx].voucherId = newVoucher.id; 
-                            // Only re-open AFTER the create modal is fully hidden
-                            this.showStatementProcessingModal(this.currentBankTransactions);
-                        }
-                    }
                 }, { once: true });
-                
                 modal.hide();
             } else {
                 this.updateTable();
@@ -1823,12 +1870,61 @@ const VouchersUI = {
         }
     },
 
+    async importSelectedBankTransactions() {
+        const checkboxes = document.querySelectorAll('.bs-row-checkbox:checked');
+        const readyIndices = [];
+        checkboxes.forEach(cb => {
+            const idx = parseInt(cb.value);
+            const tx = this.currentBankTransactions[idx];
+            if (tx && tx.isReady && !tx.converted) {
+                readyIndices.push(idx);
+            }
+        });
+
+        if (readyIndices.length === 0) {
+            App.showNotification('No ready transactions selected for import.', 'warning');
+            return;
+        }
+
+        if (!confirm(`Import ${readyIndices.length} saved transactions to Vouchers?`)) return;
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const idx of readyIndices) {
+            const tx = this.currentBankTransactions[idx];
+            try {
+                const newVoucher = await VoucherManager.createVoucher(tx.mappedData);
+                tx.converted = true;
+                tx.voucherId = newVoucher.id;
+                successCount++;
+            } catch (err) {
+                console.error(`Import failed for index ${idx}:`, err);
+                failCount++;
+            }
+        }
+
+        App.showNotification(`Successfully imported ${successCount} vouchers.${failCount > 0 ? ` FAILED: ${failCount}` : ''}`, successCount > 0 ? 'success' : 'danger');
+        
+        // Refresh the table view and modal
+        this.updateTable();
+        this.showStatementProcessingModal(this.currentBankTransactions);
+    },
+
     async exportVouchersToExcel() {
         if (!this.currentBankTransactions) return;
 
+        // Pull vouchers from both already converted AND ready-to-import rows
         const sessionVouchers = this.currentBankTransactions
-            .filter(tx => tx.converted && tx.voucherId)
-            .map(tx => VoucherManager.getVoucher(tx.voucherId))
+            .filter(tx => (tx.converted && tx.voucherId) || (tx.isReady && tx.mappedData))
+            .map(tx => {
+                if (tx.converted && tx.voucherId) {
+                    return VoucherManager.getVoucher(tx.voucherId);
+                } else if (tx.isReady && tx.mappedData) {
+                    return tx.mappedData;
+                }
+                return null;
+            })
             .filter(v => v);
 
         if (sessionVouchers.length === 0) {

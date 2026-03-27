@@ -315,7 +315,11 @@ const TasksUI = {
             dropdown.classList.remove('d-none');
         };
 
-        searchInput.addEventListener('input', (e) => renderDropdown(e.target.value));
+        let searchTimeout = null;
+        searchInput.addEventListener('input', (e) => {
+            if (searchTimeout) clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => renderDropdown(e.target.value), 150);
+        });
         searchInput.addEventListener('focus', () => renderDropdown(searchInput.value));
 
         // Keyboard navigation
@@ -411,23 +415,35 @@ const TasksUI = {
 
         try {
             const allInvoices = await InvoiceManager.getInvoicesWithBalance();
-            const searchParty = (partyId || '').toLowerCase().trim();
+            const searchPartyId = (partyId || '').toLowerCase().trim();
+            const searchPartyName = (document.getElementById('taskPartyName')?.value || document.getElementById('taskPartySearchInput')?.value || '').toLowerCase().trim();
+            
             const task = this.currentTask || {};
             const taskPartyName = (task.partyName || '').toLowerCase().trim();
 
-            const customerInvoices = allInvoices.filter(inv => {
+            let customerInvoices = allInvoices.filter(inv => {
                 const invId = (inv.customerId || '').toLowerCase().trim();
                 const invName = (inv.customerName || '').toLowerCase().trim();
                 const invKey = (invId || 'ID') + '::' + (invName || 'NAME');
                 
-                return invId === searchParty || 
-                       invName === searchParty || 
-                       invKey.toLowerCase() === searchParty ||
-                       (taskPartyName && (invName === taskPartyName || invId === taskPartyName));
-            }).filter(inv => inv.balance > 0.05);
+                // Match by ID, Name, Composite Key, or Task Metadata
+                const match = (searchPartyId && invId === searchPartyId) || 
+                              (searchPartyName && invName === searchPartyName) || 
+                              (searchPartyId && invKey.toLowerCase() === searchPartyId) ||
+                              (taskPartyName && (invName === taskPartyName || invId === taskPartyName));
+                
+                return match && inv.balance > 0.05;
+            });
+
+            // Deduplicate by ID to prevent double entries
+            const uniqueMap = new Map();
+            customerInvoices.forEach(inv => {
+                if (!uniqueMap.has(inv.id)) uniqueMap.set(inv.id, inv);
+            });
+            customerInvoices = Array.from(uniqueMap.values());
 
             if (customerInvoices.length === 0) {
-                container.innerHTML = '<div class="alert alert-info py-2 small m-0">No pending bills found for this customer.</div>';
+                container.innerHTML = `<div class="alert alert-info py-2 small m-0">No pending bills found for ${searchPartyName || 'this customer'}.</div>`;
                 return;
             }
 
@@ -446,10 +462,11 @@ const TasksUI = {
                                 <input class="form-check-input task-bill-checkbox me-2" type="checkbox" 
                                     value="${inv.invoiceNo}" 
                                     data-amount="${inv.balance}"
+                                    data-total="${inv.total}"
                                     id="bill_${inv.id}"
                                     onchange="TasksUI.updateNarrationFromBills()">
                                 <label class="form-check-label small text-white flex-grow-1" for="bill_${inv.id}">
-                                    ${inv.invoiceNo} <span class="text-white-50 ms-2">₹${inv.balance.toLocaleString('en-IN')}</span>
+                                    ${inv.invoiceNo} <span class="text-white-50 ms-2">Bal: ₹${inv.balance.toLocaleString('en-IN')} <small>(of ₹${inv.total.toLocaleString('en-IN')})</small></span>
                                 </label>
                             </div>
                         `).join('')}
@@ -478,15 +495,19 @@ const TasksUI = {
             return;
         }
 
-        let total = 0;
+        let totalPending = 0;
+        let totalBillValue = 0;
         const billsStrings = [];
+        
         checkboxes.forEach(cb => {
-            const amount = parseFloat(cb.getAttribute('data-amount'));
-            total += amount;
-            billsStrings.push(`${cb.value} (₹${amount.toLocaleString('en-IN')})`);
+            const pending = parseFloat(cb.getAttribute('data-amount'));
+            const full = parseFloat(cb.getAttribute('data-total'));
+            totalPending += pending;
+            totalBillValue += full;
+            billsStrings.push(`${cb.value} (Bill: ₹${full.toLocaleString('en-IN')}, Bal: ₹${pending.toLocaleString('en-IN')})`);
         });
 
-        narrationArea.value = `Payment follow-up for ${partyName}:\nBills: ${billsStrings.join(', ')}\nTotal balance: ₹${total.toLocaleString('en-IN')}`;
+        narrationArea.value = `Payment follow-up for ${partyName}:\nBills: ${billsStrings.join(', ')}\nTotal balance: ₹${totalPending.toLocaleString('en-IN')} (Total Outstanding: ₹${totalBillValue.toLocaleString('en-IN')})`;
     },
 
     async saveTask() {
