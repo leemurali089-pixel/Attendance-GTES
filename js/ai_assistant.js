@@ -4,7 +4,7 @@
  */
 
 const AIAssistant = {
-    apiKey: 'AIzaSyAVxwf_4EtLu_0BRuU7nO6SvXRinQAQlgQ', // User's provided API Key
+    apiKey: 'AIzaSyAhcd0SihsLEmFFAh0zn342kLRXf1BlAVI', // Fresh API Key for Gemini
     isListening: false,
     currentRecognition: null,
 
