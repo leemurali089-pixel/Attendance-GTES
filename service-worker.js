@@ -8,13 +8,21 @@ const ASSETS = [
     'js/app.js',
     'js/data.js',
     'js/fileStorage.js',
-    'js/firebaseConfig.js',
     'icon.png'
 ];
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+        caches.open(CACHE_NAME)
+            .then((cache) => {
+                // Service workers don't support caching over file://
+                if (location.protocol === 'file:') {
+                    console.log('Running locally: Service worker caching bypassed.');
+                    return Promise.resolve();
+                }
+                return cache.addAll(ASSETS);
+            })
+            .catch(err => console.log('Service Worker caching skipped:', err))
     );
 });
 
