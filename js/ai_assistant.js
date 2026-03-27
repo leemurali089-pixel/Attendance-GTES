@@ -1,12 +1,13 @@
 /**
- * Global AI Assistant Module (Omnipotent Router)
- * Handles Web Speech Recognition (Tamil) & translates intents via Gemini API
+ * Global AI Assistant Module (Conversational Intent Router)
+ * Handles Web Speech Recognition & translates intents via Gemini API with Memory
  */
 
 const AIAssistant = {
     apiKey: 'AIzaSyAhcd0SihsLEmFFAh0zn342kLRXf1BlAVI', // Fresh API Key for Gemini
     isListening: false,
     currentRecognition: null,
+    conversationHistory: [], // Keeps track of context
 
     init() {
         console.log("Global AIAssistant initialized.");
@@ -16,6 +17,8 @@ const AIAssistant = {
             App.showNotification("Your browser does not support Voice Recognition.", "error");
             return false;
         }
+        // Warm up voices
+        if (window.speechSynthesis) speechSynthesis.getVoices();
         return true;
     },
 
@@ -29,6 +32,11 @@ const AIAssistant = {
                 <div class="spinner-grow text-primary mb-3" style="width: 4rem; height: 4rem;" role="status"></div>
                 <h2>AI Assistant is thinking...</h2>
                 <p class="text-white-50 mt-2" id="aiOverlayTranscript">Translating your request...</p>
+                <div class="mt-4">
+                    <button class="btn btn-outline-light rounded-pill px-4" onclick="AIAssistant.stopAll()">
+                        <i class="bi bi-x-circle me-1"></i> Cancel
+                    </button>
+                </div>
             `;
             document.body.appendChild(overlay);
         }
@@ -38,6 +46,7 @@ const AIAssistant = {
     hideOverlay() {
         const overlay = document.getElementById('aiProcessingOverlay');
         if (overlay) overlay.style.display = 'none';
+        this.setBtnState(document.getElementById('globalAIBtn'), 'idle');
     },
 
     updateOverlayText(text) {
@@ -57,28 +66,71 @@ const AIAssistant = {
         }
     },
 
+    stopAll() {
+        if (this.currentRecognition) this.currentRecognition.stop();
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        this.conversationHistory = [];
+        this.hideOverlay();
+    },
+
+    speak(text, callback) {
+        if (!window.speechSynthesis) {
+            if (callback) callback();
+            return;
+        }
+        
+        this.conversationHistory.push(`AI: ${text}`);
+        this.trimHistory();
+
+        this.updateOverlayText(`🗣️ Speaking: "${text}"`);
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ta-IN'; // Tamil
+        utterance.rate = 1.0;
+        
+        const voices = speechSynthesis.getVoices();
+        const tamilVoice = voices.find(v => v.lang.includes('ta') || v.lang.includes('ta-IN'));
+        if (tamilVoice) utterance.voice = tamilVoice;
+
+        utterance.onend = () => { if (callback) callback(); };
+        utterance.onerror = () => { if (callback) callback(); };
+
+        window.speechSynthesis.speak(utterance);
+    },
+
+    trimHistory() {
+        if (this.conversationHistory.length > 6) {
+            this.conversationHistory.shift();
+        }
+    },
+
     /**
      * Start listening globally
      */
     async startListeningGlobal(btn) {
+        if (!btn) btn = document.getElementById('globalAIBtn');
         if (!this.init()) return;
 
-        if (this.isListening && this.currentRecognition) {
-            this.currentRecognition.stop();
+        // If clicking while listening/speaking, cancel it
+        if (this.isListening) {
+            this.stopAll();
             return;
         }
 
+        if (window.speechSynthesis) window.speechSynthesis.cancel(); // Stop talking if we click mic
+
         this.setBtnState(btn, 'listening');
+        this.showOverlay();
+        this.updateOverlayText("Listening... \n(காது கொடுத்து கேட்கிறேன்)");
 
         const recognition = new window.SpeechRecognition();
         this.currentRecognition = recognition;
-        recognition.lang = 'ta-IN'; // Tamil
+        recognition.lang = 'ta-IN'; 
         recognition.interimResults = false;
         recognition.maxAlternatives = 1;
 
         recognition.onstart = () => {
             this.isListening = true;
-            App.showNotification("Listening in Tamil... Speak now", "info");
         };
 
         recognition.onresult = async (event) => {
@@ -86,35 +138,38 @@ const AIAssistant = {
             console.log("Recognized text (Tamil):", transcript);
             
             this.setBtnState(btn, 'idle');
-            this.showOverlay();
-            this.updateOverlayText(`Recognized: "${transcript}"`);
+            this.updateOverlayText(`🧠 Thinking about: "${transcript}"`);
             
+            this.conversationHistory.push(`User: ${transcript}`);
+            this.trimHistory();
+
             try {
-                // Process with Gemini to get Intent
-                const command = await this.processGlobalAI(transcript);
+                const command = await this.processGlobalAI();
                 console.log("AI Intent Router Resolved:", command);
                 
-                this.updateOverlayText(`Executing: ${command.action}...`);
-                await this.executeGlobalAction(command);
+                await this.executeGlobalAction(command, btn);
                 
             } catch (err) {
                 console.error("AI Routing Error:", err);
-                App.showNotification("Sorry, I could not understand the request.", "error");
-            } finally {
-                setTimeout(() => this.hideOverlay(), 1000);
+                this.speak("மன்னிக்கவும், எனக்கு புரியவில்லை. மீண்டும் சொல்லுங்கள்.", () => {
+                    this.hideOverlay();
+                });
             }
         };
 
         recognition.onerror = (event) => {
             console.error("Speech Recognition Error:", event.error);
-            App.showNotification(`Microphone error: ${event.error}`, "error");
+            if (event.error !== 'aborted') {
+                App.showNotification(`Microphone error: ${event.error}`, "error");
+            }
             this.setBtnState(btn, 'idle');
             this.isListening = false;
+            this.hideOverlay();
         };
 
         recognition.onend = () => {
             this.isListening = false;
-            this.setBtnState(btn, 'idle');
+            // The overlay might stay open if we are processing or speaking
         };
 
         try {
@@ -122,44 +177,53 @@ const AIAssistant = {
         } catch(e) {
             console.error("Could not start recognition", e);
             this.setBtnState(btn, 'idle');
+            this.hideOverlay();
         }
     },
 
-    async processGlobalAI(transcript) {
+    async processGlobalAI() {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
-        let prompt = `You are an omnipotent AI controller for the "MJS PrimeLogic" ERP system. 
-You translate spoken Tamil requests into a strict JSON command to control the app remotely.
+        let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
+You understand spoken Tamil and control the app via JSON commands.
 
-Current Date context: ${today}
+IMPORTANT: You keep track of a conversation history. If the user's latest message doesn't contain all required data to complete an action, you must return a "clarify" action to ask them for the missing info in Tamil.
 
-Below are the possible App Actions you can return:
+Current Date: ${today}
+
+Conversation History (Oldest to Newest):
+${this.conversationHistory.join('\n')}
+
+Based on the history and the latest user message, figure out the intent. 
+If information is missing (e.g., creating a task but no name/details), DO NOT guess. 
+Instead, return: {"action": "clarify", "speechResponse": "யார் பேரில் டாஸ்க் உருவாக்க வேண்டும் என்று சொல்லுங்கள்"}
+
+Possible Final Actions:
 
 1. NAVIGATION
 Use action: "navigate"
-Parameters: "target" (can be: "dashboard", "hrms", "employees", "attendance", "salary", "admin", "tasks", "payments", "analytics", "accounting", "jobcards", "delivery")
-Example Tamil: "Analytics page open pannu" -> {"action": "navigate", "target": "analytics"}
-Example Tamil: "Homeikku po" -> {"action": "navigate", "target": "dashboard"}
+Parameters: "target" (can be: "dashboard", "hrms", "employees", "attendance", "salary", "admin", "tasks", "payments", "analytics", "jobcards", "delivery")
+Example Tamil: "Analytics page open pannu" -> {"action": "navigate", "target": "analytics", "speechResponse": "அனலிட்டிக்ஸ் பக்கம் திறக்கப்படுகிறது"}
 
 2. MARK ATTENDANCE
 Use action: "mark_attendance"
-Parameters: "employeeName" (string), "status" (string: "present", "absent", "half-day")
-Example Tamil: "Rajesh absent inniki" -> {"action": "mark_attendance", "parameters": {"employeeName": "Rajesh", "status": "absent"}}
+Parameters: "employeeName" (string), "status" ("present", "absent", "half-day")
+Example Tamil: "Rajesh absent inniki" -> {"action": "mark_attendance", "parameters": {"employeeName": "Rajesh", "status": "absent"}, "speechResponse": "ராஜேஷுக்கு ஆப்சென்ட் போடப்பட்டது"}
 
 3. CREATE TASK
-Use action: "create_task"
-Parameters: "partyName" (string), "narration" (english translation of task details), "followupDate" (YYYY-MM-DD), "taskType" ("normal" or "payment_followup")
-Example Tamil: "Naalaikku Ramesh ku call panni payment kekanum" -> {"action":"create_task", "parameters":{"partyName":"Ramesh","narration":"Call and ask for payment","followupDate":"${this.calculateTomorrow()}","taskType":"payment_followup"}}
+Required Parameters: "partyName" (string), "narration" (english translation)
+Optional Parameters: "followupDate" (YYYY-MM-DD), "taskType" ("normal" or "payment_followup")
+If required params are missing, return "clarify"!
+Example: {"action":"create_task", "parameters":{"partyName":"Ramesh","narration":"Call and ask for payment","followupDate":"${this.calculateTomorrow()}","taskType":"payment_followup"}, "speechResponse": "ரமேஷ் பேரில் டாஸ்க் உருவாக்கப்பட்டது"}
 
 4. CREATE JOB CARD
-Use action: "create_jobcard"
-Parameters: "customerName" (string), "problem" (english translation of compaint), "equipment" (english translation of device/vehicle)
-Example Tamil: "Vignesh laptop freeze aaguthu nu kuduthurukkar" -> {"action":"create_jobcard", "parameters":{"customerName":"Vignesh", "problem":"Laptop freezing issue", "equipment":"Laptop"}}
+Required Parameters: "customerName" (string), "equipment" (english translation)
+Optional Parameters: "problem" (english translation)
+If required params missing, return "clarify"!
+Example: {"action":"create_jobcard", "parameters":{"customerName":"Vignesh", "problem":"Laptop freezing issue", "equipment":"Laptop"}, "speechResponse": "விக்னேஷ் பேரில் ஜாப் கார்டு உருவாக்கப்பட்டது"}
 
-Return ONLY valid JSON. No markdown brackets. If the intent is completely impossible to match, return {"action": "unknown"}.
-
-User Transcript: "${transcript}"`;
+Output strictly ONLY raw JSON.`;
 
         const response = await fetch(url, {
             method: 'POST',
@@ -185,8 +249,25 @@ User Transcript: "${transcript}"`;
     /**
      * Executes the translated Intent on the local application architecture
      */
-    async executeGlobalAction(command) {
+    async executeGlobalAction(command, btn) {
         if (!command || !command.action) return;
+
+        // Ensure we speak the response aloud
+        const responseText = command.speechResponse || "சரி, செய்கிறேன்.";
+
+        if (command.action === 'clarify') {
+            // Conversational loop: AI speaks the question, then automatically listens again!
+            this.speak(responseText, () => {
+                this.hideOverlay();
+                this.startListeningGlobal(btn);
+            });
+            return;
+        }
+
+        // For terminal actions, speak first, then execute UI naturally
+        this.speak(responseText, () => {
+            this.hideOverlay();
+        });
 
         switch (command.action) {
             case 'navigate':
@@ -196,39 +277,38 @@ User Transcript: "${transcript}"`;
                 } else if (target === 'hrms' || target === 'tasks' || target === 'payments' || target === 'analytics' || target === 'accounting') {
                     App.openModule(target);
                 } else if (target === 'delivery' || target === 'jobcards') {
-                    App.openModule('accounting'); // Temporary route to delivery entry
+                    App.openModule('accounting');
                     setTimeout(() => DeliveryUI.showLanding(), 500);
                     if (target === 'jobcards') setTimeout(() => DeliveryUI.showSection('jobcard'), 600);
                 } else {
-                    App.showView(target); // Fallback to direct view mapping
+                    App.showView(target);
                 }
-                App.showNotification("Navigated via AI", "success");
                 break;
 
             case 'create_task':
                 App.openModule('tasks');
                 setTimeout(() => {
                     TasksUI.showCreateModal({
-                        partyName: command.parameters.partyName || '',
-                        narration: command.parameters.narration || '',
-                        type: command.parameters.taskType || 'normal'
+                        partyName: command.parameters?.partyName || '',
+                        narration: command.parameters?.narration || '',
+                        type: command.parameters?.taskType || 'normal'
                     });
                      // Set date immediately handling edge cases
                     setTimeout(() => {
                         const dateInput = document.getElementById('taskFollowupDate');
-                        if (dateInput && command.parameters.followupDate) dateInput.value = command.parameters.followupDate;
+                        if (dateInput && command.parameters?.followupDate) dateInput.value = command.parameters.followupDate;
                     }, 200);
                 }, 400);
                 break;
 
             case 'create_jobcard':
-                App.openModule('accounting'); // Assume accounting holds delivery/jobcards
+                App.openModule('accounting');
                 setTimeout(() => {
                     DeliveryUI.showSection('jobcard');
                     setTimeout(() => {
                         DeliveryUI.showJobCardForm();
                         setTimeout(() => {
-                            const params = command.parameters;
+                            const params = command.parameters || {};
                             const searchInput = document.getElementById('jcCustomerSearch');
                             if (searchInput && params.customerName) {
                                 searchInput.value = params.customerName;
@@ -249,18 +329,13 @@ User Transcript: "${transcript}"`;
                 break;
                 
             case 'mark_attendance':
-                // Smart auto-mark attendance for employee
                 App.openModule('hrms');
                 setTimeout(() => {
                     App.showView('attendance');
                     setTimeout(() => {
-                        const params = command.parameters;
-                        if (!params.employeeName) {
-                            App.showNotification('Employee name missing for attendance', 'warning');
-                            return;
-                        }
+                        const params = command.parameters || {};
+                        if (!params.employeeName) return;
                         
-                        // Find employee rows matching name
                         const searchName = params.employeeName.toLowerCase();
                         let clicked = false;
                         document.querySelectorAll('.attendance-btn').forEach(btn => {
@@ -268,7 +343,6 @@ User Transcript: "${transcript}"`;
                             if (tr) {
                                 const nameCell = tr.querySelector('.fw-bold.text-info');
                                 if (nameCell && nameCell.innerText.toLowerCase().includes(searchName)) {
-                                    // Match found, check if button is the correct status
                                     const isPresentBtn = btn.classList.contains('btn-outline-success');
                                     const isAbsentBtn = btn.classList.contains('btn-outline-danger');
                                     const isHalfDayBtn = btn.classList.contains('btn-outline-warning');
@@ -280,13 +354,8 @@ User Transcript: "${transcript}"`;
                             }
                         });
                         if (clicked) App.showNotification(`Attendance marked for ${params.employeeName}`, 'success');
-                        else App.showNotification(`Could not find employee ${params.employeeName} to mark attendance`, 'warning');
                     }, 500);
                 }, 400);
-                break;
-
-            default:
-                App.showNotification("Action understood but not yet supported by AI router.", "warning");
                 break;
         }
     }
