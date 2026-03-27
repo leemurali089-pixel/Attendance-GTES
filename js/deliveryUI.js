@@ -3839,6 +3839,7 @@ const DeliveryUI = {
                                         <table class="table table-sm table-borderless mb-0 small" style="font-size: 8.5pt;">
                                             <tr><td class="text-muted text-end pe-2 py-0">Invoice No:</td><td class="fw-bold py-0">${invoice.invoiceNo || invoice.id}</td></tr>
                                             <tr><td class="text-muted text-end pe-2 py-0">Date:</td><td class="fw-bold py-0">${DataManager.formatDateDisplay(invoice.date)}</td></tr>
+                                            ${invoice.poNumber ? `<tr><td class="text-muted text-end pe-2 py-0">Customer Ref / DC No:</td><td class="fw-bold py-0">${invoice.poNumber}</td></tr>` : ''}
                                             ${invoice.dispatchDetails?.via ? `<tr><td class="text-muted text-end pe-2 py-0">Dispatch Via:</td><td class="fw-bold py-0">${invoice.dispatchDetails.via}</td></tr>` : ''}
                                             ${invoice.dispatchDetails?.lrNo ? `<tr><td class="text-muted text-end pe-2 py-0">LR/Track No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.lrNo}</td></tr>` : ''}
                                             ${invoice.dispatchDetails?.vehicleNo ? `<tr><td class="text-muted text-end pe-2 py-0">Vehicle No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.vehicleNo}</td></tr>` : ''}
@@ -4294,6 +4295,7 @@ const DeliveryUI = {
                                             <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Date:</td><td class="fw-bold py-1" style="color: #000 !important;">${DataManager.formatDateDisplay(expense.date)}</td></tr>
                                             <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Status:</td><td class="fw-bold py-1" style="color: #000 !important;"><span class="badge bg-${expense.status === 'Paid' ? 'success' : 'warning'}">${expense.status || 'Pending'}</span></td></tr>
                                             ${expense.supplierInvoiceNo ? `<tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Supplier Invoice No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.supplierInvoiceNo}</td></tr>` : ''}
+                                            ${expense.poNumber ? `<tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Ref No / DC No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.poNumber}</td></tr>` : ''}
                                         </table>
                                     </div>
                                 </div>
@@ -4507,9 +4509,15 @@ const DeliveryUI = {
                                         <input type="text" class="form-control" id="purchaseVendor" placeholder="e.g. ABC Trading Co" required>
                                     </div>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label small text-muted">Description / Bill Reference</label>
-                                    <input type="text" class="form-control" id="purchaseDesc" placeholder="e.g. Material Purchase Bill #123" required>
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label small text-muted">Description</label>
+                                        <input type="text" class="form-control" id="purchaseDesc" placeholder="e.g. Material Purchase Bill" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small text-muted">Ref No / DC No</label>
+                                        <input type="text" class="form-control" id="purchasePoNumber" placeholder="e.g. 1105">
+                                    </div>
                                 </div>
                                 <div class="table-responsive mb-3">
                                     <table class="table table-dark table-sm table-bordered border-secondary" id="purchaseItemsTable">
@@ -4644,6 +4652,7 @@ const DeliveryUI = {
         const vendor = document.getElementById('purchaseVendor').value;
         const date = document.getElementById('purchaseDate').value;
         const desc = document.getElementById('purchaseDesc').value;
+        const poNumber = document.getElementById('purchasePoNumber')?.value || '';
 
         if (!vendor || !date) {
             App.showNotification('Please fill vendor name and date', 'error');
@@ -4688,7 +4697,8 @@ const DeliveryUI = {
         const purchaseData = {
             date,
             vendorName: vendor,
-            description: `${vendor}: ${desc}`,
+            description: desc,
+            poNumber: poNumber, // Captured reference number
             category: 'Purchase Material',
             amount: totalSubtotal + totalCgst + totalSgst,
             subtotal: totalSubtotal,
