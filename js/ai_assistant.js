@@ -202,12 +202,15 @@ const AIAssistant = {
 
         recognition.onerror = (event) => {
             console.error("Speech Recognition Error:", event.error);
-            if (event.error !== 'aborted') {
-                App.showNotification(`Microphone error: ${event.error}`, "error");
-            }
-            this.setBtnState(btn, 'idle');
             this.isListening = false;
-            this.hideOverlay();
+            this.setBtnState(btn, 'idle');
+            
+            if (event.error === 'network') {
+                this.updateOverlayText("🚫 Microphone unavailable (Network Error).\nPlease type your command below:");
+            } else if (event.error !== 'aborted') {
+                this.updateOverlayText(`⚠️ Mic Error: ${event.error}. Please type instead:`);
+            }
+            // DO NOT hideOverlay() - Allow user to type!
         };
 
         recognition.onend = () => {
