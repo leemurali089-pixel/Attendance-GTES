@@ -241,7 +241,21 @@ const AIAssistant = {
                 continue;
             }
         }
+        
+        // Final failure diagnostic
+        console.error("All AI models failed. Fetching list of available models for this key...");
+        this.listAvailableModels().catch(() => {});
         throw lastErr;
+    },
+
+    async listAvailableModels() {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            console.log("AUTHORIZED MODELS FOR THIS KEY:", data.models?.map(m => m.name) || "None/Error");
+            if (data.error) console.error("Model Listing Error:", data.error.message);
+        } catch(e) { console.error("Could not fetch models list:", e); }
     },
 
     async fetchGemini(modelName) {
