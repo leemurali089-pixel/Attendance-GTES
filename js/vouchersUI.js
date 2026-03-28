@@ -1829,8 +1829,13 @@ const VouchersUI = {
                 const idx = parseInt(txIndex);
                 if (this.currentBankTransactions[idx]) {
                     this.currentBankTransactions[idx].isReady = true;
-                    this.currentBankTransactions[idx].mappedData = data;
+                    this.currentBankTransactions[idx].mappedVoucher = data; // Unify field naming
                     
+                    // Record this serial locally to ensure immediate auto-increment correctness for the next row
+                    if (typeof VoucherManager.recordUsedSerial === 'function') {
+                        VoucherManager.recordUsedSerial(data.type, data.id);
+                    }
+
                     // --- Learning Mapping ---
                     const bankDesc = formData.get('bankDescription');
                     if (bankDesc && name && (data.paymentMode === 'Bank' || data.paymentMode === 'bank' || data.paymentMode === 'cheque')) {
@@ -1845,7 +1850,7 @@ const VouchersUI = {
                         }, { once: true });
                         modal.hide();
                     }
-                    App.showNotification('Details saved to session. Use "Import Saved" or "Export" to finish.', 'info');
+                    App.showNotification(`Details for ${data.id} saved to session. Use "Import Saved" to finish.`, 'info');
                     return; 
                 }
             }

@@ -415,8 +415,8 @@ const VoucherManager = {
         // 1. Combine with Bank Import Queue (Ready OR Converted)
         if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
             const queueVouchers = VouchersUI.currentBankTransactions
-                .filter(tx => tx.mappedVoucher)
-                .map(tx => tx.mappedVoucher);
+                .filter(tx => tx.mappedVoucher || tx.mappedData)
+                .map(tx => tx.mappedVoucher || tx.mappedData);
             vouchers = vouchers.concat(queueVouchers);
         }
 
