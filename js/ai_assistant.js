@@ -31,16 +31,50 @@ const AIAssistant = {
             overlay.innerHTML = `
                 <div class="spinner-grow text-primary mb-3" style="width: 4rem; height: 4rem;" role="status"></div>
                 <h2>AI Assistant is thinking...</h2>
+                <div class="mt-3 w-75">
+                    <input type="text" id="aiManualInput" class="form-control form-control-lg rounded-pill text-center" placeholder="Type command if mic fails..." style="background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2);">
+                </div>
                 <p class="text-white-50 mt-2" id="aiOverlayTranscript">Translating your request...</p>
                 <div class="mt-4">
-                    <button class="btn btn-outline-light rounded-pill px-4" onclick="AIAssistant.stopAll()">
+                    <button class="btn btn-outline-light rounded-pill px-4 mx-2" onclick="AIAssistant.handleManualSubmit()">
+                        <i class="bi bi-send me-1"></i> Send
+                    </button>
+                    <button class="btn btn-outline-light rounded-pill px-4 mx-2" onclick="AIAssistant.stopAll()">
                         <i class="bi bi-x-circle me-1"></i> Cancel
                     </button>
                 </div>
             `;
             document.body.appendChild(overlay);
+
+            // Handle Enter key for manual input
+            overlay.querySelector('#aiManualInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.handleManualSubmit();
+            });
         }
         overlay.style.display = 'flex';
+        const input = document.getElementById('aiManualInput');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+    },
+
+    async handleManualSubmit() {
+        const input = document.getElementById('aiManualInput');
+        if (!input || !input.value.trim()) return;
+        
+        const text = input.value.trim();
+        this.updateOverlayText(`🧠 Processing: "${text}"`);
+        this.conversationHistory.push(`User: ${text}`);
+        this.trimHistory();
+        
+        try {
+            const command = await this.processGlobalAI();
+            await this.executeGlobalAction(command, document.getElementById('globalAIBtn'));
+        } catch (err) {
+            console.error("Manual AI Error:", err);
+            this.speak("மன்னிக்கவும், எனக்கு புரியவில்லை.");
+        }
     },
 
     hideOverlay() {
@@ -191,7 +225,7 @@ const AIAssistant = {
     },
 
     async processGlobalAI() {
-        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${this.apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
         let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
