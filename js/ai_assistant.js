@@ -191,7 +191,7 @@ const AIAssistant = {
     },
 
     async processGlobalAI() {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
         let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
