@@ -1852,6 +1852,11 @@ const VouchersUI = {
 
             const newVoucher = await VoucherManager.createVoucher(data);
 
+            // Record this serial locally to ensure immediate auto-increment correctness for the next row
+            if (typeof VoucherManager.recordUsedSerial === 'function') {
+                VoucherManager.recordUsedSerial(data.type, data.id);
+            }
+
             const modalEl = document.getElementById('createVoucherModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             

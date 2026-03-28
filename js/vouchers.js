@@ -397,18 +397,22 @@ const VoucherManager = {
     },
 
     /**
-     * NEW: Get next sequential voucher number for a type
-     * Intelligently detects numeric suffixes to follow manual patterns.
+     * Cache for the last used serial to ensure immediate increment even 
+     * if the database sync is slightly delayed.
+     */
+    _lastSerials: {},
+
+    /**
+     * Get next sequential voucher number for a type
+     * Intelligently detects numeric suffixes and follows the LATEST used prefix.
      */
     getNextVoucherNumber(type, date = null) {
         let vouchers = DataManager.getData('vouchers') || [];
         const year = DataManager.getFinancialYear(date || new Date());
-        const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : 'CNT');
+        const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : (type === 'contra' ? 'CNT' : 'VCH'));
         const defaultPrefix = `${typeCode}-${year}-`;
         
-        // Also include ANY vouchers in the Bank Import Queue (Ready OR Converted)
-        // This ensures the NEXT row immediately picks up the number from the PREVIOUS row, 
-        // even if the database sync is still pending in the background.
+        // 1. Combine with Bank Import Queue (Ready OR Converted)
         if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
             const queueVouchers = VouchersUI.currentBankTransactions
                 .filter(tx => tx.mappedVoucher)
@@ -416,50 +420,79 @@ const VoucherManager = {
             vouchers = vouchers.concat(queueVouchers);
         }
 
-        // Filter by type
+        // 2. Filter by type
         const typeVouchers = vouchers.filter(v => v.type === type && v.id);
         
-        if (typeVouchers.length === 0) {
-            return `${defaultPrefix}001`;
+        // 3. Find the "Best" prefix to follow. 
+        // We prioritize the prefix used by the most recently added voucher of this type.
+        let targetPrefix = defaultPrefix;
+        if (this._lastSerials[type]) {
+            const lastMatch = this._lastSerials[type].match(/^(.*?)(\d+)$/);
+            if (lastMatch) targetPrefix = lastMatch[1];
+        } else if (typeVouchers.length > 0) {
+            // Use the last item in the list as the "most recent" reference
+            const lastVch = typeVouchers[typeVouchers.length - 1];
+            const lastMatch = (lastVch.id || '').match(/^(.*?)(\d+)$/);
+            if (lastMatch) targetPrefix = lastMatch[1];
         }
 
-        // We want to find the "Most Relevant" latest voucher.
-        // We prioritize vouchers that match the current year/type pattern.
-        // However, if the user has manually started a new series (like PAY173), 
-        // we should follow that if it's the absolute maximum.
-
+        // 4. Find the maximum number for THIS specific prefix
         let maxNum = 0;
-        let bestPrefix = defaultPrefix;
-        let maxPadding = 3;
+        let padding = 1;
 
+        // First pass: Check for max number matching our target prefix
         for (const v of typeVouchers) {
             const match = (v.id || '').match(/^(.*?)(\d+)$/);
-            if (match) {
-                const prefix = match[1];
-                const num = parseInt(match[2], 10);
-                
-                // Logic: 
-                // 1. If it's the absolute highest number seen so far, track it.
-                // 2. If it's the same number but matches our preferred prefix, prefer that.
-                if (num > maxNum) {
-                    maxNum = num;
-                    bestPrefix = prefix;
-                    maxPadding = match[2].length;
-                } else if (num === maxNum && prefix === defaultPrefix) {
-                    // Stay with default prefix if same number
-                    bestPrefix = prefix;
-                    maxPadding = match[2].length;
+            if (match && match[1] === targetPrefix) {
+                const n = parseInt(match[2], 10);
+                if (n > maxNum) {
+                    maxNum = n;
+                    padding = match[2].length;
+                }
+            }
+        }
+
+        // Fallback: If no vouchers match the latest prefix (rare), or if we are forced to default,
+        // scan everything to find the globally highest record of this type.
+        if (maxNum === 0) {
+            for (const v of typeVouchers) {
+                const match = (v.id || '').match(/^(.*?)(\d+)$/);
+                if (match) {
+                    const n = parseInt(match[2], 10);
+                    if (n > maxNum) {
+                        maxNum = n;
+                        targetPrefix = match[1];
+                        padding = match[2].length;
+                    }
+                }
+            }
+        }
+
+        // Also check our local cache for immediate override protection
+        if (this._lastSerials[type]) {
+            const match = this._lastSerials[type].match(/^(.*?)(\d+)$/);
+            if (match && match[1] === targetPrefix) {
+                const n = parseInt(match[2], 10);
+                if (n > maxNum) {
+                    maxNum = n;
                 }
             }
         }
         
         if (maxNum === 0) {
-            return `${defaultPrefix}001`;
+            return `${targetPrefix}001`;
         }
 
-        const nextNumber = maxNum + 1;
-        const paddedNext = String(nextNumber).padStart(Math.max(maxPadding, 3), '0');
-        return bestPrefix + paddedNext;
+        const nextNum = maxNum + 1;
+        return targetPrefix + String(nextNum).padStart(Math.max(padding, 3), '0');
+    },
+
+    /**
+     * Record the use of a serial number to ensure next increment is correct
+     */
+    recordUsedSerial(type, id) {
+        if (!type || !id) return;
+        this._lastSerials[type] = id;
     },
 
     /**
