@@ -1186,6 +1186,19 @@ const VouchersUI = {
             deleteBtn.disabled = totalCheckedAnywhere === 0;
             deleteBtn.innerHTML = `<i class="bi bi-trash"></i> Delete Selected (${totalCheckedAnywhere})`;
         }
+
+        // --- NEW: Enable Import Saved button only if READY transactions are selected ---
+        const importBtn = document.getElementById('btnImportSelectedBankTx');
+        if (importBtn) {
+            const readyCheckedCount = allCheckboxes.filter(cb => {
+                if (!cb.checked) return false;
+                const tx = this.currentBankTransactions[parseInt(cb.value)];
+                return tx && tx.isReady && !tx.converted;
+            }).length;
+
+            importBtn.disabled = readyCheckedCount === 0;
+            importBtn.innerHTML = `<i class="bi bi-cloud-arrow-down-fill me-1"></i> Import Saved ${readyCheckedCount > 0 ? `(${readyCheckedCount})` : ''}`;
+        }
     },
 
     deleteBankRow(index) {

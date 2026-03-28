@@ -1,4 +1,4 @@
-const CACHE_NAME = 'primelogic-v8';
+const CACHE_NAME = 'primelogic-v9';
 const ASSETS = [
     'index.html',
     'manifest.json',
