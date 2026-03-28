@@ -112,113 +112,68 @@ const DataManager = {
         // Initialize FileStorage first
         const fileStorageEnabled = await FileStorage.init();
 
-        if (fileStorageEnabled) {
-            console.log('Using Dropbox file storage');
-        } else {
-            console.log('Using localStorage fallback');
-        }
+        console.log(fileStorageEnabled ? 'Using Firebase cloud storage' : 'Using localStorage fallback');
 
-        // Initialize SyncManager (Phase 5)
-        if (window.SyncManager) {
-            window.SyncManager.init();
-        }
+        // Essential Keys for Login and Branding
+        const coreKeys = [
+            this.KEYS.ADMIN_PASSWORD,
+            this.KEYS.SETTINGS,
+            'gtes_users'
+        ];
 
-        // Set default admin password if not exists
-        const existingPassword = await this.loadData(this.KEYS.ADMIN_PASSWORD);
-        if (!existingPassword) {
-            await this.saveData(this.KEYS.ADMIN_PASSWORD, this.DEFAULT_SETTINGS.defaultAdminPassword);
-        }
-
-        // Initialize empty arrays if not exists
-        if (!(await this.loadData(this.KEYS.EMPLOYEES))) {
-            await this.saveData(this.KEYS.EMPLOYEES, []);
-        }
-        if (!(await this.loadData(this.KEYS.ATTENDANCE))) {
-            await this.saveData(this.KEYS.ATTENDANCE, []);
-        }
-        if (!(await this.loadData(this.KEYS.HOLIDAYS))) {
-            await this.saveData(this.KEYS.HOLIDAYS, []);
-        }
-        if (!(await this.loadData(this.KEYS.ADVANCES))) {
-            await this.saveData(this.KEYS.ADVANCES, []);
-        }
-        if (!(await this.loadData(this.KEYS.BONUS_PAYOUTS))) {
-            await this.saveData(this.KEYS.BONUS_PAYOUTS, []);
-        }
-        if (!(await this.loadData(this.KEYS.EMAIL_LOGS))) {
-            await this.saveData(this.KEYS.EMAIL_LOGS, []);
-        }
-        if (!(await this.loadData(this.KEYS.SETTINGS))) {
-            await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
-        }
-        if (!(await this.loadData(this.KEYS.EXPENSES))) {
-            await this.saveData(this.KEYS.EXPENSES, []);
-        }
-        if (!(await this.loadData(this.KEYS.EXPENSE_CATEGORIES))) {
-            const defaultCategories = [
-                { id: 'cat_rent', name: 'Rent', type: 'indirect' },
-                { id: 'cat_salaries', name: 'Salaries', type: 'indirect' },
-                { id: 'cat_utilities', name: 'Utilities/Bills', type: 'indirect' },
-                { id: 'cat_purchase', name: 'Inventory Purchase', type: 'direct' },
-                { id: 'cat_transport', name: 'Transportation', type: 'direct' },
-                { id: 'cat_misc', name: 'Miscellaneous', type: 'indirect' }
-            ];
-            await this.saveData(this.KEYS.EXPENSE_CATEGORIES, defaultCategories);
-        }
-        if (!(await this.loadData(this.KEYS.ESTIMATES))) {
-            await this.saveData(this.KEYS.ESTIMATES, []);
-        }
-        if (!(await this.loadData(this.KEYS.PURCHASE_ORDERS))) {
-            await this.saveData(this.KEYS.PURCHASE_ORDERS, []);
-        }
-        if (!(await this.loadData(this.KEYS.RECURRING_INVOICES))) {
-            await this.saveData(this.KEYS.RECURRING_INVOICES, []);
-        }
-
-        if (!(await this.loadData(this.KEYS.RECYCLE_BIN))) {
-            await this.saveData(this.KEYS.RECYCLE_BIN, []);
-        }
-
-        // --- NEW: Load essential cloud keys that were missing from initial cache fetch ---
-        const additionalKeys = [
+        // All other data keys to pre-warm cache
+        const dataKeys = [
+            this.KEYS.EMPLOYEES,
+            this.KEYS.ATTENDANCE,
+            this.KEYS.HOLIDAYS,
+            this.KEYS.ADVANCES,
+            this.KEYS.BONUS_PAYOUTS,
+            this.KEYS.EMAIL_LOGS,
+            this.KEYS.EXPENSES,
+            this.KEYS.EXPENSE_CATEGORIES,
+            this.KEYS.ESTIMATES,
+            this.KEYS.PURCHASE_ORDERS,
+            this.KEYS.RECURRING_INVOICES,
+            this.KEYS.RECYCLE_BIN,
             'gtes_tasks', 
             'customers', 
             'invoices', 
             'vouchers', 
             'inventory', 
-            'gtes_users', 
             'gtes_services', 
             'inventoryTransactions'
         ];
+
+        console.log("[DataManager]: Prefetching all data modules in parallel...");
         
-        // Fetch missing keys in parallel for speed on PWA Mobile
-        if (typeof window.electronAPI === 'undefined' && FileStorage && FileStorage.isCloudReady) {
-            console.log("[DataManager]: Web Mode - Prefetching essential cloud modules...");
-            await Promise.all(additionalKeys.map(async (key) => {
-                if (!(await this.loadData(key))) {
-                    await this.saveData(key, []);
-                }
-            }));
-        } else {
-            // Desktop mode sequential
-            for (const key of additionalKeys) {
-                if (!(await this.loadData(key))) {
-                    await this.saveData(key, []);
-                }
-            }
+        // Fetch everything at once! This is much faster than sequential calls.
+        const allKeys = [...coreKeys, ...dataKeys];
+        const results = await Promise.all(allKeys.map(key => this.loadData(key)));
+        
+        // Quick verification/initialization for just the absolute essentials
+        const passwordIdx = allKeys.indexOf(this.KEYS.ADMIN_PASSWORD);
+        if (!results[passwordIdx]) {
+            await this.saveData(this.KEYS.ADMIN_PASSWORD, this.DEFAULT_SETTINGS.defaultAdminPassword);
         }
 
-        // Phase 2: Migrate employees to new schema
+        const settingsIdx = allKeys.indexOf(this.KEYS.SETTINGS);
+        if (!results[settingsIdx]) {
+            await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
+        }
+
+        // Run migrations and background tasks
+        // We do these without blocking the main return if possible, 
+        // but some migrations are needed for logic consistency.
         await this.migrateEmployeesToV2();
-
-        // Version 2.0: Migrate employees to add salary revisions
         await this.migrateToSalaryRevisions();
-
-        // Auto-mark Sundays as Holiday for all active employees
-        await this.autoMarkSundayHolidays();
-
-        // Schedule auto-marking for midnight each day
+        
+        // Background tasks
+        this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
         this.scheduleSundayHolidayCheck();
+        
+        if (window.SyncManager) {
+            window.SyncManager.init();
+        }
     },
 
     /**

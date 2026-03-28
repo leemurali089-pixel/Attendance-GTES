@@ -404,47 +404,61 @@ const VoucherManager = {
         let vouchers = DataManager.getData('vouchers') || [];
         const year = DataManager.getFinancialYear(date || new Date());
         const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : 'CNT');
+        const defaultPrefix = `${typeCode}-${year}-`;
         
-        // Also include temporary vouchers sitting in the Bank Import Queue
+        // Also include ANY vouchers in the Bank Import Queue (Ready OR Converted)
+        // This ensures the NEXT row immediately picks up the number from the PREVIOUS row, 
+        // even if the database sync is still pending in the background.
         if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
-            const pendingImportOps = VouchersUI.currentBankTransactions
-                .filter(tx => tx.isReady && tx.mappedVoucher)
+            const queueVouchers = VouchersUI.currentBankTransactions
+                .filter(tx => tx.mappedVoucher)
                 .map(tx => tx.mappedVoucher);
-            vouchers = vouchers.concat(pendingImportOps);
+            vouchers = vouchers.concat(queueVouchers);
         }
 
         // Filter by type
         const typeVouchers = vouchers.filter(v => v.type === type && v.id);
         
         if (typeVouchers.length === 0) {
-            return `${typeCode}-${year}-001`;
+            return `${defaultPrefix}001`;
         }
 
-        // Find the maximum numeric suffix to ensure we always get the absolute highest counter
+        // We want to find the "Most Relevant" latest voucher.
+        // We prioritize vouchers that match the current year/type pattern.
+        // However, if the user has manually started a new series (like PAY173), 
+        // we should follow that if it's the absolute maximum.
+
         let maxNum = 0;
-        let bestPrefix = `${typeCode}-${year}-`;
-        let paddingLevel = 3;
+        let bestPrefix = defaultPrefix;
+        let maxPadding = 3;
 
         for (const v of typeVouchers) {
             const match = (v.id || '').match(/^(.*?)(\d+)$/);
             if (match) {
                 const prefix = match[1];
                 const num = parseInt(match[2], 10);
-                // Prefer matches that align with the current year prefix, but accept absolute max otherwise
-                if (num > maxNum || (num === maxNum && prefix === bestPrefix)) {
+                
+                // Logic: 
+                // 1. If it's the absolute highest number seen so far, track it.
+                // 2. If it's the same number but matches our preferred prefix, prefer that.
+                if (num > maxNum) {
                     maxNum = num;
                     bestPrefix = prefix;
-                    paddingLevel = match[2].length;
+                    maxPadding = match[2].length;
+                } else if (num === maxNum && prefix === defaultPrefix) {
+                    // Stay with default prefix if same number
+                    bestPrefix = prefix;
+                    maxPadding = match[2].length;
                 }
             }
         }
         
         if (maxNum === 0) {
-            return `${typeCode}-${year}-001`;
+            return `${defaultPrefix}001`;
         }
 
         const nextNumber = maxNum + 1;
-        const paddedNext = String(nextNumber).padStart(Math.max(paddingLevel, 3), '0');
+        const paddedNext = String(nextNumber).padStart(Math.max(maxPadding, 3), '0');
         return bestPrefix + paddedNext;
     },
 
