@@ -4,13 +4,20 @@
  */
 
 const AIAssistant = {
-    apiKey: 'AIzaSyAhcd0SihsLEmFFAh0zn342kLRXf1BlAVI', // Fresh API Key for Gemini
+    apiKey: 'AIzaSyAmohl6pxn9OjD02Kft-MwE4pteYWklzjI', // Default Key
     isListening: false,
     currentRecognition: null,
     conversationHistory: [], // Keeps track of context
 
-    init() {
+    async init() {
         console.log("Global AIAssistant initialized.");
+        
+        // Load saved API key if available
+        const savedSettings = DataManager.getData('ai_settings');
+        if (savedSettings && savedSettings.apiKey) {
+            this.apiKey = savedSettings.apiKey;
+        }
+
         window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!window.SpeechRecognition) {
             console.error("Speech Recognition is not supported in this browser.");
@@ -36,6 +43,9 @@ const AIAssistant = {
                 </div>
                 <p class="text-white-50 mt-2" id="aiOverlayTranscript">Translating your request...</p>
                 <div class="mt-4">
+                    <button class="btn btn-outline-light rounded-pill px-4 mx-2" title="Settings" onclick="AIAssistant.showSettings()">
+                        <i class="bi bi-gear-fill"></i>
+                    </button>
                     <button class="btn btn-outline-light rounded-pill px-4 mx-2" onclick="AIAssistant.handleManualSubmit()">
                         <i class="bi bi-send me-1"></i> Send
                     </button>
@@ -74,6 +84,16 @@ const AIAssistant = {
         } catch (err) {
             console.error("Manual AI Error:", err);
             this.speak("மன்னிக்கவும், எனக்கு புரியவில்லை.");
+        }
+    },
+
+    async showSettings() {
+        const newKey = prompt("Enter your Gemini API Key:", this.apiKey);
+        if (newKey && newKey.trim()) {
+            this.apiKey = newKey.trim();
+            await DataManager.saveData('ai_settings', { apiKey: this.apiKey });
+            App.showNotification("AI Settings Updated! Please refresh if it fails.", "success");
+            this.updateOverlayText(`✅ New API key saved!\nReady to process: "${this.apiKey.substring(0, 10)}..."`);
         }
     },
 
