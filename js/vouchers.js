@@ -506,32 +506,43 @@ const VoucherManager = {
     getVoucherAllocationsMap() {
         const vouchers = this.getAllVouchers();
         
+        // 1. Gather session-saved mappings from bank import session
+        let mappedVch = [];
+        if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
+            mappedVch = VouchersUI.currentBankTransactions
+                .filter(tx => (tx.mappedVoucher || tx.mappedData))
+                .map(tx => tx.mappedVoucher || tx.mappedData);
+        }
+
+        const totalCount = vouchers.length + mappedVch.length;
+        
         // Simple cache: if count hasn't changed, return cached map
-        // Note: For full robustness, a checksum would be better, but count is usually enough for UI performance
-        if (this._allocationsCache && this._lastVoucherCount === vouchers.length) {
+        if (this._allocationsCache && this._lastVoucherCount === totalCount) {
             return this._allocationsCache;
         }
 
         const map = new Map();
 
-        vouchers.forEach(v => {
-            // 1. Check explicit allocations
+        // Process both DB vouchers AND Current Session mapped vouchers
+        [...vouchers, ...mappedVch].forEach(v => {
+            if (!v) return;
+            // 1. Check explicit allocations (Advanced/Precise)
             if (v.allocations && v.allocations.length > 0) {
                 v.allocations.forEach(a => {
                     const id = a.id || a.no;
                     if (id) {
-                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
+                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount || 0)) + (parseFloat(a.discountAmount || 0));
                         map.set(id, (map.get(id) || 0) + amount);
                     }
                 });
             } 
-            // 2. Check legacy/imported linkedInvoices
+            // 2. Check legacy/imported linkedInvoices (Calculation fallback)
             else if (v.linkedInvoices && Array.isArray(v.linkedInvoices)) {
                 v.linkedInvoices.forEach(link => {
                     let id, amount;
                     if (typeof link === 'string') {
                         id = link;
-                        const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
+                        const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount || 0)) + (parseFloat(v.discountAmount || 0));
                         amount = totalSettlement / v.linkedInvoices.length;
                     } else if (link && typeof link === 'object') {
                         id = link.id || link.invoiceNo || link.billNo;
@@ -546,7 +557,7 @@ const VoucherManager = {
         });
 
         this._allocationsCache = map;
-        this._lastVoucherCount = vouchers.length;
+        this._lastVoucherCount = totalCount;
         return map;
     },
 
