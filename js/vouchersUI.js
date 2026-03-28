@@ -800,9 +800,37 @@ const VouchersUI = {
                     dateField.value = tx.date.toISOString().split('T')[0];
                 }
 
-                // Pre-fill Remarks
-                const remarksField = form.querySelector('[name="remarks"]');
-                if (remarksField) remarksField.value = `Bank Import: ${tx.description}`;
+                // Restore persistent fields if already mapped in session
+                if (tx.mappedVoucher) {
+                    const mv = tx.mappedVoucher;
+                    if (mv.tdsAmount) {
+                        const tdsField = form.querySelector('[name="tdsAmount"]');
+                        if (tdsField) tdsField.value = mv.tdsAmount;
+                    }
+                    if (mv.discountAmount) {
+                        const discField = form.querySelector('[name="discountAmount"]');
+                        if (discField) discField.value = mv.discountAmount;
+                    }
+                    if (mv.remarks) {
+                        const remarksField = form.querySelector('[name="remarks"]');
+                        if (remarksField) remarksField.value = mv.remarks;
+                    }
+                    if (mv.paymentMode) {
+                        const modeField = form.querySelector('[name="paymentMode"]');
+                        if (modeField) {
+                            modeField.value = mv.paymentMode;
+                            VouchersUI.onPaymentModeChange(modeField);
+                        }
+                    }
+                    if (mv.referenceId) {
+                        const refField = form.querySelector('[name="refNo"]');
+                        if (refField) refField.value = mv.referenceId;
+                    }
+                } else {
+                    // Pre-fill Remarks (only if new)
+                    const remarksField = form.querySelector('[name="remarks"]');
+                    if (remarksField) remarksField.value = `Bank Import: ${tx.description}`;
+                }
 
                 // NEW: Populate Hidden Bank Desc for Learning
                 const bankDescField = form.querySelector('#bankDescription');
@@ -812,15 +840,13 @@ const VouchersUI = {
                 const indexField = form.querySelector('#bankTxIndex');
                 if (indexField) indexField.value = index;
 
-                // NEW: Try to Auto-Resolve Party
+                // NEW: Try to Auto-Resolve Party OR restore existing assignment
                 if (tx) {
-                    const resolvedName = VoucherManager.resolveBankParty(tx.description);
-                    if (resolvedName) {
-                        // Find the customer ID
-                        const customers = DataManager.getData('customers') || [];
-                        const found = customers.find(c => c.name === resolvedName);
-                        const resolvedId = found ? found.id : '';
+                    const mv = tx.mappedVoucher;
+                    const resolvedName = mv ? mv.customerName : VoucherManager.resolveBankParty(tx.description);
+                    const resolvedId   = mv ? mv.customerId   : '';
 
+                    if (resolvedName) {
                         // Use the new selectParty to show badge and load invoices
                         setTimeout(() => {
                             VouchersUI.selectParty(resolvedName, resolvedId);
@@ -1147,6 +1173,15 @@ const VouchersUI = {
             }));
             allVouchers = [...allVouchers, ...transformedPurchases];
         }
+
+        // NEW: Calculate remaining balance by accounting for other pending transactions in this session
+        // Filter out the CURRENT transaction so we don't subtract its own amount if we are re-editing
+        const otherPendingTx = (this.currentBankTransactions || []).filter((_, i) => i !== index);
+        const sessionAllocationsMap = VoucherManager.getVoucherAllocationsMap(otherPendingTx);
+        allVouchers = allVouchers.map(v => {
+            const balance = VoucherManager.getDocumentBalance(v.voucherId, v.amount, sessionAllocationsMap);
+            return { ...v, amount: balance, originalAmount: v.amount };
+        }).filter(v => v.amount > 0.05); // Only show items with actual remaining balance
 
         const oldModal = document.getElementById('assignToVoucherModal');
         if (oldModal) { bootstrap.Modal.getInstance(oldModal)?.dispose(); oldModal.remove(); }
@@ -1529,6 +1564,11 @@ const VouchersUI = {
         const voucherType = document.getElementById('voucherType').value;
         tbody.innerHTML = '';
 
+        // NEW: Filter out the CURRENT transaction so we don't subtract its own amount if already mapped
+        const indexField = document.getElementById('bankTxIndex');
+        const currentIndex = indexField ? parseInt(indexField.value) : -1;
+        const otherPendingTx = (VouchersUI.currentBankTransactions || []).filter((_, i) => i !== currentIndex);
+
         if (!name) {
             container.classList.add('d-none');
             return;
@@ -1583,6 +1623,10 @@ const VouchersUI = {
         // Sort by date
         pendingDocs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
+        // NEW: Identifying already mapped data to restore UI state
+        const tx = (currentIndex !== -1) ? VouchersUI.currentBankTransactions[currentIndex] : null;
+        const mv = tx ? tx.mappedVoucher : null;
+
         if (pendingDocs.length > 0) {
             container.classList.remove('d-none');
             // Update Header Label
@@ -1595,12 +1639,27 @@ const VouchersUI = {
                 const totalAmountNum = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
                 const total = totalAmountNum.toFixed(2);
                 
-                // NEW: Use VoucherManager to get actual pending balance
-                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum);
+                // NEW: Use VoucherManager to get actual pending balance, including current session's pending tx (excluding itself)
+                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum, null, otherPendingTx);
                 const pending = pendingNum.toFixed(2);
                 
-                // Skip if practically zero
-                if (pendingNum <= 0.01) return;
+                // RESTORE: Check if this doc was already assigned in this session
+                let isAssigned = false;
+                let assignedAmt = 0;
+                if (mv) {
+                    if (mv.allocations) {
+                        const a = mv.allocations.find(al => al.id === doc.id || al.no === docNo);
+                        if (a) { isAssigned = true; assignedAmt = a.amount; }
+                    } else if (mv.linkedInvoices && mv.linkedInvoices.includes(doc.id)) {
+                        isAssigned = true;
+                        // For legacy links with no detailed allocation, we might not know the exact amount easily
+                        // but let's assume it was the whole transaction if it's the only one, or 0.
+                        assignedAmt = mv.linkedInvoices.length === 1 ? mv.amount : 0;
+                    }
+                }
+
+                // Skip if practically zero and NOT already assigned to this specific rows
+                if (pendingNum <= 0.01 && !isAssigned) return;
 
                 tr.innerHTML = `
                     <td class="text-center align-middle">
@@ -1608,6 +1667,7 @@ const VouchersUI = {
                                value="${doc.id}" 
                                data-amount="${pending}" 
                                data-no="${docNo}"
+                               ${isAssigned ? 'checked' : ''}
                                onchange="VouchersUI.calculateTotal(this)">
                     </td>
                     <td>
@@ -1626,8 +1686,8 @@ const VouchersUI = {
                     <td class="text-end align-middle text-warning">${pending}</td>
                     <td class="align-middle p-1">
                         <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary text-end pay-input" 
-                               value="0" min="0" max="${pending}" step="0.01" 
-                               oninput="VouchersUI.calculateTotal()" disabled>
+                               value="${isAssigned ? assignedAmt : '0'}" min="0" max="${pending}" step="0.01" 
+                               oninput="VouchersUI.calculateTotal()" ${isAssigned ? '' : 'disabled'}>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -1635,6 +1695,20 @@ const VouchersUI = {
         } else {
             container.classList.add('d-none');
         }
+
+        // RESTORE: Advance Payment if already set in session
+        if (mv && mv.amount !== undefined) {
+            const advanceInput = document.getElementById('advanceAmount');
+            if (advanceInput) {
+                // Advance = total amount - sum of allocations
+                const totalAlloc = (mv.allocations || []).reduce((sum, a) => sum + parseFloat(a.amount || 0), 0);
+                const advance = Math.max(0, mv.amount - totalAlloc);
+                advanceInput.value = advance.toFixed(2);
+            }
+        }
+
+        // Recalculate totals after restoration
+        setTimeout(() => this.calculateTotal(), 500);
     },
 
     calculateTotal(checkbox) {

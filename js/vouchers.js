@@ -501,48 +501,40 @@ const VoucherManager = {
 
     /**
      * NEW: Get a map of all document allocations for fast lookup
-     * Returns: Map { docId => totalAllocatedAmount }
+     * @param {Array} extraTransactions - Optional list of pending bank transactions to include.
      */
-    getVoucherAllocationsMap() {
+    getVoucherAllocationsMap(extraTransactions = null) {
         const vouchers = this.getAllVouchers();
         
-        // 1. Gather session-saved mappings from bank import session
-        let mappedVch = [];
-        if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
-            mappedVch = VouchersUI.currentBankTransactions
-                .filter(tx => (tx.mappedVoucher || tx.mappedData))
-                .map(tx => tx.mappedVoucher || tx.mappedData);
-        }
+        // Use a more dynamic key for caching (including isReady count to detect session changes)
+        const readyCount = (extraTransactions || []).filter(tx => tx.isReady || tx.converted).length;
+        const cacheKey = extraTransactions ? `v${vouchers.length}_e${extraTransactions.length}_r${readyCount}` : `v${vouchers.length}`;
 
-        const totalCount = vouchers.length + mappedVch.length;
-        
-        // Simple cache: if count hasn't changed, return cached map
-        if (this._allocationsCache && this._lastVoucherCount === totalCount) {
+        if (this._allocationsCache && this._lastVoucherCount === cacheKey) {
             return this._allocationsCache;
         }
 
         const map = new Map();
 
-        // Process both DB vouchers AND Current Session mapped vouchers
-        [...vouchers, ...mappedVch].forEach(v => {
-            if (!v) return;
-            // 1. Check explicit allocations (Advanced/Precise)
+        // 1. Existing Vouchers from Database
+        vouchers.forEach(v => {
+            // 1. Check explicit allocations
             if (v.allocations && v.allocations.length > 0) {
                 v.allocations.forEach(a => {
                     const id = a.id || a.no;
                     if (id) {
-                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount || 0)) + (parseFloat(a.discountAmount || 0));
+                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
                         map.set(id, (map.get(id) || 0) + amount);
                     }
                 });
             } 
-            // 2. Check legacy/imported linkedInvoices (Calculation fallback)
+            // 2. Check legacy/imported linkedInvoices
             else if (v.linkedInvoices && Array.isArray(v.linkedInvoices)) {
                 v.linkedInvoices.forEach(link => {
                     let id, amount;
                     if (typeof link === 'string') {
                         id = link;
-                        const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount || 0)) + (parseFloat(v.discountAmount || 0));
+                        const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
                         amount = totalSettlement / v.linkedInvoices.length;
                     } else if (link && typeof link === 'object') {
                         id = link.id || link.invoiceNo || link.billNo;
@@ -556,21 +548,41 @@ const VoucherManager = {
             }
         });
 
+        // 3. Pending Bank Transactions (Session-Aware Balance)
+        if (extraTransactions && Array.isArray(extraTransactions)) {
+            extraTransactions.forEach(tx => {
+                // If it's linked but not yet imported
+                if ((tx.isReady || tx.converted) && !tx.imported) {
+                    if (tx.linkedVoucherId) {
+                        map.set(tx.linkedVoucherId, (map.get(tx.linkedVoucherId) || 0) + parseFloat(tx.amount || 0));
+                    }
+                    const mv = tx.mappedVoucher || tx.mappedData;
+                    if (mv && mv.linkedInvoices) {
+                        mv.linkedInvoices.forEach(id => {
+                            // If it's a bulk link, we assume the whole amount for simplicity or check allocations if present
+                            const amt = mv.allocations?.find(a => a.id === id)?.amount || (tx.amount / mv.linkedInvoices.length);
+                            map.set(id, (map.get(id) || 0) + parseFloat(amt));
+                        });
+                    }
+                }
+            });
+        }
+
         this._allocationsCache = map;
-        this._lastVoucherCount = totalCount;
+        this._lastVoucherCount = cacheKey;
         return map;
     },
 
     /**
      * Updated: Get the remaining balance for a specific document
      */
-    getDocumentBalance(docId, totalAmount, allocationsMap = null) {
+    getDocumentBalance(docId, totalAmount, allocationsMap = null, extraTransactions = null) {
         let allocated = 0;
         if (allocationsMap) {
             allocated = allocationsMap.get(docId) || 0;
         } else {
-            // Fallback to slow method if map not provided
-            const tempMap = this.getVoucherAllocationsMap();
+            // Pass extraTransactions specifically if map not provided
+            const tempMap = this.getVoucherAllocationsMap(extraTransactions);
             allocated = tempMap.get(docId) || 0;
         }
         
