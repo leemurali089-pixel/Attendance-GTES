@@ -191,7 +191,7 @@ const AIAssistant = {
     },
 
     async processGlobalAI() {
-        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
         let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
@@ -234,19 +234,29 @@ Example: {"action":"create_jobcard", "parameters":{"customerName":"Vignesh", "pr
 
 Output strictly ONLY raw JSON.`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
 
-        if (!response.ok) throw new Error(`Gemini API error: ${response.statusText}`);
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                console.error("Gemini API Full Error:", errorBody);
+                const msg = errorBody.error?.message || response.statusText;
+                throw new Error(`Gemini API error (${response.status}): ${msg}`);
+            }
 
-        const data = await response.json();
-        let resultText = data.candidates[0].content.parts[0].text;
-        resultText = resultText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
-        
-        return JSON.parse(resultText);
+            const data = await response.json();
+            let resultText = data.candidates[0].content.parts[0].text;
+            resultText = resultText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+            
+            return JSON.parse(resultText);
+        } catch (err) {
+            console.error("processGlobalAI Exception:", err);
+            throw err;
+        }
     },
 
     calculateTomorrow() {
