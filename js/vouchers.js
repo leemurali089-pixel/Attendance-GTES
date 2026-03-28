@@ -19,14 +19,29 @@ const VoucherManager = {
     async createVoucher(data) {
         const vouchers = DataManager.getData('vouchers') || [];
 
-        // Generate ID if not provided manually
+        // 1. Generate/Verify ID Uniqueness
         let id = data.id;
         if (!id) {
             id = this.getNextVoucherNumber(data.type, data.date);
         }
 
+        // Final Collision Check: If this ID is ALREADY in the database or our local session tracker, 
+        // keep incrementing until we find a truly unique one.
+        let uniqueId = id;
+        let attempts = 0;
+        while (attempts < 100) {
+            const isDuplicate = vouchers.some(v => v.id === uniqueId) || 
+                               (this._lastSerials[data.type] === uniqueId);
+            
+            if (!isDuplicate) break;
+            
+            // Increment
+            uniqueId = this.getNextVoucherNumber(data.type, data.date);
+            attempts++;
+        }
+
         const voucher = {
-            id: id,
+            id: uniqueId,
             date: data.date,
             type: data.type, // 'receipt', 'payment', 'contra'
             customerName: data.customerName,
@@ -44,6 +59,9 @@ const VoucherManager = {
             isPurchase: data.isPurchase,
             createdAt: new Date().toISOString()
         };
+
+        // Record it immediately to prevent the next call in a loop from taking the same ID
+        this.recordUsedSerial(data.type, uniqueId);
 
         vouchers.push(voucher);
         await DataManager.saveData('vouchers', vouchers);
@@ -403,6 +421,14 @@ const VoucherManager = {
     _lastSerials: {},
 
     /**
+     * Track a used serial number in real-time
+     */
+    recordUsedSerial(type, id) {
+        if (!type || !id) return;
+        this._lastSerials[type] = id;
+    },
+
+    /**
      * Get next sequential voucher number for a type
      * Intelligently detects numeric suffixes and follows the LATEST used prefix.
      */
@@ -426,8 +452,12 @@ const VoucherManager = {
         // 3. Find the "Best" prefix to follow. 
         // We prioritize the prefix used by the most recently added voucher of this type.
         let targetPrefix = defaultPrefix;
-        if (this._lastSerials[type]) {
-            const lastMatch = this._lastSerials[type].match(/^(.*?)(\d+)$/);
+        
+        // Use the last item in our session cache if available
+        const lastSessionId = this._lastSerials[type];
+        
+        if (lastSessionId) {
+            const lastMatch = lastSessionId.match(/^(.*?)(\d+)$/);
             if (lastMatch) targetPrefix = lastMatch[1];
         } else if (typeVouchers.length > 0) {
             // Use the last item in the list as the "most recent" reference
@@ -440,9 +470,12 @@ const VoucherManager = {
         let maxNum = 0;
         let padding = 1;
 
-        // First pass: Check for max number matching our target prefix
-        for (const v of typeVouchers) {
-            const match = (v.id || '').match(/^(.*?)(\d+)$/);
+        // Combine database vouchers with our local tracking cache for max number check
+        const allReferenceIds = typeVouchers.map(v => v.id);
+        if (lastSessionId) allReferenceIds.push(lastSessionId);
+
+        for (const vid of allReferenceIds) {
+            const match = (vid || '').match(/^(.*?)(\d+)$/);
             if (match && match[1] === targetPrefix) {
                 const n = parseInt(match[2], 10);
                 if (n > maxNum) {
