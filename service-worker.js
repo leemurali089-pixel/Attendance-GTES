@@ -1,4 +1,4 @@
-const CACHE_NAME = 'primelogic-v3';
+const CACHE_NAME = 'primelogic-v4';
 const ASSETS = [
     'index.html',
     'manifest.json',
@@ -8,6 +8,9 @@ const ASSETS = [
     'js/app.js',
     'js/data.js',
     'js/fileStorage.js',
+    'js/vouchers.js',
+    'js/vouchersUI.js',
+    'js/ai_assistant.js',
     'icon.png'
 ];
 
