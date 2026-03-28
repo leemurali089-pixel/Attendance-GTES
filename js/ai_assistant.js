@@ -228,7 +228,24 @@ const AIAssistant = {
     },
 
     async processGlobalAI() {
-        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`;
+        const models = ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+        let lastErr = null;
+
+        for (const model of models) {
+            try {
+                return await this.fetchGemini(model);
+            } catch (err) {
+                lastErr = err;
+                console.warn(`Model ${model} failed, trying next...`, err);
+                if (err.message.includes('429')) break; // If quota hit, don't spam other models immediately
+                continue;
+            }
+        }
+        throw lastErr;
+    },
+
+    async fetchGemini(modelName) {
+        const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${this.apiKey}`;
         const today = new Date().toISOString().split('T')[0];
         
         let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
