@@ -401,10 +401,18 @@ const VoucherManager = {
      * Intelligently detects numeric suffixes to follow manual patterns.
      */
     getNextVoucherNumber(type, date = null) {
-        const vouchers = DataManager.getData('vouchers') || [];
+        let vouchers = DataManager.getData('vouchers') || [];
         const year = DataManager.getFinancialYear(date || new Date());
         const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : 'CNT');
         
+        // Also include temporary vouchers sitting in the Bank Import Queue
+        if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
+            const pendingImportOps = VouchersUI.currentBankTransactions
+                .filter(tx => tx.isReady && tx.mappedVoucher)
+                .map(tx => tx.mappedVoucher);
+            vouchers = vouchers.concat(pendingImportOps);
+        }
+
         // Filter by type
         const typeVouchers = vouchers.filter(v => v.type === type && v.id);
         
@@ -412,26 +420,32 @@ const VoucherManager = {
             return `${typeCode}-${year}-001`;
         }
 
-        // Get the latest voucher of this type (last added)
-        const latest = typeVouchers[typeVouchers.length - 1];
-        const lastId = latest.id;
+        // Find the maximum numeric suffix to ensure we always get the absolute highest counter
+        let maxNum = 0;
+        let bestPrefix = `${typeCode}-${year}-`;
+        let paddingLevel = 3;
 
-        // Try to match numeric part at the end
-        // Matches: Prefix-Number (e.g. RCT-2026-001 -> 001, 01228 -> 01228)
-        const match = lastId.match(/^(.*?)(\d+)$/);
+        for (const v of typeVouchers) {
+            const match = (v.id || '').match(/^(.*?)(\d+)$/);
+            if (match) {
+                const prefix = match[1];
+                const num = parseInt(match[2], 10);
+                // Prefer matches that align with the current year prefix, but accept absolute max otherwise
+                if (num > maxNum || (num === maxNum && prefix === bestPrefix)) {
+                    maxNum = num;
+                    bestPrefix = prefix;
+                    paddingLevel = match[2].length;
+                }
+            }
+        }
         
-        if (match) {
-            const prefix = match[1];
-            const numberStr = match[2];
-            const nextNumber = parseInt(numberStr) + 1;
-            
-            // Re-pad to same length
-            const paddedNext = String(nextNumber).padStart(numberStr.length, '0');
-            return prefix + paddedNext;
+        if (maxNum === 0) {
+            return `${typeCode}-${year}-001`;
         }
 
-        // Fallback for non-numeric or complex IDs
-        return `${typeCode}-${year}-001`;
+        const nextNumber = maxNum + 1;
+        const paddedNext = String(nextNumber).padStart(Math.max(paddingLevel, 3), '0');
+        return bestPrefix + paddedNext;
     },
 
     /**
