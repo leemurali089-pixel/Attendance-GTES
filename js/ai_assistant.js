@@ -108,6 +108,15 @@ const AIAssistant = {
      * Start listening globally
      */
     async startListeningGlobal(btn) {
+        // Mobile Permission & HTTPS Check
+        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        if (isMobile && !isSecure) {
+            App.showNotification("Voice features require a secure (HTTPS) connection on mobile.", "warning");
+            return;
+        }
+
         if (!btn) btn = document.getElementById('globalAIBtn');
         if (!this.init()) return;
 

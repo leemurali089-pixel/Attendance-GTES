@@ -66,6 +66,55 @@ const DataManager = {
 
     // Device ID for tracking changes (used for sync and audit)
     _deviceId: null,
+    _cache: {}, // Memory cache for synchronous access when localStorage fails quota
+    _db: null,  // IndexedDB instance
+
+    /**
+     * Initialize IndexedDB for large storage
+     */
+    async initDB() {
+        if (this._db) return this._db;
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('MJSPrimeLogicDB', 1);
+            request.onerror = () => reject('IDB Error');
+            request.onsuccess = (e) => {
+                this._db = e.target.result;
+                resolve(this._db);
+            };
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('largeData')) {
+                    db.createObjectStore('largeData');
+                }
+            };
+        });
+    },
+
+    async saveToIDB(key, value) {
+        try {
+            const db = await this.initDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('largeData', 'readwrite');
+                const store = tx.objectStore('largeData');
+                const request = store.put(value, key);
+                request.onsuccess = () => resolve(true);
+                request.onerror = () => reject(false);
+            });
+        } catch(e) { return false; }
+    },
+
+    async getFromIDB(key) {
+        try {
+            const db = await this.initDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('largeData', 'readonly');
+                const store = tx.objectStore('largeData');
+                const request = store.get(key);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(null);
+            });
+        } catch(e) { return null; }
+    },
 
     /**
      * Get or create a unique device ID
@@ -268,11 +317,19 @@ const DataManager = {
 
     // Helper methods for storage operations
     async saveData(key, data) {
-        // Update local cache first
+        // Update memory cache for synchronous access
+        this._cache[key] = data;
+
+        // Try local storage cache
         try {
             localStorage.setItem(key, JSON.stringify(data));
         } catch (e) {
-            console.error('Error updating localStorage cache:', e);
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                console.warn(`[DataManager] LocalStorage quota exceeded for ${key} during save. Falling back to IndexedDB.`);
+                this.saveToIDB(key, data);
+            } else {
+                console.error('Error updating localStorage cache:', e);
+            }
         }
 
         // Phase 5: Check for conflicts before saving
@@ -284,12 +341,28 @@ const DataManager = {
     },
 
     async loadData(key) {
-        const data = await FileStorage.loadData(key);
+        let data = await FileStorage.loadData(key);
+        
+        // If not in cloud, try local fallbacks
+        if (!data) {
+            data = this.getData(key); // Check memory/localStorage
+            if (!data) data = await this.getFromIDB(key); // Check IndexedDB
+        }
+
         if (data) {
+            // Update memory cache for synchronous getData calls
+            this._cache[key] = data;
+            
             try {
                 localStorage.setItem(key, JSON.stringify(data));
             } catch (e) {
-                console.error('Error updating localStorage cache during load:', e);
+                // If QuotaExceeded, save to IndexedDB instead
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    console.warn(`[DataManager] LocalStorage full for ${key}. Falling back to IndexedDB.`);
+                    this.saveToIDB(key, data);
+                } else {
+                    console.error('Error updating localStorage cache during load:', e);
+                }
             }
         }
         return data;
@@ -297,11 +370,16 @@ const DataManager = {
 
     // Alias for loadData (used by delivery modules)
     getData(key) {
-        // Note: This is synchronous wrapper - data should be cached already
+        // Priority 1: Memory Cache (Safe & Instant)
+        if (this._cache[key]) return this._cache[key];
+
+        // Priority 2: LocalStorage
         const data = localStorage.getItem(key);
         if (!data) return null;
         try {
-            return JSON.parse(data);
+            const parsed = JSON.parse(data);
+            this._cache[key] = parsed; // Populate cache
+            return parsed;
         } catch (e) {
             return null;
         }
@@ -309,12 +387,19 @@ const DataManager = {
 
     // Synchronous saveData wrapper for delivery modules  
     saveDataSync(key, value) {
+        this._cache[key] = value; // Always update memory cache for instant access
         try {
             localStorage.setItem(key, JSON.stringify(value));
             // Also trigger async save for file storage
             this.saveData(key, value).catch(err => console.error('Async save error:', err));
             return true;
         } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                console.warn(`[DataManager] LocalStorage quota exceeded for ${key}. Saving to Fallbacks.`);
+                this.saveToIDB(key, value);
+                this.saveData(key, value).catch(err => console.error('Async save error:', err));
+                return true; // Still success because we handled it
+            }
             console.error('Save error:', e);
             return false;
         }
