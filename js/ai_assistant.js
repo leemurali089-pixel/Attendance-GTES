@@ -484,3 +484,5 @@ Output strictly ONLY raw JSON.`;
         }
     }
 };
+
+window.AIAssistant = AIAssistant;
