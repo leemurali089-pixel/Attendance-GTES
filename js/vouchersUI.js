@@ -561,7 +561,7 @@ const VouchersUI = {
         }
 
         return `
-            <tr class="${tx.converted ? 'table-active opacity-50' : (tx.isReady ? 'table-warning bg-opacity-10' : '')}" data-index="${index}">
+            <tr class="${tx.converted || alreadyVouchered ? 'bs-imported-row' : (tx.isReady ? 'bs-ready-row' : '')}" data-index="${index}">
                 <td class="text-center align-middle">
                     <input type="checkbox" class="form-check-input bs-row-checkbox" value="${index}" onchange="VouchersUI.updateBankSelectionStatus()">
                 </td>
@@ -616,22 +616,89 @@ const VouchersUI = {
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-0 d-flex flex-column" style="height: ${isFullscreen ? 'calc(100vh - 120px)' : 'auto'};">
-                            <div class="alert alert-info mx-3 my-2 py-1 small">
-                                <i class="bi bi-info-circle me-1"></i> Click on a transaction to create a voucher or use checkboxes for bulk actions.
+                        <div class="modal-body p-0 d-flex flex-column" style="height: ${isFullscreen ? 'calc(100vh - 120px)' : 'auto'}; position: relative;">
+                            <style>
+                                #bankStatementModal .modal-content {
+                                    background: rgba(33, 37, 41, 0.95) !important;
+                                    backdrop-filter: blur(10px);
+                                    border: 1px solid rgba(255, 255, 255, 0.1);
+                                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                                }
+                                #bankStatementModal .modal-header, #bankStatementModal .modal-footer {
+                                    border-color: rgba(255, 255, 255, 0.1);
+                                    background: rgba(0, 0, 0, 0.2);
+                                }
+                                .btn-premium-import {
+                                    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 8px 20px;
+                                    border-radius: 6px;
+                                    font-weight: 600;
+                                    transition: all 0.3s ease;
+                                    box-shadow: 0 4px 15px rgba(13, 110, 253, 0.3);
+                                }
+                                .btn-premium-import:hover:not(:disabled) {
+                                    transform: translateY(-2px);
+                                    box-shadow: 0 6px 20px rgba(13, 110, 253, 0.4);
+                                    filter: brightness(1.1);
+                                }
+                                .btn-premium-import:active:not(:disabled) {
+                                    transform: translateY(0);
+                                }
+                                .btn-premium-import:disabled {
+                                    background: #495057;
+                                    box-shadow: none;
+                                    opacity: 0.6;
+                                }
+                                .btn-premium-excel {
+                                    background: transparent;
+                                    border: 1px solid #198754;
+                                    color: #198754;
+                                    padding: 8px 20px;
+                                    border-radius: 6px;
+                                    font-weight: 600;
+                                    transition: all 0.3s ease;
+                                }
+                                .btn-premium-excel:hover {
+                                    background: rgba(25, 135, 84, 0.1);
+                                    color: #198754;
+                                    border-color: #198754;
+                                    transform: translateY(-2px);
+                                }
+                                .bs-status-badge {
+                                    padding: 6px 12px;
+                                    border-radius: 20px;
+                                    font-size: 0.75rem;
+                                    font-weight: 600;
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 6px;
+                                }
+                                .bs-ready-row {
+                                    background: rgba(255, 193, 7, 0.05) !important;
+                                }
+                                .bs-imported-row {
+                                    background: rgba(25, 135, 84, 0.05) !important;
+                                    opacity: 0.7;
+                                }
+                            </style>
+                            <div class="alert alert-info mx-3 my-2 py-2 small d-flex align-items-center" style="background: rgba(13, 202, 240, 0.1); border: 1px solid rgba(13, 202, 240, 0.2); color: #0dcaf0;">
+                                <i class="bi bi-info-circle-fill me-2 fs-5"></i> 
+                                <span>Assign transactions to parties. Once "Ready to Import", use the checkboxes and click the <strong>Import Saved</strong> button.</span>
                             </div>
                             <div class="table-responsive flex-grow-1" style="max-height: ${isFullscreen ? 'calc(100vh - 200px)' : '75vh'};">
-                                <table class="table table-dark table-hover table-sm mb-0 align-middle">
-                                    <thead class="sticky-top">
-                                        <tr style="background-color: #212529;">
-                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40; width: 40px;" class="text-center">
+                                <table class="table table-dark table-hover table-sm mb-0 align-middle" style="border-collapse: separate; border-spacing: 0;">
+                                    <thead class="sticky-top" style="z-index: 10;">
+                                        <tr>
+                                            <th style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40; width: 45px;" class="text-center px-3">
                                                 <input type="checkbox" class="form-check-input" id="bsSelectAll" onchange="VouchersUI.toggleAllBankRows(this)">
                                             </th>
-                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Date</th>
-                                            <th style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Description</th>
-                                            <th class="text-end" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Debit</th>
-                                            <th class="text-end" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Credit</th>
-                                            <th class="text-center" style="background-color: #212529; color: #adb5bd; border-bottom: 2px solid #343a40;">Action</th>
+                                            <th style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Date</th>
+                                            <th style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Description</th>
+                                            <th class="text-end" style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Debit</th>
+                                            <th class="text-end" style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Credit</th>
+                                            <th class="text-center" style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -640,18 +707,18 @@ const VouchersUI = {
                                 </table>
                             </div>
                         </div>
-                        <div class="modal-footer border-secondary">
-                            <span class="text-muted small me-auto"><i class="bi bi-info-circle me-1"></i> New vouchers created here can be exported to Excel.</span>
-                            <button type="button" class="btn btn-outline-danger me-2" id="btnDeleteSelectedBankTx" onclick="VouchersUI.deleteSelectedBankRows()" disabled>
+                        <div class="modal-footer border-secondary shadow-lg">
+                            <span class="text-muted small me-auto"><i class="bi bi-shield-check me-1"></i> ${transactions.length} transactions loaded for processing.</span>
+                            <button type="button" class="btn btn-outline-danger btn-sm me-2" id="btnDeleteSelectedBankTx" onclick="VouchersUI.deleteSelectedBankRows()" disabled>
                                 <i class="bi bi-trash"></i> Delete Selected
                             </button>
-                            <button type="button" class="btn btn-primary me-2" id="btnImportSelectedBankTx" onclick="VouchersUI.importSelectedBankTransactions()" disabled>
-                                <i class="bi bi-cloud-arrow-down"></i> Import Saved
+                            <button type="button" class="btn btn-premium-import me-2" id="btnImportSelectedBankTx" onclick="VouchersUI.importSelectedBankTransactions()" disabled>
+                                <i class="bi bi-cloud-arrow-down-fill me-1"></i> Import Saved
                             </button>
-                            <button type="button" class="btn btn-outline-success" onclick="VouchersUI.exportVouchersToExcel()">
-                                <i class="bi bi-file-earmark-excel"></i> Export Vouchers as Excel
+                            <button type="button" class="btn btn-premium-excel me-3" onclick="VouchersUI.exportVouchersToExcel()">
+                                <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Export Excel
                             </button>
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
                         </div>
                     </div>
                 </div>
@@ -1966,32 +2033,53 @@ const VouchersUI = {
         });
 
         if (readyIndices.length === 0) {
-            App.showNotification('No ready transactions selected for import.', 'warning');
+            App.showNotification('No transactions "Ready to Import" were selected. Please assign details to a transaction first.', 'warning');
             return;
         }
 
         if (!confirm(`Import ${readyIndices.length} saved transactions to Vouchers?`)) return;
 
+        const importBtn = document.getElementById('btnImportSelectedBankTx');
+        const originalHtml = importBtn.innerHTML;
+        importBtn.disabled = true;
+        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing...';
+
         let successCount = 0;
         let failCount = 0;
+        let lastError = null;
+
+        console.log(`Starting bulk import for ${readyIndices.length} transactions...`);
 
         for (const idx of readyIndices) {
             const tx = this.currentBankTransactions[idx];
             try {
                 const voucherData = tx.mappedVoucher || tx.mappedData;
+                if (!voucherData) throw new Error('No mapped detail data found for this transaction.');
+
                 const newVoucher = await VoucherManager.createVoucher(voucherData);
                 tx.converted = true;
                 tx.voucherId = newVoucher.id;
                 successCount++;
+                console.log(`Success: Imported ${newVoucher.id}`);
             } catch (err) {
                 console.error(`Import failed for index ${idx}:`, err);
                 failCount++;
+                lastError = err.message;
             }
         }
 
-        App.showNotification(`Successfully imported ${successCount} vouchers.${failCount > 0 ? ` FAILED: ${failCount}` : ''}`, successCount > 0 ? 'success' : 'danger');
+        importBtn.innerHTML = originalHtml;
+        importBtn.disabled = false;
+
+        if (successCount > 0) {
+            App.showNotification(`Successfully imported ${successCount} vouchers.`, 'success');
+        }
         
-        // Refresh the table view and modal
+        if (failCount > 0) {
+            App.showNotification(`Failed to import ${failCount} records. Error: ${lastError}`, 'danger');
+        }
+        
+        // Refresh view
         this.updateTable();
         this.showStatementProcessingModal(this.currentBankTransactions);
     },
