@@ -237,7 +237,7 @@ const AIAssistant = {
             } catch (err) {
                 lastErr = err;
                 console.warn(`Model ${model} failed, trying next...`, err);
-                if (err.message.includes('429')) break; // If quota hit, don't spam other models immediately
+                // Continue to next model even on 429, because quotas can be per-model
                 continue;
             }
         }
