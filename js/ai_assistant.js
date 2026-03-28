@@ -269,19 +269,42 @@ const AIAssistant = {
     },
 
     async listAvailableModels() {
-        try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            console.log("AUTHORIZED MODELS FOR THIS KEY:", data.models?.map(m => m.name) || "None/Error");
-            if (data.error) console.error("Model Listing Error:", data.error.message);
-        } catch(e) { console.error("Could not fetch models list:", e); }
+        const versions = ['v1beta', 'v1'];
+        for (const ver of versions) {
+            try {
+                const url = `https://generativelanguage.googleapis.com/${ver}/models?key=${this.apiKey}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.models) {
+                    console.log(`AUTHORIZED MODELS (${ver}):`, data.models.map(m => m.name));
+                    return;
+                }
+                if (data.error) console.error(`Listing Models (${ver}) Error:`, data.error.message);
+            } catch(e) { console.error(`Could not fetch models (${ver}):`, e); }
+        }
+        console.error("All model discovery attempts failed.");
     },
 
     async fetchGemini(modelName) {
-        const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${this.apiKey}`;
+        // Try v1 first, then v1beta
+        const versions = ['v1', 'v1beta'];
+        let lastErr = null;
+
+        for (const ver of versions) {
+            try {
+                const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${this.apiKey}`;
+                return await this._executeFetch(url);
+            } catch (err) {
+                lastErr = err;
+                if (err.message.includes('404')) continue; // Try next version
+                throw err; // Stop on 429 or other errors
+            }
+        }
+        throw lastErr;
+    },
+
+    async _executeFetch(url) {
         const today = new Date().toISOString().split('T')[0];
-        
         let prompt = `You are a conversational Voice Assistant for "MJS PrimeLogic" ERP system.
 You understand spoken Tamil and control the app via JSON commands.
 
@@ -322,29 +345,23 @@ Example: {"action":"create_jobcard", "parameters":{"customerName":"Vignesh", "pr
 
 Output strictly ONLY raw JSON.`;
 
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-            });
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
 
-            if (!response.ok) {
-                const errorBody = await response.json().catch(() => ({}));
-                console.error("Gemini API Full Error:", errorBody);
-                const msg = errorBody.error?.message || response.statusText;
-                throw new Error(`Gemini API error (${response.status}): ${msg}`);
-            }
-
-            const data = await response.json();
-            let resultText = data.candidates[0].content.parts[0].text;
-            resultText = resultText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
-            
-            return JSON.parse(resultText);
-        } catch (err) {
-            console.error("processGlobalAI Exception:", err);
-            throw err;
+        if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({}));
+            console.error("Gemini API Full Error:", errorBody);
+            const msg = errorBody.error?.message || response.statusText;
+            throw new Error(`Gemini API error (${response.status}): ${msg}`);
         }
+
+        const data = await response.json();
+        let resultText = data.candidates[0].content.parts[0].text;
+        resultText = resultText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+        return JSON.parse(resultText);
     },
 
     calculateTomorrow() {
