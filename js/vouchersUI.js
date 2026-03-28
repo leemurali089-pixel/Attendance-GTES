@@ -1978,7 +1978,8 @@ const VouchersUI = {
         for (const idx of readyIndices) {
             const tx = this.currentBankTransactions[idx];
             try {
-                const newVoucher = await VoucherManager.createVoucher(tx.mappedData);
+                const voucherData = tx.mappedVoucher || tx.mappedData;
+                const newVoucher = await VoucherManager.createVoucher(voucherData);
                 tx.converted = true;
                 tx.voucherId = newVoucher.id;
                 successCount++;
@@ -2000,12 +2001,13 @@ const VouchersUI = {
 
         // Pull vouchers from both already converted AND ready-to-import rows
         const sessionVouchers = this.currentBankTransactions
-            .filter(tx => (tx.converted && tx.voucherId) || (tx.isReady && tx.mappedData))
+            .filter(tx => (tx.converted && tx.voucherId) || (tx.isReady && (tx.mappedVoucher || tx.mappedData)))
             .map(tx => {
+                const mv = tx.mappedVoucher || tx.mappedData;
                 if (tx.converted && tx.voucherId) {
                     return VoucherManager.getVoucher(tx.voucherId);
-                } else if (tx.isReady && tx.mappedData) {
-                    return tx.mappedData;
+                } else if (tx.isReady && mv) {
+                    return mv;
                 }
                 return null;
             })
