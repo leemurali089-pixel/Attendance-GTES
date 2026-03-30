@@ -234,6 +234,43 @@ const DataManager = {
      * This runs on app startup and at midnight
      */
     async autoMarkSundayHolidays() {
+        // ALWAYS run deduplication first to heal any historical duplicate bugs
+        let attendance = await this.getAttendance();
+        let dedupCount = 0;
+        let needsSave = false;
+        const seenRecords = new Set();
+        const cleanAttendance = [];
+
+        for (const r of attendance) {
+            // Check if invalid date or something, gracefully recover
+            if (!r.date) { cleanAttendance.push(r); continue; }
+            
+            const rDate = new Date(r.date);
+            if (isNaN(rDate.getTime())) { cleanAttendance.push(r); continue; }
+
+            const dateStrIter = this.formatDate(rDate);
+            const isSun = rDate.getDay() === 0;
+            
+            // Deduplicate 'Holiday' status on Sundays
+            if (isSun && r.status === 'Holiday') {
+                const dupKey = `${r.employee}_${dateStrIter}`;
+                if (seenRecords.has(dupKey)) {
+                    dedupCount++;
+                    needsSave = true;
+                    continue; // Skip the duplicate
+                }
+                seenRecords.add(dupKey);
+            }
+            cleanAttendance.push(r);
+        }
+
+        if (needsSave) {
+            attendance = cleanAttendance;
+            await this.saveAttendance(attendance);
+            console.log(`[Auto-Heal] Removed ${dedupCount} duplicate Sunday records.`);
+        }
+
+        // Now proceed with normal auto-mark logic
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -253,38 +290,8 @@ const DataManager = {
             return;
         }
 
-        // Get existing attendance
-        let attendance = await this.getAttendance();
         let markedCount = 0;
-        let dedupCount = 0;
-
-        // Auto-heal past duplicates: If an employee has multiple 'Holiday' records for the SAME Sunday, delete extras
-        const seenRecords = new Set();
-        const cleanAttendance = [];
-        let needsSave = false;
-
-        for (const r of attendance) {
-            const dateStrIter = this.formatDate(new Date(r.date));
-            const isSun = new Date(r.date).getDay() === 0;
-            
-            if (isSun && r.status === 'Holiday') {
-                const dupKey = `${r.employee}_${dateStrIter}`;
-                if (seenRecords.has(dupKey)) {
-                    dedupCount++;
-                    needsSave = true;
-                    continue; // Skip the duplicate
-                }
-                seenRecords.add(dupKey);
-            }
-            cleanAttendance.push(r);
-        }
-
-        if (needsSave) {
-            attendance = cleanAttendance;
-            await this.saveAttendance(attendance);
-            console.log(`[Auto-Heal] Removed ${dedupCount} duplicate Sunday records.`);
-        }
-
+        
         for (const employee of employees) {
             // Check if this employee already has an attendance record for today
             const existingRecord = attendance.find(a =>
