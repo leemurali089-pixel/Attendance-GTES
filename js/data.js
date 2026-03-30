@@ -158,13 +158,16 @@ const DataManager = {
 
     // Initialize data storage
     async init() {
-        // Initialize FileStorage first
-        const fileStorageEnabled = await FileStorage.init();
+        if (this._initPromise) return this._initPromise;
 
-        console.log(fileStorageEnabled ? 'Using Firebase cloud storage' : 'Using localStorage fallback');
+        this._initPromise = (async () => {
+            // Initialize FileStorage first
+            const fileStorageEnabled = await FileStorage.init();
 
-        // Essential Keys for Login and Branding
-        const coreKeys = [
+            console.log(fileStorageEnabled ? 'Using Firebase cloud storage' : 'Using localStorage fallback');
+
+            // Essential Keys for Login and Branding
+            const coreKeys = [
             this.KEYS.ADMIN_PASSWORD,
             this.KEYS.SETTINGS,
             'gtes_users'
@@ -223,6 +226,7 @@ const DataManager = {
         if (window.SyncManager) {
             window.SyncManager.init();
         }
+        })();
     },
 
     /**
@@ -250,8 +254,36 @@ const DataManager = {
         }
 
         // Get existing attendance
-        const attendance = await this.getAttendance();
+        let attendance = await this.getAttendance();
         let markedCount = 0;
+        let dedupCount = 0;
+
+        // Auto-heal past duplicates: If an employee has multiple 'Holiday' records for the SAME Sunday, delete extras
+        const seenRecords = new Set();
+        const cleanAttendance = [];
+        let needsSave = false;
+
+        for (const r of attendance) {
+            const dateStrIter = this.formatDate(new Date(r.date));
+            const isSun = new Date(r.date).getDay() === 0;
+            
+            if (isSun && r.status === 'Holiday') {
+                const dupKey = `${r.employee}_${dateStrIter}`;
+                if (seenRecords.has(dupKey)) {
+                    dedupCount++;
+                    needsSave = true;
+                    continue; // Skip the duplicate
+                }
+                seenRecords.add(dupKey);
+            }
+            cleanAttendance.push(r);
+        }
+
+        if (needsSave) {
+            attendance = cleanAttendance;
+            await this.saveAttendance(attendance);
+            console.log(`[Auto-Heal] Removed ${dedupCount} duplicate Sunday records.`);
+        }
 
         for (const employee of employees) {
             // Check if this employee already has an attendance record for today
