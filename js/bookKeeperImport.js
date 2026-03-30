@@ -950,7 +950,8 @@ const BookKeeperImport = {
                         type: 'in',
                         quantity: openingStock,
                         date: new Date().toISOString(),
-                        remarks: 'Opening Balance (BookKeeper Import)'
+                        remarks: 'Opening Balance (BookKeeper Import)',
+                        source: 'bookkeeper'
                     });
                 }
                 existingInventory.push(newItem);
@@ -2323,7 +2324,7 @@ const BookKeeperImport = {
                         existingTxns.push({
                             id: `TXN-BK-P-${purchase.v_id}-${Math.random().toString(36).substr(2, 4)}`,
                             materialId: material.id, type: 'in', quantity: parseFloat(i.units || i.quantity) || 0,
-                            date: expense.date, ref: ref, party: expense.vendor, source: 'bookkeeper_import'
+                            date: expense.date, ref: ref, party: expense.vendor, source: 'bookkeeper'
                         });
                     }
                 }
@@ -3023,7 +3024,8 @@ const BookKeeperImport = {
             expenses: DataManager.KEYS ? DataManager.KEYS.EXPENSES : 'gtes_expenses',
             customers: 'customers',
             inventory: 'inventory',
-            purchases: 'gtes_purchases'
+            purchases: 'gtes_purchases',
+            inventoryTransactions: 'inventoryTransactions'
         };
 
         let cleared = 0;
@@ -3031,7 +3033,13 @@ const BookKeeperImport = {
         for (const [type, key] of Object.entries(keys)) {
             try {
                 const all = DataManager.getData(key) || [];
-                const kept = all.filter(item => item.source !== 'bookkeeper');
+                // Aggressive clean up for both current and legacy bugs
+                const kept = all.filter(item => {
+                    const isBookkeeper = item.source === 'bookkeeper' 
+                        || item.source === 'bookkeeper_import' 
+                        || item.remarks === 'Opening Balance (BookKeeper Import)';
+                    return !isBookkeeper;
+                });
                 cleared += (all.length - kept.length);
                 DataManager.saveData(key, kept);
             } catch (e) {
