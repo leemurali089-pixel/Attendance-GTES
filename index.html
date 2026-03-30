@@ -1770,6 +1770,23 @@
                             const summary = BookKeeperImport.getSummary(stats);
                             await BookKeeperImport.cleanupImportedData();
 
+                            // Save sync details to BookKeeperSync config so modal can display them
+                            if (window.BookKeeperSync) {
+                                window.BookKeeperSync.config.lastSyncDetails = {
+                                    time: new Date().getTime(),
+                                    counts: {
+                                        vouchers: stats.vouchers || 0,
+                                        customers: stats.customers || 0,
+                                        inventory: stats.inventory || 0
+                                    },
+                                    path: file.name
+                                };
+                                if (!window.BookKeeperSync.config.backupPath) {
+                                    window.BookKeeperSync.config.backupPath = file.name;
+                                }
+                                window.BookKeeperSync.saveConfig();
+                            }
+
                             // Show detailed report modal
                             const modalBody = document.getElementById('syncReportBody');
                             if (modalBody) {

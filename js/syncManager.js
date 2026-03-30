@@ -266,57 +266,54 @@ const SyncManager = {
         const logList = document.getElementById('syncAuditLogList');
         const bkInfoDiv = document.getElementById('bookKeeperSyncInfo');
 
-        // Update Book Keeper Info
+        // Update Book Keeper Info — always show this section
         if (bkInfoDiv) {
-            if (window.BookKeeperSync && window.BookKeeperSync.config.backupPath) {
-                const details = window.BookKeeperSync.config.lastSyncDetails;
-                const path = window.BookKeeperSync.config.backupPath;
-                const fileName = path.split('\\').pop().split('/').pop();
-                
-                let statsHtml = '';
-                if (details) {
-                    const d = new Date(details.time);
-                    const timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    statsHtml = `
-                        <div class="p-3 rounded border mb-2" style="background: var(--bg-glass); border-color: var(--border-color) !important;">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <div>
-                                    <h6 class="mb-0 text-primary small fw-bold uppercase">Book Keeper Backup</h6>
-                                    <div class="text-muted" style="font-size: 0.7rem;">${fileName}</div>
-                                </div>
-                                <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.triggerSync()">
-                                    <i class="bi bi-arrow-repeat"></i> Sync DB
-                                </button>
+            const bkSync = window.BookKeeperSync;
+            const details = bkSync && bkSync.config.lastSyncDetails ? bkSync.config.lastSyncDetails : null;
+            const backupPath = bkSync && bkSync.config.backupPath ? bkSync.config.backupPath : null;
+
+            if (details) {
+                // Have sync details — show full info
+                const d = new Date(details.time);
+                const timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const fileName = backupPath ? backupPath.split('\\').pop().split('/').pop() : 'BookKeeper Backup';
+                bkInfoDiv.innerHTML = `
+                    <div class="p-3 rounded border mb-2" style="background: var(--bg-glass); border-color: var(--border-color) !important;">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h6 class="mb-0 text-primary small fw-bold"><i class="bi bi-database me-1"></i>Book Keeper Backup</h6>
+                                <div class="text-muted" style="font-size: 0.7rem;">${fileName}</div>
                             </div>
-                            <div class="d-flex justify-content-between small">
-                                <span>Last Imported:</span>
-                                <span class="fw-bold">${timeStr}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mt-2">
-                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.vouchers} Vouchers</span>
-                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.customers} Parties</span>
-                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.inventory} Items</span>
-                            </div>
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="document.getElementById('bkImportFile').click()">
+                                <i class="bi bi-arrow-repeat"></i> Sync Now
+                            </button>
                         </div>
-                    `;
-                } else {
-                    statsHtml = `
-                        <div class="p-3 rounded border border-warning mb-2" style="background: rgba(255, 193, 7, 0.05);">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <h6 class="mb-0 text-warning small fw-bold">Book Keeper Linked</h6>
-                                    <div class="text-muted small">${fileName}</div>
-                                </div>
-                                <button class="btn btn-sm btn-warning py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.triggerSync()">
-                                    <i class="bi bi-arrow-repeat"></i> First Sync
-                                </button>
-                            </div>
+                        <div class="d-flex justify-content-between small mb-2">
+                            <span class="text-muted">Last Imported:</span>
+                            <span class="fw-bold">${timeStr}</span>
                         </div>
-                    `;
-                }
-                bkInfoDiv.innerHTML = statsHtml;
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.vouchers || 0} Vouchers</span>
+                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.customers || 0} Parties</span>
+                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.inventory || 0} Items</span>
+                        </div>
+                    </div>
+                `;
             } else {
-                bkInfoDiv.innerHTML = '';
+                // No sync yet — show prompt with sync button
+                bkInfoDiv.innerHTML = `
+                    <div class="p-3 rounded border mb-2" style="border-color: var(--border-color); background: rgba(255,255,255,0.03);">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0 small fw-bold"><i class="bi bi-database me-1 text-info"></i>Book Keeper Backup</h6>
+                                <div class="text-muted" style="font-size: 0.7rem;">No sync performed yet</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="document.getElementById('bkImportFile').click(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal')).hide();">
+                                <i class="bi bi-arrow-repeat"></i> Sync Now
+                            </button>
+                        </div>
+                    </div>
+                `;
             }
         }
 
