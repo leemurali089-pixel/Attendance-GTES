@@ -186,6 +186,11 @@ const BookKeeperSync = {
                 }
 
                 if (window.BookKeeperImport) {
+                    // Clear old BK data first so deletions are reflected
+                    if (typeof BookKeeperImport.clearBookKeeperData === 'function') {
+                        BookKeeperImport.clearBookKeeperData();
+                    }
+
                     // Run Import
                     const stats = await BookKeeperImport.runFullImport(result.buffer);
                     const isVerified = await this.verifyDataIntegrity();
@@ -194,9 +199,9 @@ const BookKeeperSync = {
                     this.config.lastSyncDetails = {
                         time: new Date().getTime(),
                         counts: {
-                            vouchers: stats.vouchers || 0,
-                            customers: stats.customers || 0,
-                            inventory: stats.inventory || 0
+                            vouchers: stats.vouchers?.imported || 0,
+                            customers: stats.customers?.imported || 0,
+                            inventory: stats.inventory?.imported || 0
                         },
                         path: this.config.backupPath
                     };

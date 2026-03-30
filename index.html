@@ -1783,11 +1783,10 @@
                                         customers: stats.customers?.imported || 0,
                                         inventory: stats.inventory?.imported || 0
                                     },
-                                    path: file.name
+                                    path: file.path || file.name
                                 };
-                                if (!window.BookKeeperSync.config.backupPath) {
-                                    window.BookKeeperSync.config.backupPath = file.name;
-                                }
+                                // Always update backupPath to the newly selected file's absolute path
+                                window.BookKeeperSync.config.backupPath = file.path || file.name;
                                 window.BookKeeperSync.saveConfig();
                             }
 
