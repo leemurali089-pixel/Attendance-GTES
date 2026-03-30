@@ -31,6 +31,11 @@ const SyncManager = {
             this.checkBackup();
         }
 
+        // NEW: Initialize BookKeeper Sync if available
+        if (typeof BookKeeperSync !== 'undefined') {
+            BookKeeperSync.init();
+        }
+
         console.log('SyncManager initialized');
     },
 
