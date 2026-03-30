@@ -3010,6 +3010,46 @@ const BookKeeperImport = {
         };
     },
 
+    /**
+     * Clear all BookKeeper-sourced data before a fresh sync.
+     * This ensures deleted records in BookKeeper are removed here too.
+     */
+    clearBookKeeperData() {
+        console.log('[BK] Clearing previous BookKeeper data...');
+
+        const keys = {
+            vouchers: 'vouchers',
+            invoices: 'invoices',
+            expenses: DataManager.KEYS ? DataManager.KEYS.EXPENSES : 'gtes_expenses',
+            customers: 'customers',
+            inventory: 'inventory',
+            purchases: 'gtes_purchases'
+        };
+
+        let cleared = 0;
+
+        for (const [type, key] of Object.entries(keys)) {
+            try {
+                const all = DataManager.getData(key) || [];
+                const kept = all.filter(item => item.source !== 'bookkeeper');
+                cleared += (all.length - kept.length);
+                DataManager.saveData(key, kept);
+            } catch (e) {
+                console.warn(`[BK] Could not clear ${type}:`, e.message);
+            }
+        }
+
+        // Also clear customers if stored via CustomerManager
+        try {
+            const allCust = CustomerManager.getAllCustomers();
+            const keptCust = allCust.filter(c => c.source !== 'bookkeeper');
+            cleared += (allCust.length - keptCust.length);
+            DataManager.saveData('customers', keptCust);
+        } catch (e) {}
+
+        console.log(`[BK] Cleared ${cleared} BookKeeper records. Ready for fresh import.`);
+    },
+
     async cleanupImportedData() {
         console.log('Starting cleanup of imported data...');
         const invoices = DataManager.getData('invoices') || [];
