@@ -38,9 +38,12 @@ const AccountingUI = {
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2><i class="bi bi-bank text-primary me-2"></i> Accounting</h2>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-outline-info btn-sm" onclick="document.getElementById('bkImportFile').click()">
-                            <i class="bi bi-arrow-repeat"></i> Sync with Book Keeper
-                        </button>
+                        <div class="text-center">
+                            <button class="btn btn-outline-info btn-sm w-100" onclick="document.getElementById('bkImportFile').click()">
+                                <i class="bi bi-arrow-repeat"></i> Sync with Book Keeper
+                            </button>
+                            <div id="lastBKSyncLabel" class="text-muted mt-1" style="font-size: 0.65rem; min-height: 12px;"></div>
+                        </div>
                         <button class="btn btn-outline-warning btn-sm" onclick="AccountingUI.downloadDebugInfo()">
                             <i class="bi bi-bug"></i> Debug Info
                         </button>
@@ -157,6 +160,21 @@ const AccountingUI = {
                 </div>
             </div>
         `;
+
+        // Update last sync label
+        this.updateLastSyncLabel();
+    },
+
+    updateLastSyncLabel() {
+        const label = document.getElementById('lastBKSyncLabel');
+        if (!label) return;
+
+        if (window.BookKeeperSync && window.BookKeeperSync.config.lastSyncDetails) {
+            const d = new Date(window.BookKeeperSync.config.lastSyncDetails.time);
+            label.textContent = `Last Sync: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        } else {
+            label.textContent = 'Never Synced';
+        }
     },
 
     /**

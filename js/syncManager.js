@@ -105,6 +105,9 @@ const SyncManager = {
                             </button>
                         </div>
 
+                        <!-- Book Keeper Sync Details -->
+                        <div id="bookKeeperSyncInfo" class="mb-4"></div>
+
                         <h6 class="pb-2 mb-2" style="border-bottom: 1px solid var(--border-color);">Audit Log</h6>
                         <div class="list-group list-group-flush small" id="syncAuditLogList" style="max-height: 250px; overflow-y: auto;">
                             <!-- Items will be populated here -->
@@ -261,6 +264,61 @@ const SyncManager = {
         const titleDiv = document.getElementById('modalSyncStatusTitle');
         const timeDiv = document.getElementById('modalLastSyncTime');
         const logList = document.getElementById('syncAuditLogList');
+        const bkInfoDiv = document.getElementById('bookKeeperSyncInfo');
+
+        // Update Book Keeper Info
+        if (bkInfoDiv) {
+            if (window.BookKeeperSync && window.BookKeeperSync.config.backupPath) {
+                const details = window.BookKeeperSync.config.lastSyncDetails;
+                const path = window.BookKeeperSync.config.backupPath;
+                const fileName = path.split('\\').pop().split('/').pop();
+                
+                let statsHtml = '';
+                if (details) {
+                    const d = new Date(details.time);
+                    const timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    statsHtml = `
+                        <div class="p-3 rounded border mb-2" style="background: var(--bg-glass); border-color: var(--border-color) !important;">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h6 class="mb-0 text-primary small fw-bold uppercase">Book Keeper Backup</h6>
+                                    <div class="text-muted" style="font-size: 0.7rem;">${fileName}</div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.triggerSync()">
+                                    <i class="bi bi-arrow-repeat"></i> Sync DB
+                                </button>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span>Last Imported:</span>
+                                <span class="fw-bold">${timeStr}</span>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mt-2">
+                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.vouchers} Vouchers</span>
+                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.customers} Parties</span>
+                                <span class="badge bg-light text-dark shadow-sm" style="font-size: 0.65rem;">${details.counts.inventory} Items</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    statsHtml = `
+                        <div class="p-3 rounded border border-warning mb-2" style="background: rgba(255, 193, 7, 0.05);">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0 text-warning small fw-bold">Book Keeper Linked</h6>
+                                    <div class="text-muted small">${fileName}</div>
+                                </div>
+                                <button class="btn btn-sm btn-warning py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.triggerSync()">
+                                    <i class="bi bi-arrow-repeat"></i> First Sync
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+                bkInfoDiv.innerHTML = statsHtml;
+            } else {
+                bkInfoDiv.innerHTML = '';
+            }
+        }
 
         // Update Header Status
         iconDiv.className = 'me-3 fs-1';

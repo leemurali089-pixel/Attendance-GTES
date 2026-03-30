@@ -141,6 +141,9 @@ const BookKeeperSync = {
                     this.saveConfig();
 
                     // Run the actual sync
+                    if (typeof App !== 'undefined' && App.showNotification) {
+                        App.showNotification('Book Keeper backup update detected. Syncing...', 'info');
+                    }
                     await this.triggerSync();
                 }
             } else if (result.error) {
@@ -184,8 +187,20 @@ const BookKeeperSync = {
 
                 if (window.BookKeeperImport) {
                     // Run Import
-                    await BookKeeperImport.runFullImport(result.buffer);
+                    const stats = await BookKeeperImport.runFullImport(result.buffer);
                     const isVerified = await this.verifyDataIntegrity();
+
+                    // Store last sync details
+                    this.config.lastSyncDetails = {
+                        time: new Date().getTime(),
+                        counts: {
+                            vouchers: stats.vouchers || 0,
+                            customers: stats.customers || 0,
+                            inventory: stats.inventory || 0
+                        },
+                        path: this.config.backupPath
+                    };
+                    this.saveConfig();
 
                     if (typeof SyncManager !== 'undefined') {
                         if (isVerified) {
