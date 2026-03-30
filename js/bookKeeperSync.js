@@ -27,11 +27,20 @@ const BookKeeperSync = {
                 issues.push('Invoices missing but vouchers present. Check Sales import.');
             }
 
-            // Check for orphaned inventory transactions
+            // Check for orphaned inventory transactions and auto-repair
             const txns = DataManager.getData('inventoryTransactions') || [];
             const orphanedTxns = txns.filter(t => !inventory.find(m => m.id === t.materialId));
+            
             if (orphanedTxns.length > 0) {
-                issues.push(`${orphanedTxns.length} orphaned inventory transactions found.`);
+                console.warn(`[Sync] Found ${orphanedTxns.length} orphaned inventory txns. Auto-repairing...`);
+                // Auto repair by saving only valid transactions
+                const validTxns = txns.filter(t => inventory.find(m => m.id === t.materialId));
+                DataManager.saveData('inventoryTransactions', validTxns);
+                
+                // Optional: log to sync manager so user knows a repair happened
+                if (typeof SyncManager !== 'undefined') {
+                    SyncManager.logSyncEvent('info', `Auto-repaired ${orphanedTxns.length} orphaned legacy records. DB is clean.`);
+                }
             }
 
             if (issues.length > 0) {
