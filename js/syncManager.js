@@ -276,26 +276,40 @@ const SyncManager = {
                 // Have sync details — show full info
                 const d = new Date(details.time);
                 const timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const fileName = backupPath ? backupPath.split('\\').pop().split('/').pop() : 'BookKeeper Backup';
+                const fileName = backupPath ? backupPath.split('\\').pop().split('/').pop() : (details.path || 'BookKeeper Backup');
+
+                // Normalize count: handle both old {imported: N} format and new number format
+                const getCount = (val) => {
+                    if (typeof val === 'number') return val;
+                    if (val && typeof val === 'object') return val.imported || 0;
+                    return 0;
+                };
+                const vCount = getCount(details.counts.vouchers);
+                const cCount = getCount(details.counts.customers);
+                const iCount = getCount(details.counts.inventory);
+
                 bkInfoDiv.innerHTML = `
-                    <div class="p-3 rounded border mb-2" style="background: var(--bg-glass); border-color: var(--border-color) !important;">
+                    <div class="p-3 rounded mb-2" style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.3);">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <div>
-                                <h6 class="mb-0 text-primary small fw-bold"><i class="bi bi-database me-1"></i>Book Keeper Backup</h6>
-                                <div class="text-muted" style="font-size: 0.7rem;">${fileName}</div>
+                                <div style="color: #60a5fa; font-size: 0.8rem; font-weight: 700;">
+                                    <i class="bi bi-database me-1"></i>Book Keeper Backup
+                                </div>
+                                <div style="color: rgba(255,255,255,0.7); font-size: 0.75rem; margin-top: 2px;">${fileName}</div>
+                                <div style="color: rgba(255,255,255,0.4); font-size: 0.6rem; margin-top: 1px; word-break: break-all;">${backupPath || 'No absolute path saved'}</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="document.getElementById('bkImportFile').click()">
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.initiateNativeSync()">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>
-                        <div class="d-flex justify-content-between small mb-2">
-                            <span class="text-muted">Last Imported:</span>
-                            <span class="fw-bold">${timeStr}</span>
+                        <div class="d-flex justify-content-between align-items-center mb-2" style="font-size: 0.8rem;">
+                            <span style="color: rgba(255,255,255,0.55);">Last Imported:</span>
+                            <span style="color: #fff; font-weight: 600;">${timeStr}</span>
                         </div>
                         <div class="d-flex flex-wrap gap-2">
-                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.vouchers || 0} Vouchers</span>
-                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.customers || 0} Parties</span>
-                            <span class="badge bg-secondary" style="font-size: 0.65rem;">${details.counts.inventory || 0} Items</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${vCount} Vouchers</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${cCount} Parties</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${iCount} Items</span>
                         </div>
                     </div>
                 `;
@@ -308,7 +322,7 @@ const SyncManager = {
                                 <h6 class="mb-0 small fw-bold"><i class="bi bi-database me-1 text-info"></i>Book Keeper Backup</h6>
                                 <div class="text-muted" style="font-size: 0.7rem;">No sync performed yet</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="document.getElementById('bkImportFile').click(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal')).hide();">
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.initiateNativeSync(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal'))?.hide();">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>

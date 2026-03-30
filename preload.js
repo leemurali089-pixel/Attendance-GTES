@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createBackup: () => ipcRenderer.invoke('create-backup'),
     createManualBackup: () => ipcRenderer.invoke('create-manual-backup'),
     readFileBuffer: (path) => ipcRenderer.invoke('read-file-buffer', path),
+    selectBookKeeperDb: () => ipcRenderer.invoke('select-bookkeeper-db'),
 
     // Listeners
     onFileChanged: (callback) => ipcRenderer.on('file-changed', (event, filename) => callback(filename)),

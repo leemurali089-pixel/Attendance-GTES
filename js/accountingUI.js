@@ -39,7 +39,7 @@ const AccountingUI = {
                     <h2><i class="bi bi-bank text-primary me-2"></i> Accounting</h2>
                     <div class="d-flex gap-2">
                         <div class="text-center">
-                            <button class="btn btn-outline-info btn-sm w-100" onclick="document.getElementById('bkImportFile').click()">
+                            <button class="btn btn-outline-info btn-sm w-100" onclick="BookKeeperSync.initiateNativeSync()">
                                 <i class="bi bi-arrow-repeat"></i> Sync with Book Keeper
                             </button>
                             <div id="lastBKSyncLabel" class="text-muted mt-1" style="font-size: 0.65rem; min-height: 12px;"></div>

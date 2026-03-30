@@ -389,6 +389,29 @@ ipcMain.handle('import-backup', async () => {
         return { success: false, error: error.message };
     }
 });
+
+// Select Book Keeper Database File (for getting absolute path)
+ipcMain.handle('select-bookkeeper-db', async () => {
+    try {
+        const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+            title: 'Select Book Keeper Database (.db)',
+            buttonLabel: 'Select Database',
+            filters: [
+                { name: 'BookKeeper Database', extensions: ['db', 'sqlite'] },
+                { name: 'All Files', extensions: ['*'] }
+            ],
+            properties: ['openFile']
+        });
+
+        if (canceled || !filePaths || filePaths.length === 0) {
+            return { success: false, canceled: true };
+        }
+        
+        return { success: true, path: filePaths[0] };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
 // Save PDF to specific folder (PRD Requirement)
 ipcMain.handle('save-pdf', async (event, { blobBase64, filename, subfolder }) => {
     try {

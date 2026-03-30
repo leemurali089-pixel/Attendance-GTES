@@ -150,6 +150,9 @@ const BookKeeperSync = {
                 // Only log once to avoid console spam in intervals
                 if (!this._lastError) {
                     console.warn('[Sync] File check error:', result.error);
+                    if (typeof SyncManager !== 'undefined') {
+                        SyncManager.logSyncEvent('error', 'Auto-watch error: ' + result.error + ' [' + this.config.backupPath + ']');
+                    }
                     this._lastError = result.error;
                 }
             } else {
@@ -157,6 +160,48 @@ const BookKeeperSync = {
             }
         } catch (error) {
             console.error('[Sync] Unexpected error during file check:', error);
+        }
+    },
+
+    /**
+     * Shows native file dialog to pick database and get absolute path
+     */
+    async initiateNativeSync() {
+        if (!window.electronAPI || !window.electronAPI.selectBookKeeperDb) {
+            if (window.App && App.showNotification) App.showNotification('Native file picker not available. Please restart the app.', 'error');
+            return;
+        }
+
+        try {
+            const result = await window.electronAPI.selectBookKeeperDb();
+            
+            if (result.canceled) return;
+
+            if (!result.success || !result.path) {
+                if (window.App && App.showNotification) App.showNotification('Error selecting file: ' + (result.error || 'Unknown'), 'error');
+                return;
+            }
+
+            console.log('[Sync] Natively selected absolute path:', result.path);
+
+            // Save the absolute path
+            this.config.backupPath = result.path;
+            
+            // Force a baseline reset so the background auto watcher registers this as the new master
+            this.config.lastModified = 0;
+            this.saveConfig();
+
+            // Run the actual Sync
+            await this.triggerSync();
+            
+            // If the modal was open, gracefully reload it so the new path renders
+            if (typeof SyncManager !== 'undefined' && document.getElementById('syncStatusModal')) {
+                SyncManager.updateAuditModalUI();
+            }
+
+        } catch (e) {
+            console.error('[Sync] Native dialgue error:', e);
+            if (window.App && App.showNotification) App.showNotification('Failed to open file picker.', 'error');
         }
     },
 
