@@ -223,6 +223,17 @@ ipcMain.handle('get-file-stats', async (event, key) => {
     }
 });
 
+// NEW: Get external file stats (for Book Keeper sync)
+ipcMain.handle('get-external-file-stats', async (event, absolutePath) => {
+    try {
+        if (!absolutePath) throw new Error('Path is required');
+        const stats = await fs.stat(absolutePath);
+        return { success: true, lastModified: stats.mtimeMs, size: stats.size };
+    } catch (error) {
+        return { success: false, error: error.code || error.message };
+    }
+});
+
 // Check if file exists
 ipcMain.handle('file-exists', async (event, key) => {
     try {

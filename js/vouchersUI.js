@@ -743,9 +743,11 @@ const VouchersUI = {
                 </select>
                 <select id="bsStatusFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
                     <option value="" ${filters.status === '' ? 'selected' : ''}>All Status</option>
-                    <option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>Pending</option>
-                    <option value="imported" ${filters.status === 'imported' ? 'selected' : ''}>Imported</option>
+                    <option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>Pending (Needs Action)</option>
+                    <option value="ready" ${filters.status === 'ready' ? 'selected' : ''}>Ready for Import</option>
+                    <option value="imported" ${filters.status === 'imported' ? 'selected' : ''}>Imported (This Session)</option>
                     <option value="matched" ${filters.status === 'matched' ? 'selected' : ''}>Auto-Matched</option>
+                    <option value="exists" ${filters.status === 'exists' ? 'selected' : ''}>Already in DB</option>
                 </select>
                 <span id="bsRowCount" class="text-muted small ms-auto"></span>
             </div>
@@ -800,14 +802,19 @@ const VouchersUI = {
             
             const desc = (descTd?.textContent || '').toLowerCase();
             const isDebit = debitTd?.textContent.trim() !== '';
-            const isImported = row.classList.contains('table-active');
+            const isImported = row.classList.contains('bs-imported-row') && !descTd?.innerText.includes('Already Exists');
+            const isExists = descTd?.innerText.includes('Already Exists');
+            const isReady = row.classList.contains('bs-ready-row');
             const hasMatch = descTd?.querySelector('.badge.bg-primary') !== null;
 
             const partyOk = !partyQ || desc.includes(partyQ);
             const typeOk = !typeQ || (typeQ === 'debit' && isDebit) || (typeQ === 'credit' && !isDebit);
+            
             let statusOk = true;
             if (statusQ === 'imported') statusOk = isImported;
-            else if (statusQ === 'pending') statusOk = !isImported;
+            else if (statusQ === 'ready') statusOk = isReady;
+            else if (statusQ === 'exists') statusOk = isExists;
+            else if (statusQ === 'pending') statusOk = !isImported && !isReady && !isExists;
             else if (statusQ === 'matched') statusOk = hasMatch;
 
             const show = partyOk && typeOk && statusOk;

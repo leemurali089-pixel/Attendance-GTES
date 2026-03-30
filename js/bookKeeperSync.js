@@ -120,32 +120,40 @@ const BookKeeperSync = {
         }
 
         try {
-            const result = await window.electronAPI.getFileStats(this.config.backupPath);
-            // Note: getFileStats in main.js currently expects a key relative to DATA_FOLDER. 
-            // We might need to ask the user to move the DB or update main.js to handle absolute paths for this specific check.
-            // However, relying on the 'bookKeeperImport.js' logic, we load the file content.
+            const result = await window.electronAPI.getExternalFileStats(this.config.backupPath);
+            
+            if (result.success && result.lastModified) {
+                // Initial load / bootstrap: If we don't have a baseline yet, set it now.
+                if (!this.config.lastModified) {
+                    this.config.lastModified = result.lastModified;
+                    this.saveConfig();
+                    console.log('[Sync] Initialized baseline timestamp:', new Date(result.lastModified).toLocaleString());
+                    return;
+                }
 
-            // FIXME: The main.js `get-file-stats` handles files in the Data folder. 
-            // We need a way to check an absolute path.
-            // For now, let's assume valid access or use the manual import trigger if auto check fails.
+                // Comparison: Has the file been modified since our last check?
+                if (result.lastModified > this.config.lastModified) {
+                    console.log('[Sync] Change detected! Auto-triggering import...');
+                    console.log(`[Sync] Old: ${new Date(this.config.lastModified).toLocaleString()}, New: ${new Date(result.lastModified).toLocaleString()}`);
+                    
+                    // Update baseline immediately to prevent multiple triggers if import is slow
+                    this.config.lastModified = result.lastModified;
+                    this.saveConfig();
 
-            // Actually, we can just try to "import" it. 
-            // If the file timestamp hasn't changed, the import module might optimize? 
-            // No, the import module is heavy. We need a lightweight stat check.
-
-            // Let's rely on the user manually selecting the file for "import" for now to bootstrap,
-            // and then we can look at adding `ipc` for watching external files.
-
-            // For this phase, let's simulate the check or re-use the import logic if appropriate.
-            // Since we can't easily `fs.stat` an arbitrary path without main process support for arbitrary paths:
-
-            // WORKAROUND: We will trigger a silent import if `autoSync` is on, but carefully.
-            // Better approach: Add `check-external-file` to main.js. 
-
-            // For this implementation step, I will trigger the import logic directly if I can.
-
+                    // Run the actual sync
+                    await this.triggerSync();
+                }
+            } else if (result.error) {
+                // Only log once to avoid console spam in intervals
+                if (!this._lastError) {
+                    console.warn('[Sync] File check error:', result.error);
+                    this._lastError = result.error;
+                }
+            } else {
+                this._lastError = null;
+            }
         } catch (error) {
-            console.error('File check error', error);
+            console.error('[Sync] Unexpected error during file check:', error);
         }
     },
 
