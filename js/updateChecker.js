@@ -20,10 +20,10 @@ const UpdateChecker = {
         // For now, this is a placeholder
         // Future: fetch('https://yourserver.com/version.json')
         return {
-            updateAvailable: false,
-            latestVersion: this.currentVersion,
-            releaseNotes: '',
-            downloadUrl: ''
+            updateAvailable: false, // Set to true to test the notification modal
+            latestVersion: '1.3.0',
+            releaseNotes: '• Unified Invoice & Purchase Layouts\n• Robust Vendor Name Cleaning\n• Fixed Table Column Overlaps\n• Enhanced Page-Break Support\n• Import Safeguards for Messy Data',
+            downloadUrl: 'https://github.com/leemurali089-pixel/Attendance-GTES/releases'
         };
     },
 
