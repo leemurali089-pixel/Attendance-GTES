@@ -1,11 +1,12 @@
 {
     "name": "attendance-gtes",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "description": "MJS PrimeLogic - Attendance & Salary Management System",
     "main": "main.js",
     "author": "Murali D",
     "scripts": {
-        "start": "electron .",
+        "start": "node node_modules/electron/cli.js .",
+        "start:electron": "electron .",
         "build": "electron-builder"
     },
     "productName": "MJS PrimeLogic",

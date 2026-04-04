@@ -18,16 +18,23 @@ ipcMain.handle('hash-password', async (event, password) => {
 });
 
 ipcMain.handle('verify-password', async (event, password, storedHash) => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+        if (storedHash == null || typeof storedHash !== 'string') {
+            resolve(false);
+            return;
+        }
         const [salt, originalHash] = storedHash.split(':');
         if (!salt || !originalHash) {
-            // Fallback for plain text (migration phase)
             resolve(password === storedHash);
             return;
         }
 
         crypto.pbkdf2(password, salt, 1000, 64, 'sha512', (err, derivedKey) => {
-            if (err) reject(err);
+            if (err) {
+                console.error('verify-password pbkdf2 error:', err);
+                resolve(false);
+                return;
+            }
             resolve(originalHash === derivedKey.toString('hex'));
         });
     });
