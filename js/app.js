@@ -45,26 +45,17 @@ const App = {
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
         let loginScreenReady = false;
-        try {
-            // Initialize data (now async for file storage)
-            await DataManager.init();
+        // Wire UI first so login still works if cloud/prefetch throws later
+        this.setupNavigation();
+        this.setupEventListeners();
+        this.initTheme();
 
-            // Initialize User Manager
+        try {
+            await DataManager.init();
             await UserManager.init();
 
-            // Check authentication status
             const loggedIn = await this.checkLoginStatus();
 
-            // Setup navigation
-            this.setupNavigation();
-
-            // Setup event listeners
-            this.setupEventListeners();
-
-            // Initialize theme
-            this.initTheme();
-
-            // Update Company Branding
             await this.updateCompanyBranding();
 
             // When logged out, dismiss the full-screen loader immediately so the login form is usable.
@@ -78,6 +69,11 @@ const App = {
             }
         } catch (error) {
             console.error('App initialization error:', error);
+            try {
+                await UserManager.init();
+            } catch (e2) {
+                console.error('UserManager.init fallback failed:', e2);
+            }
             alert('Application failed to initialize: ' + error.message);
         } finally {
             if (!loginScreenReady) {
@@ -374,8 +370,8 @@ const App = {
         if (loginForm) {
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const username = document.getElementById('loginUsername').value;
-                const password = document.getElementById('loginPassword').value;
+                const username = document.getElementById('loginUsername').value.trim();
+                const password = document.getElementById('loginPassword').value.trim();
                 const errorDiv = document.getElementById('loginError');
 
                 try {
@@ -483,17 +479,18 @@ const App = {
                         document.getElementById('loginPassword').value = '';
                         if (errorDiv) errorDiv.classList.add('d-none');
                     } else {
-                        // Login failed
                         if (errorDiv) {
-                            errorDiv.textContent = result.message;
+                            errorDiv.textContent = result.message || 'Invalid username or password';
                             errorDiv.classList.remove('d-none');
+                            errorDiv.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                         }
                     }
                 } catch (error) {
                     console.error('Login error:', error);
                     if (errorDiv) {
-                        errorDiv.textContent = 'An error occurred during login';
+                        errorDiv.textContent = 'An error occurred during login. Check the console for details.';
                         errorDiv.classList.remove('d-none');
+                        errorDiv.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                     }
                 }
             });

@@ -56,9 +56,6 @@ const DataManager = {
     /** On load, union-merge with localStorage so cloud snapshots cannot drop newer invoices/DCs/vouchers */
     MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans']),
 
-    /** Security-sensitive keys — NEVER overwrite from cloud. Always trust local file/localStorage. */
-    LOCAL_ONLY_KEYS: new Set(['gtes_users', 'gtes_current_user']),
-
     _mergeRecordArraysById(localArr, cloudArr) {
         const a = Array.isArray(localArr) ? localArr : [];
         const b = Array.isArray(cloudArr) ? cloudArr : [];
@@ -230,10 +227,16 @@ const DataManager = {
         ];
 
         console.log("[DataManager]: Prefetching all data modules in parallel...");
-        
-        // Fetch everything at once! This is much faster than sequential calls.
+
         const allKeys = [...coreKeys, ...dataKeys];
-        const results = await Promise.all(allKeys.map(key => this.loadData(key)));
+        const results = await Promise.all(allKeys.map(async (key) => {
+            try {
+                return await this.loadData(key);
+            } catch (err) {
+                console.error(`[DataManager] Prefetch failed for '${key}' (other keys still load):`, err);
+                return null;
+            }
+        }));
         
         // Quick verification/initialization for just the absolute essentials
         const passwordIdx = allKeys.indexOf(this.KEYS.ADMIN_PASSWORD);
@@ -410,48 +413,11 @@ const DataManager = {
             const canProceed = await window.SyncManager.checkConflict(key);
             if (!canProceed) return false;
         }
-        // Security guard: credentials are NEVER pushed to cloud
-        if (this.LOCAL_ONLY_KEYS && this.LOCAL_ONLY_KEYS.has(key)) {
-            // Also save via Electron IPC (local JSON file) if available
-            if (window.electronAPI) {
-                window.electronAPI.saveData(key, data).catch(e =>
-                    console.warn(`[DataManager] IPC save for '${key}' failed:`, e)
-                );
-            }
-            console.log(`[DataManager] '${key}' saved locally only (security key — cloud skipped).`);
-            return true;
-        }
         return await FileStorage.saveData(key, data);
     },
 
     async loadData(key) {
-        // Security guard: never let cloud overwrite user credentials or session data
-        if (this.LOCAL_ONLY_KEYS && this.LOCAL_ONLY_KEYS.has(key)) {
-            let localData = null;
-            try {
-                const raw = localStorage.getItem(key);
-                if (raw) localData = JSON.parse(raw);
-            } catch (e) { localData = null; }
-            // Tier 3 (Electron only): fall back to the local JSON file
-            if ((localData === null || localData === undefined) && window.electronAPI) {
-                try {
-                    const fileResult = await window.electronAPI.loadData(key);
-                    if (fileResult && fileResult.success && fileResult.data) {
-                        localData = fileResult.data;
-                        // Warm up localStorage so next call is fast
-                        try { localStorage.setItem(key, JSON.stringify(localData)); } catch (_) {}
-                        console.log(`[DataManager] '${key}' recovered from Electron local file.`);
-                    }
-                } catch (e) {
-                    console.warn(`[DataManager] IPC load fallback failed for '${key}':`, e);
-                }
-            }
-            if (localData !== null && localData !== undefined) {
-                this._cache[key] = localData;
-            }
-            console.log(`[DataManager] '${key}' loaded from LOCAL only (security key).`);
-            return localData;
-        }
+
         let localParsed = null;
         try {
             const raw = localStorage.getItem(key);
@@ -460,7 +426,13 @@ const DataManager = {
             localParsed = null;
         }
 
-        let data = await FileStorage.loadData(key);
+        let data;
+        try {
+            data = await FileStorage.loadData(key);
+        } catch (err) {
+            console.error(`[DataManager] FileStorage.loadData('${key}') failed:`, err);
+            data = null;
+        }
 
         if (data === null || data === undefined) {
             data = localParsed;
@@ -489,7 +461,10 @@ const DataManager = {
             const loc = Array.isArray(localParsed) ? localParsed : [];
             const merged = this._mergeRecordArraysById(loc, data);
             if (merged.length !== data.length || merged.length !== loc.length) {
-                console.warn(`[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s).`);
+                console.warn(
+                    `[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
+                    '(Union by id; fewer rows usually means duplicate ids or cloud rows without `id` — not a login error.)'
+                );
             }
             data = merged;
         }
