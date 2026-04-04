@@ -60,6 +60,7 @@
 .invoice-sheet,
 #challanPrintArea,
 #invoicePrintArea,
+#purchasePrintArea,
 #jobCardPrintArea {
     background-color: #ffffff !important;
     color: #1a202c !important;
@@ -76,6 +77,7 @@
 .invoice-sheet .text-muted,
 #challanPrintArea .text-muted,
 #invoicePrintArea .text-muted,
+#purchasePrintArea .text-muted,
 #jobCardPrintArea .text-muted,
 #jobCardPrintArea label {
     color: #64748b !important;
@@ -164,17 +166,17 @@
     background-color: rgba(15, 23, 42, 0.95) !important;
 }
 
-[data-theme="light"] .navbar-brand {
-    color: var(--text-primary) !important;
-}
-
-[data-theme="light"] .navbar-brand,
-[data-theme="light"] .nav-link,
-[data-theme="light"] .nav-text {
+/* Navbar only: light text on dark bar (do not target all .nav-link — breaks analytics pills, tabs, etc.) */
+[data-theme="light"] .navbar .navbar-brand {
     color: #f8fafc !important;
 }
 
-[data-theme="light"] .nav-link.active {
+[data-theme="light"] .navbar .nav-link,
+[data-theme="light"] .navbar .nav-text {
+    color: #f8fafc !important;
+}
+
+[data-theme="light"] .navbar .nav-link.active {
     color: #fff !important;
 }
 
@@ -217,10 +219,15 @@
     background: linear-gradient(135deg, #e3f2fd 0%, #f5f5f5 50%, #fce4ec 100%);
 }
 
-/* Icons and buttons in light mode - dark colors */
+/* Icons in light mode — default dark; buttons/navbar/footer override below */
 [data-theme="light"] .bi,
 [data-theme="light"] i {
     color: #1a202c !important;
+}
+
+[data-theme="light"] .btn i,
+[data-theme="light"] .btn .bi {
+    color: currentColor !important;
 }
 
 [data-theme="light"] .navbar .bi,
@@ -376,6 +383,61 @@
 
 [data-theme="light"] .table td {
     color: #2d3748 !important;
+}
+
+/* Accounting & any Bootstrap dark tables/cards: light theme must not force dark text on dark surfaces */
+[data-theme="light"] .table.table-dark th,
+[data-theme="light"] .table.table-dark td {
+    color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .table.table-dark thead th {
+    color: #f8fafc !important;
+}
+
+[data-theme="light"] .table.table-dark tbody td .text-info {
+    color: #7dd3fc !important;
+}
+
+[data-theme="light"] .card.bg-dark .card-title,
+[data-theme="light"] .card.bg-dark h4,
+[data-theme="light"] .card.bg-dark h5 {
+    color: #f8fafc !important;
+}
+
+[data-theme="light"] .card.bg-dark .card-header {
+    background: rgba(15, 23, 42, 0.94) !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.35) !important;
+    color: #f8fafc !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-muted {
+    color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .card.bg-dark .bi,
+[data-theme="light"] .card.bg-dark i {
+    color: inherit !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-success {
+    color: #4ade80 !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-warning {
+    color: #fbbf24 !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-info {
+    color: #38bdf8 !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-primary {
+    color: #93c5fd !important;
+}
+
+[data-theme="light"] .card.bg-dark .text-danger {
+    color: #f87171 !important;
 }
 
 [data-theme="light"] .table tbody tr:hover {
@@ -570,7 +632,7 @@ body {
 .btn:hover,
 .card:hover,
 .quick-action-btn:hover,
-.nav-link:hover,
+.navbar .nav-link:hover,
 .table tbody tr:hover,
 .form-control:focus,
 .form-select:focus,
@@ -796,7 +858,8 @@ a:hover {
     z-index: 1;
 }
 
-.nav-link {
+/* Main navbar links only — global .nav-link was breaking analytics pills & modals (column layout, min-width). */
+.navbar .nav-link {
     color: var(--text-secondary) !important;
     font-weight: 500;
     padding: 0.5rem 1.25rem !important;
@@ -811,40 +874,54 @@ a:hover {
     min-width: 90px;
     position: relative;
     background: transparent !important;
-    /* Remove default background */
     box-shadow: none !important;
-    /* Remove default shadow */
 }
 
-.nav-icon {
+.navbar .nav-icon {
     font-size: 1.25rem;
     line-height: 1;
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.nav-text {
+.navbar .nav-text {
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.02em;
 }
 
-.nav-link:hover {
+.navbar .nav-link:hover {
     color: var(--text-primary) !important;
     background: transparent !important;
 }
 
-.nav-link:hover .nav-icon {
+.navbar .nav-link:hover .nav-icon {
     transform: translateY(-2px);
 }
 
-.nav-link.active {
+.navbar .nav-link.active {
     color: #fff !important;
     background: transparent !important;
     box-shadow: none !important;
 }
 
-.nav-link.active .nav-icon {
+.navbar .nav-link.active .nav-icon {
     transform: translateY(-2px);
+}
+
+/* Business Analytics sub-nav: horizontal pills, always on top of dashboard cards */
+#analyticsView #analyticsTabs {
+    position: relative;
+    z-index: 5;
+    list-style: none;
+}
+
+#analyticsView #analyticsTabs .nav-link {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: auto !important;
+    gap: 0.35rem;
 }
 
 /* Magic Indicator */
@@ -1148,11 +1225,29 @@ a:hover {
     background-color: rgba(59, 130, 246, 0.05);
 }
 
-.table tbody td:first-child,
-.table tbody td:nth-child(2) {
+/* Do not apply theme primary on dark tables — light theme uses dark --text-primary */
+.table:not(.table-dark) tbody td:first-child,
+.table:not(.table-dark) tbody td:nth-child(2) {
     color: var(--text-primary);
     font-weight: 500;
     background-color: transparent;
+}
+
+/* Bootstrap table-dark: keep body cells readable in both themes */
+.table.table-dark tbody td {
+    color: #e2e8f0;
+}
+
+.table.table-dark thead th {
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .table.table-dark tbody td {
+    color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .table.table-dark thead th {
+    color: #f8fafc !important;
 }
 
 /* Override Bootstrap's table-secondary to ensure text is always readable */
@@ -1893,19 +1988,25 @@ footer p {
 @keyframes slideUpFade {
     from {
         opacity: 0;
-        transform: translateY(20px);
-        filter: blur(5px);
+        transform: translateY(12px);
     }
 
     to {
         opacity: 1;
         transform: translateY(0);
-        filter: blur(0);
     }
 }
 
 .view-section {
-    animation: slideUpFade 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity: 1;
+    animation: slideUpFade 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* Reserve space + stacking so analytics pills are never collapsed under KPI row */
+.gtes-analytics-subnav-mount {
+    position: relative;
+    z-index: 6;
+    min-height: 3.25rem;
 }
 
 /* Calendar Overrides */
@@ -2375,6 +2476,235 @@ footer p {
     border-bottom: 2px solid var(--primary-color);
 }
 
+/* Analytics & in-app nav-pills (not inside .navbar) — readable in both themes */
+[data-theme="light"] #analyticsView .nav-pills .nav-link {
+    color: #334155 !important;
+}
+
+[data-theme="light"] #analyticsView .nav-pills .nav-link:not(.active) i,
+[data-theme="light"] #analyticsView .nav-pills .nav-link:not(.active) .bi {
+    color: #475569 !important;
+}
+
+[data-theme="light"] #analyticsView .nav-pills .nav-link.active,
+[data-theme="light"] #analyticsView .nav-pills .nav-link.active i,
+[data-theme="light"] #analyticsView .nav-pills .nav-link.active .bi {
+    color: #fff !important;
+}
+
+[data-theme="dark"] #analyticsView .nav-pills .nav-link:not(.active) {
+    color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] #analyticsView .nav-pills .nav-link:not(.active) i,
+[data-theme="dark"] #analyticsView .nav-pills .nav-link:not(.active) .bi {
+    color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] #analyticsView .nav-pills .nav-link.active,
+[data-theme="dark"] #analyticsView .nav-pills .nav-link.active i,
+[data-theme="dark"] #analyticsView .nav-pills .nav-link.active .bi {
+    color: #fff !important;
+}
+
+[data-theme="light"] #analyticsView .btn-outline-light {
+    color: #1e293b !important;
+    border-color: #64748b !important;
+    background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+[data-theme="light"] #analyticsView .btn-outline-light:hover {
+    color: #0f172a !important;
+    background-color: #f1f5f9 !important;
+    border-color: #475569 !important;
+}
+
+[data-theme="dark"] #analyticsView h2 {
+    color: var(--text-primary) !important;
+}
+
+/* Analytics: stronger dark-mode contrast (labels, lists, charts) */
+[data-theme="dark"] #analyticsView .text-muted {
+    color: #94a3b8 !important;
+}
+
+[data-theme="dark"] #analyticsView .card-header h6 {
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] #analyticsView .list-group-item {
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] #analyticsView .nav-pills .nav-link.active {
+    background-color: #2563eb !important;
+    color: #fff !important;
+    border: 1px solid #60a5fa;
+}
+
+[data-theme="dark"] #analyticsView .nav-pills .nav-link:not(.active) {
+    background-color: rgba(148, 163, 184, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-muted {
+    color: #94a3b8 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-chart-label {
+    color: #94a3b8 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-chart-legend {
+    color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-alert .gtes-analytics-alert-msg {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-analytics-alert .gtes-analytics-alert-msg {
+    color: #334155 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-table {
+    --bs-table-bg: rgba(15, 23, 42, 0.55);
+    --bs-table-color: #e2e8f0;
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-table thead th {
+    background: rgba(30, 41, 59, 0.98) !important;
+    color: #f8fafc !important;
+    border-color: #475569 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-table tbody td {
+    border-color: #334155 !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-analytics-table {
+    --bs-table-bg: #fff;
+    --bs-table-color: #0f172a;
+    color: #0f172a;
+}
+
+[data-theme="light"] #analyticsView .gtes-analytics-table thead th {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+}
+
+/* GST report blocks inside Analytics */
+[data-theme="dark"] #analyticsView .gtes-gst-inner-card,
+[data-theme="dark"] #analyticsView .gtes-gst-metric-card {
+    background: rgba(15, 23, 42, 0.78);
+    color: #e2e8f0;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-inner-card,
+[data-theme="light"] #analyticsView .gtes-gst-metric-card {
+    background: #fff;
+    color: #0f172a;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-report-table td,
+[data-theme="dark"] #analyticsView .gtes-gst-report-table th {
+    color: #e2e8f0;
+    border-color: #475569;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-report-table thead th {
+    background: rgba(30, 41, 59, 0.98) !important;
+    color: #f8fafc !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-report-table td,
+[data-theme="light"] #analyticsView .gtes-gst-report-table th {
+    color: #0f172a;
+    border-color: #cbd5e1;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-report-table thead th {
+    background: #f1f5f9 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-row-accent {
+    background: rgba(37, 99, 235, 0.28) !important;
+    color: #f8fafc !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-row-success {
+    background: rgba(22, 163, 74, 0.22) !important;
+    color: #ecfdf5 !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-row-payable {
+    background: rgba(220, 38, 38, 0.22) !important;
+    color: #fef2f2 !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-row-accent {
+    background: rgba(59, 130, 246, 0.15) !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-row-success {
+    background: rgba(34, 197, 94, 0.15) !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-row-payable {
+    background: rgba(248, 113, 113, 0.2) !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-section-title {
+    color: #f1f5f9 !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-section-title {
+    color: #0f172a !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-metric-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-metric-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-small {
+    color: #94a3b8 !important;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-small {
+    color: #64748b !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-gst-hsn {
+    font-family: ui-monospace, monospace;
+    color: #7dd3fc;
+}
+
+[data-theme="light"] #analyticsView .gtes-gst-hsn {
+    font-family: ui-monospace, monospace;
+    color: #0369a1;
+}
+
+#analyticsView .gtes-gst-hsn-full,
+#analyticsView .gtes-gst-lines-scroll .gtes-gst-hsn-full {
+    white-space: normal;
+    word-break: break-all;
+    vertical-align: top;
+}
+
+#analyticsView .gtes-gst-lines-scroll {
+    max-height: 480px;
+    overflow: auto;
+}
+
 /* Fix modal title visibility in light mode */
 [data-theme="light"] .modal-title {
     color: #1a202c !important;
@@ -2485,4 +2815,81 @@ footer p {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
+
+    #invoicePrintArea .gtes-pdf-document,
+    #purchasePrintArea .gtes-pdf-document,
+    #pdfPreviewContainer .gtes-pdf-document {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+/* PDF preview / html2canvas: table-based sections avoid flex–grid overlap (“collaged” PDFs) */
+.gtes-pdf-document {
+    box-sizing: border-box;
+    position: relative;
+    isolation: isolate;
+}
+
+.gtes-pdf-document *,
+.gtes-pdf-document *::before,
+.gtes-pdf-document *::after {
+    box-sizing: border-box;
+}
+
+.gtes-pdf-break-safe {
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+#invoicePrintArea,
+#purchasePrintArea {
+    display: block !important;
+    text-align: center;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Shared PDF preview: grey workspace, white “page”, minimal gutter */
+.modal .gtes-pdf-preview-body {
+    background: #525659 !important;
+    padding: 0 !important;
+    min-height: 50vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+}
+
+#pdfPreviewModal #pdfPreviewContainer.gtes-pdf-preview-sheet {
+    background: #fff !important;
+    margin: 8px auto 16px !important;
+    padding: 0 !important;
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+    transform-origin: top center;
+    max-width: calc(100% - 16px);
+    width: fit-content;
+}
+
+.modal .gtes-pdf-preview-body .gtes-pdf-preview-sheet {
+    background: #fff !important;
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+    margin: 8px auto 16px !important;
+}
+
+#invoicePrintArea .gtes-pdf-document,
+#purchasePrintArea .gtes-pdf-document,
+#pdfPreviewContainer .gtes-pdf-document {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+    width: 760px !important;
+    min-width: 760px !important;
+    max-width: none !important;
+}
+
+#pdfPreviewContainer {
+    overflow-x: auto;
+    max-width: 100%;
 }

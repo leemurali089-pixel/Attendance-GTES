@@ -329,7 +329,7 @@ const VouchersUI = {
                                         </div>
                                         <div class="col-md-3">
                                             <div class="vch-form-label">Voucher No.</div>
-                                            <input type="text" class="form-control vch-form-control highlight-vch" name="voucherId" id="voucherIdField" value="${VoucherManager.getNextVoucherNumber(type)}" required>
+                                            <input type="text" class="form-control vch-form-control highlight-vch" name="voucherId" id="voucherIdField" value="${VoucherManager.getNextVoucherNumber(type, new Date(), this.currentMode)}" required>
                                         </div>
                                         <div class="col-md-3">
                                             <div class="vch-form-label">Date</div>
@@ -446,7 +446,9 @@ const VouchersUI = {
         // Update Voucher No for the new type
         const idField = document.getElementById('voucherIdField');
         if (idField) {
-            idField.value = VoucherManager.getNextVoucherNumber(type);
+            const dateInput = document.querySelector('#createVoucherForm [name="date"]');
+            const d = dateInput && dateInput.value ? new Date(dateInput.value) : new Date();
+            idField.value = VoucherManager.getNextVoucherNumber(type, d, this.currentMode);
         }
     },
 
@@ -1642,9 +1644,9 @@ const VouchersUI = {
     },
 
     onPartySelect(input) {
-        const name = input.value;
+        const name = (input && input.value ? input.value : '').trim();
         const customers = DataManager.getData('customers') || [];
-        const customer = customers.find(c => c.name === name);
+        const customer = customers.find(c => (c.name || '').trim().toLowerCase() === name.toLowerCase());
 
         const container = document.getElementById('invoiceLinkingSection');
         const tbody = document.getElementById('pendingInvoicesBody');
@@ -1657,17 +1659,18 @@ const VouchersUI = {
         const otherPendingTx = (VouchersUI.currentBankTransactions || []).filter((_, i) => i !== currentIndex);
 
         if (!name) {
-            container.classList.add('d-none');
+            if (container) container.classList.add('d-none');
             return;
         }
+        if (!container || !tbody) return;
 
         let pendingDocs = [];
         const isPayment = voucherType === 'payment';
 
         if (isPayment) {
-            // Load Pending Purchase Bills (Expenses)
-            const expenses = DataManager.getData('gtes_expenses') || []; 
-            const purchases = DataManager.getData('purchases') || []; 
+            // Load Pending Purchase Bills (EXPENSES key is 'purchases'; legacy 'gtes_expenses')
+            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+            const purchases = DataManager.getData('purchases') || [];
             
             // Deduplicate by ID to prevent same bill appearing twice
             // Use same priority as line 1554 for the key to ensure consistency
@@ -1679,30 +1682,33 @@ const VouchersUI = {
                 }
             });
             
-            pendingDocs = Array.from(uniqueDocsMap.values()).filter(doc =>
-                (doc.vendor === name || doc.customerName === name || doc.partyName === name || doc.supplier === name) && 
-                (doc.status !== 'paid' && doc.status !== 'cancelled')
-            );
+            const nameLc = name.toLowerCase();
+            pendingDocs = Array.from(uniqueDocsMap.values()).filter(doc => {
+                const party = (doc.vendor || doc.customerName || doc.partyName || doc.supplier || '').toString().trim().toLowerCase();
+                const partyMatch = party === nameLc;
+                const st = (doc.status || '').toLowerCase();
+                return partyMatch && st !== 'paid' && st !== 'cancelled';
+            });
 
         } else {
-            // Load Pending Sales Invoices
+            // Load Pending Sales Invoices (match customer by id or name, case-insensitive)
             const allInvoices = DataManager.getData('invoices') || [];
+            const nameLc = name.toLowerCase();
             pendingDocs = allInvoices.filter(inv => {
-                const nameMatch = (inv.customerId === (customer?.id || '') || inv.customerName === name);
-                const statusMatch = (inv.status !== 'cancelled' && inv.status !== 'paid');
-                
-                // Mode Match Filter - Improved robustness
-                let modeMatch = true;
+                const invName = (inv.customerName || '').toString().trim().toLowerCase();
+                const nameMatch = (customer && inv.customerId && inv.customerId === customer.id) ||
+                    (invName && invName === nameLc);
+                const st = (inv.status || 'pending').toLowerCase();
+                const statusMatch = st !== 'cancelled' && st !== 'paid';
+
                 const invType = (inv.type || '').toLowerCase();
-                
+                let modeMatch = true;
                 if (this.currentMode === 'gst') {
-                    // Show only GST invoices (including legacy with no type or 'with-bill')
-                    modeMatch = (invType === 'gst-invoice' || invType === 'with-bill' || !invType || invType === 'sales-gst');
+                    modeMatch = !inv.type || invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst';
                 } else if (this.currentMode === 'non-gst') {
-                    // Show only Plain invoices
-                    modeMatch = (invType === 'non-gst-invoice' || invType === 'without-bill' || invType === 'sales-non-gst');
+                    modeMatch = invType === 'without-bill' || invType === 'sales-non-gst' || invType === 'non-gst-invoice';
                 }
-                
+
                 return nameMatch && statusMatch && modeMatch;
             });
         }
@@ -1726,8 +1732,8 @@ const VouchersUI = {
                 const totalAmountNum = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
                 const total = totalAmountNum.toFixed(2);
                 
-                // NEW: Use VoucherManager to get actual pending balance, including current session's pending tx (excluding itself)
-                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum, null, otherPendingTx);
+                const allocMap = VoucherManager.getVoucherAllocationsMap(otherPendingTx, isPayment ? 'payment' : 'receipt');
+                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum, allocMap, docNo, doc);
                 const pending = pendingNum.toFixed(2);
                 
                 // RESTORE: Check if this doc was already assigned in this session
@@ -2241,16 +2247,34 @@ const VouchersUI = {
         if (!voucher) return null;
 
         const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || {};
-        const companyName = settings.companyName || 'My Company';
-        const address = settings.registeredAddress || settings.address || '';
+        const esc = typeof InvoicesUI !== 'undefined' && InvoicesUI.escapePdfHtml
+            ? (s) => InvoicesUI.escapePdfHtml(s)
+            : (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+        const company = {
+            name: settings.companyName || DataManager.COMPANY_PROFILE?.name || 'My Company',
+            address: settings.registeredAddress || DataManager.COMPANY_PROFILE?.registeredAddress || settings.address || '',
+            workAddress: settings.workAddress || DataManager.COMPANY_PROFILE?.workAddress || '',
+            gstin: settings.gstin || DataManager.COMPANY_PROFILE?.gstin || '',
+            pan: settings.pan || DataManager.COMPANY_PROFILE?.pan || '',
+            emails: settings.emails || DataManager.COMPANY_PROFILE?.emails,
+            phones: settings.phones || DataManager.COMPANY_PROFILE?.phones,
+            bank: settings.bankDetails || DataManager.COMPANY_PROFILE?.bankDetails
+        };
+        const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
+        const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
+        const upiId = settings.upiId || '';
+        const amt = parseFloat(voucher.amount) || 0;
+        const qrUrl = upiId ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${amt}&cu=INR`)}` : '';
+
+        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
-        element.style.width = '1000px';
-        element.style.padding = '30px';
+        element.className = 'gtes-pdf-document';
+        element.style.width = `${pdfW}px`;
+        element.style.padding = '14px';
         element.style.background = 'white';
-        element.style.color = 'black';
-        element.style.fontFamily = "'Inter', sans-serif";
-        element.style.border = '1px solid #ddd';
+        element.style.color = '#000';
+        element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
 
         const typeLabels = {
             'receipt': 'Receipt Voucher',
@@ -2259,70 +2283,118 @@ const VouchersUI = {
             'purchase': 'Purchase Voucher'
         };
         const typeLabel = typeLabels[voucher.type] || 'Voucher';
+        const partyLabel = voucher.type === 'receipt' ? 'Received From (Party)' : 'Paid To (Party)';
+        const modeStr = [voucher.paymentMode || voucher.mode, voucher.referenceId ? `Ref: ${voucher.referenceId}` : ''].filter(Boolean).join(' · ');
+        const tds = parseFloat(voucher.tdsAmount) || 0;
+        const disc = parseFloat(voucher.discountAmount) || 0;
+        const totalAdj = amt + tds + disc;
+        const narr = (voucher.remarks || voucher.narration || '').trim();
 
         element.innerHTML = `
-            <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
-                <h2 style="margin: 0; text-transform: uppercase;">${typeLabel}</h2>
-                <h3 style="margin: 5px 0 0; font-weight: normal; font-size: 16px;">${companyName}</h3>
-                <p style="margin: 0; font-size: 12px; color: #666;">${address}</p>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-                <div>
-                     <strong>Voucher No:</strong> ${voucher.id}<br>
-                     <strong>Date:</strong> ${voucher.date}
-                </div>
-                <div style="text-align: right;">
-                    <strong>Mode:</strong> ${voucher.paymentMode || voucher.mode} ${voucher.referenceId ? '(' + voucher.referenceId + ')' : ''}
-                </div>
-            </div>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
+                <tr>
+                    <td style="width: 62%; vertical-align: top; padding: 0 12px 12px 0;">
+                        <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${esc(company.name)}</h1>
+                        <div style="font-size: 10px; color: #222; margin-top: 6px; line-height: 1.45;">
+                            ${esc(company.address)}<br>
+                            ${company.workAddress ? `<strong>Work:</strong> ${esc(company.workAddress)}<br>` : ''}
+                            ${emailLine ? `Email: ${esc(emailLine)}<br>` : ''}
+                            ${phoneLine ? `Ph: ${esc(phoneLine)}<br>` : ''}
+                            ${company.gstin ? `<strong>GSTIN:</strong> ${esc(company.gstin)}` : ''}${company.gstin && company.pan ? ' | ' : ''}${company.pan ? `<strong>PAN:</strong> ${esc(company.pan)}` : ''}
+                        </div>
+                    </td>
+                    <td style="width: 38%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
+                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 8px;">${esc(typeLabel)}</div>
+                        <div style="font-size: 10px; color: #222; line-height: 1.5;">
+                            <strong>Voucher No:</strong> ${esc(voucher.id)}<br>
+                            <strong>Date:</strong> ${esc(voucher.date)}
+                        </div>
+                    </td>
+                </tr>
+            </table>
 
-            <div style="background: #f9f9f9; padding: 15px; margin-bottom: 20px;">
-                <div style="margin-bottom: 10px;">
-                    <span style="color: #666; font-size: 12px; text-transform: uppercase;">${voucher.type === 'receipt' ? 'Received From' : 'Paid To'}</span><br>
-                    <strong style="font-size: 18px;">${voucher.customerName || 'Unknown Party'}</strong>
-                    ${voucher.billNo ? `<div style="font-size: 12px; color: #666;">Bill No: ${voucher.billNo}</div>` : ''}
-                </div>
-                <div style="display: flex; gap: 30px;">
-                    <div style="margin-bottom: 10px;">
-                        <span style="color: #666; font-size: 12px; text-transform: uppercase;">Amount (Bank/Cash)</span><br>
-                        <strong style="font-size: 20px;">₹${parseFloat(voucher.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    ${voucher.tdsAmount > 0 ? `
-                    <div style="margin-bottom: 10px;">
-                        <span style="color: #666; font-size: 12px; text-transform: uppercase;">TDS Deduction</span><br>
-                        <strong style="font-size: 20px; color: #b45309;">₹${parseFloat(voucher.tdsAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    ` : ''}
-                    ${voucher.discountAmount > 0 ? `
-                    <div style="margin-bottom: 10px;">
-                        <span style="color: #666; font-size: 12px; text-transform: uppercase;">Discount</span><br>
-                        <strong style="font-size: 20px; color: #059669;">₹${parseFloat(voucher.discountAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    ` : ''}
-                    ${(voucher.tdsAmount > 0 || voucher.discountAmount > 0) ? `
-                    <div style="margin-bottom: 10px;">
-                        <span style="color: #666; font-size: 12px; text-transform: uppercase;">Total Adjustable</span><br>
-                        <strong style="font-size: 20px;">₹${(parseFloat(voucher.amount) + parseFloat(voucher.tdsAmount || 0) + parseFloat(voucher.discountAmount || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    ` : ''}
-                </div>
-                 ${voucher.remarks || voucher.narration ? `
-                <div>
-                    <span style="color: #666; font-size: 12px; text-transform: uppercase;">Remarks</span><br>
-                    <span>${voucher.remarks || voucher.narration}</span>
-                </div>` : ''}
-            </div>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">${esc(partyLabel)}</div>
+                            <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: #111;">${esc(voucher.customerName || 'Unknown Party')}</div>
+                            ${voucher.billNo ? `<div style="font-size: 10px; color: #444;"><strong>Bill No:</strong> ${esc(voucher.billNo)}</div>` : ''}
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 7px;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Voucher Details</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 100px; color: #444;">Mode / Ref:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${esc(modeStr || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Type:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${esc(typeLabel)}</strong></td></tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
+                        ${narr ? `
+                        <div style="background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
+                            <span style="text-transform: uppercase; font-size: 9px; font-weight: bold; color: #64748b;">Narration</span><br>
+                            <span style="font-size: 10px; color: #111; white-space: pre-wrap;">${esc(narr)}</span>
+                        </div>` : ''}
+                        ${qrUrl ? `
+                        <table style="margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; border-collapse: collapse;"><tr>
+                            <td style="padding: 8px; vertical-align: middle;"><img src="${qrUrl}" alt="UPI" style="width: 72px; height: 72px; display: block;" /></td>
+                            <td style="padding: 8px 12px 8px 0; vertical-align: middle;">
+                                <div style="font-size: 9px; font-weight: bold; text-transform: uppercase;">Pay via UPI</div>
+                                <div style="font-size: 10px; font-weight: bold;">${esc(upiId)}</div>
+                            </td>
+                        </tr></table>` : ''}
+                        <div style="font-size: 10px; line-height: 1.45;">
+                            <strong>Bank:</strong> ${esc(company.bank?.bankName || '-')}
+                            &nbsp;|&nbsp; <strong>A/c:</strong> ${esc(company.bank?.accountNo || '-')}
+                            &nbsp;|&nbsp; <strong>IFSC:</strong> ${esc(company.bank?.ifsc || '-')}
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
+                                <tr><td style="padding: 6px 8px; text-align: right; color: #666;">Amount (Bank/Cash)</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                                ${tds > 0 ? `<tr><td style="padding: 6px 8px; text-align: right; color: #666;">TDS</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #b45309;">₹${tds.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                                ${disc > 0 ? `<tr><td style="padding: 6px 8px; text-align: right; color: #666;">Discount</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #059669;">₹${disc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                                ${(tds > 0 || disc > 0) ? `<tr style="border-top: 1px solid #e5e7eb; font-weight: 600;">
+                                    <td style="padding: 6px 8px; text-align: right; color: #666;">Total adjustable</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${totalAdj.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                                <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
+                                    <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
+                                        <tr style="font-weight: bold; font-size: 16px;">
+                                            <td style="padding: 10px 8px; text-align: right;">Voucher amount</td>
+                                            <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                        </tr>
+                                    </table>
+                                </td></tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
 
             ${this.renderLinkedDocuments(voucher)}
 
-            <div style="display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px;">
-                <div style="text-align: center; width: 150px; border-top: 1px solid #ccc;">
-                    <span style="font-size: 12px; color: #666;">Accountant</span>
+            <table style="width: 100%; margin-top: 36px; border-collapse: collapse;"><tr><td style="text-align: right;">
+                <div style="display: inline-block; text-align: right; width: 280px; max-width: 100%;">
+                    <div style="font-size: 11px; margin-bottom: 44px;">For <strong style="font-weight: 800;">${esc(company.name)}</strong></div>
+                    <div style="border-top: 1px solid #000; padding-top: 8px; text-align: center;">
+                        <span style="font-weight: bold; font-size: 12px; text-transform: uppercase;">Authorized Signatory</span>
+                    </div>
                 </div>
-                <div style="text-align: center; width: 150px; border-top: 1px solid #ccc;">
-                    <span style="font-size: 12px; color: #666;">Authorized Signatory</span>
-                </div>
+            </td></tr></table>
+
+            <div style="margin-top: 24px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #e5e7eb; padding-top: 10px;">
+                This is a computer generated document and does not require a physical signature.
             </div>
         `;
         return element;
@@ -2339,45 +2411,97 @@ const VouchersUI = {
         if (linked.length === 0) return '';
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const isReceipt = (voucher.type || '').toLowerCase() === 'receipt';
+        const esc = (s) => String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
         const rows = linked.map(link => {
             const docId = typeof link === 'object' ? link.id : link;
-            
-            // Priority: Use specific allocation amount if available
+            const docIdStr = (docId != null ? docId : '').toString();
+
             let amount = voucher.amount;
             if (voucher.allocations && Array.isArray(voucher.allocations)) {
-                const alloc = voucher.allocations.find(a => a.id === docId);
+                const alloc = voucher.allocations.find(a => (a.id != null && a.id.toString() === docIdStr) ||
+                    (a.billNo != null && a.billNo.toString() === docIdStr) ||
+                    (a.no != null && a.no.toString() === docIdStr) ||
+                    (a.invoiceNo != null && a.invoiceNo.toString() === docIdStr) ||
+                    (a.poRef != null && a.poRef.toString() === docIdStr));
                 if (alloc) amount = parseFloat(alloc.amount) || 0;
             } else if (typeof link === 'object') {
                 amount = parseFloat(link.amount) || 0;
             }
 
-            // Try to find the document for extra details
-            const doc = invoices.find(i => i.id === docId) || expenses.find(e => e.id === docId);
+            let doc = invoices.find(i => i.id === docId) || expenses.find(e => e.id === docId);
+            const docLc = docIdStr.toLowerCase().trim();
+            if (!doc && docLc) {
+                doc = invoices.find(i => (i.invoiceNo || '').toString().toLowerCase().trim() === docLc) ||
+                    expenses.find(e => (e.billNo || '').toString().toLowerCase().trim() === docLc);
+            }
+            if (!doc && docLc) {
+                doc = expenses.find(e => (e.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc) ||
+                    invoices.find(i => (i.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc);
+            }
+            if (!doc && docLc) {
+                doc = expenses.find(e => (e.bookkeeperId || '').toLowerCase() === `bk-pur-${docLc}`) ||
+                    invoices.find(i => (i.bookkeeperId || '').toLowerCase() === `bk-inv-${docLc}`);
+            }
+            if (!doc && docId) {
+                const bkSearchId = `BK-INV-${docId}`;
+                doc = invoices.find(i => i.bookkeeperId === bkSearchId) ||
+                    expenses.find(e => e.bookkeeperId === `BK-PUR-${docId}` || e.bookkeeperId === `BK-EXP-${docId}`);
+            }
+
+            const isInvoiceDoc = doc && invoices.some(i => i === doc);
             const date = doc ? doc.date : '-';
-            const refNo = doc ? (doc.invoiceNo || doc.billNo || docId) : (link.billNo || docId);
-            const supplierRef = doc ? (doc.supplierBillNo || '-') : (link.supplierBillNo || '-');
+            let refNo;
+            let thirdCol;
+            let lineDetails = '';
+            if (doc) {
+                if (isInvoiceDoc) {
+                    refNo = (doc.invoiceNo || doc.id || '').toString().trim();
+                    thirdCol = (doc.poNumber || doc.referenceNo || doc.buyerPoNo || '').toString().trim() || '-';
+                    if (isReceipt && doc.items && doc.items.length) {
+                        lineDetails = doc.items.slice(0, 6).map(it => {
+                            const bits = [it.name, (it.description || '').trim()].filter(Boolean);
+                            return bits.join(' — ');
+                        }).filter(Boolean).join('; ');
+                        if (lineDetails.length > 220) lineDetails = lineDetails.slice(0, 217) + '…';
+                    }
+                } else {
+                    refNo = (doc.billNo || doc.id || '').toString().trim();
+                    thirdCol = (doc.supplierBillNo || doc.supplierInvoiceNo || '').toString().trim() || '-';
+                }
+            } else {
+                refNo = ((typeof link === 'object' && (link.invoiceNo || link.billNo || link.no)) || docId || '').toString();
+                thirdCol = (typeof link === 'object' && ((link.poRef || link.supplierBillNo || '') + '').trim()) || '-';
+            }
 
             return `
-                <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 10px;">${refNo}</td>
-                    <td style="padding: 10px;">${date}</td>
-                    <td style="padding: 10px;">${supplierRef}</td>
-                    <td style="padding: 10px; text-align: right;">₹${amount.toFixed(2)}</td>
+                <tr style="border: 1px solid #000;">
+                    <td style="padding: 8px; border: 1px solid #000; font-family: Arial, Helvetica, sans-serif; font-size: 11px;">${esc(refNo)}</td>
+                    <td style="padding: 8px; border: 1px solid #000; font-family: Arial, Helvetica, sans-serif; font-size: 11px;">${esc(date)}</td>
+                    ${isReceipt ? `<td style="padding: 8px; border: 1px solid #000; font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #222;">${esc(lineDetails || '—')}</td>` : ''}
+                    <td style="padding: 8px; border: 1px solid #000; font-family: Arial, Helvetica, sans-serif; font-size: 11px;">${esc(thirdCol)}</td>
+                    <td style="padding: 8px; border: 1px solid #000; text-align: right; font-family: Arial, Helvetica, sans-serif; font-size: 11px;">₹${amount.toFixed(2)}</td>
                 </tr>
             `;
         }).join('');
 
+        const colPo = isReceipt ? 'PO / Reference' : 'Supplier Invoice No';
+        const colDetail = isReceipt ? '<th style="padding: 8px; text-align: left; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase;">Item details</th>' : '';
+        const thLinked = 'padding: 8px; text-align: left; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase; color: #fff;';
+
         return `
-            <div style="margin-top: 30px;">
-                <h4 style="font-size: 14px; text-transform: uppercase; color: #333; margin-bottom: 10px;">Remittance Details</h4>
-                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <div class="gtes-pdf-break-safe" style="margin-top: 24px;">
+                <h4 style="font-size: 11px; text-transform: uppercase; color: #000; margin-bottom: 8px; font-weight: bold; letter-spacing: 0.02em;">Remittance details</h4>
+                <table style="width: 100%; border-collapse: collapse; border: 1px solid #000;">
                     <thead>
-                        <tr style="background: #f8f9fa; border-top: 2px solid #333; border-bottom: 1px solid #333;">
-                            <th style="padding: 10px; text-align: left;">Invoice No. Reference</th>
-                            <th style="padding: 10px; text-align: left;">Date</th>
-                            <th style="padding: 10px; text-align: left;">Supplier Invoice No</th>
-                            <th style="padding: 10px; text-align: right;">Amount</th>
+                        <tr style="background: #4a5568;">
+                            <th style="${thLinked}">Invoice / Bill No.</th>
+                            <th style="${thLinked}">Date</th>
+                            ${colDetail}
+                            <th style="${thLinked}">${colPo}</th>
+                            <th style="padding: 8px; text-align: right; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase; color: #fff;">Amount</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2389,18 +2513,28 @@ const VouchersUI = {
     },
 
     async generatePDF(voucherId) {
+        if (typeof DeliveryUI !== 'undefined' && DeliveryUI.downloadVoucherPdf) {
+            return DeliveryUI.downloadVoucherPdf(voucherId);
+        }
         const element = await this.getVoucherElement(voucherId);
         if (!element) return;
 
+        const filename = `Voucher_${voucherId}.pdf`;
         const opt = {
-            margin: 10,
-            filename: `Voucher_${voucherId}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            margin: [10, 10, 10, 10],
+            filename,
+            image: { type: 'jpeg', quality: 0.92 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                backgroundColor: '#ffffff'
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] }
         };
-
-        html2pdf().set(opt).from(element).save();
+        await html2pdf().set(opt).from(element).save();
     },
 
     async previewVoucher(voucherId) {
@@ -2412,10 +2546,31 @@ const VouchersUI = {
         const downloadBtn = document.getElementById('pdfDownloadBtn');
 
         container.innerHTML = '';
+        container.dataset.gtesPreviewKind = 'voucher';
+        container.dataset.gtesPreviewId = String(voucherId);
+        element.style.margin = '0 auto';
+        element.style.boxShadow = 'none';
         container.appendChild(element);
         title.textContent = 'Voucher Preview';
 
-        downloadBtn.onclick = () => this.generatePDF(voucherId);
+        downloadBtn.onclick = () => {
+            if (typeof DeliveryUI !== 'undefined' && DeliveryUI.downloadVoucherPdf) {
+                void DeliveryUI.downloadVoucherPdf(voucherId);
+            } else {
+                this.generatePDF(voucherId);
+            }
+        };
+
+        const printBtn = document.getElementById('pdfPrintBtn');
+        if (printBtn) {
+            printBtn.onclick = () => {
+                if (typeof DeliveryUI !== 'undefined' && DeliveryUI.nativePrint) {
+                    DeliveryUI.nativePrint();
+                } else {
+                    window.print();
+                }
+            };
+        }
 
         const modal = new bootstrap.Modal(document.getElementById('pdfPreviewModal'));
         modal.show();

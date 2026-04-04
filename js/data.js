@@ -40,6 +40,7 @@ const DataManager = {
         CHALLANS: 'gtes_challans',
         WAREHOUSES: 'gtes_warehouses',
         INVENTORY_ITEMS: 'gtes_inventory_items',
+        SERVICES: 'gtes_services',
         ACCOUNTS: 'gtes_accounts',
         JOURNAL_ENTRIES: 'gtes_journal_entries',
 
@@ -50,6 +51,32 @@ const DataManager = {
         IMPORT_COLUMNS: 'gtes_import_columns',
         IMPORT_RAW: 'gtes_import_raw',
         RECYCLE_BIN: 'gtes_recycle_bin'
+    },
+
+    /** On load, union-merge with localStorage so cloud snapshots cannot drop newer invoices/DCs/vouchers */
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans']),
+
+    _mergeRecordArraysById(localArr, cloudArr) {
+        const a = Array.isArray(localArr) ? localArr : [];
+        const b = Array.isArray(cloudArr) ? cloudArr : [];
+        const map = new Map();
+        const take = (item) => {
+            if (!item || typeof item !== 'object') return;
+            const id = item.id;
+            if (id === undefined || id === null || id === '') return;
+            const idKey = String(id);
+            const prev = map.get(idKey);
+            if (!prev) {
+                map.set(idKey, item);
+                return;
+            }
+            const pt = Date.parse(prev.updatedAt || prev.createdAt || 0) || 0;
+            const nt = Date.parse(item.updatedAt || item.createdAt || 0) || 0;
+            map.set(idKey, nt >= pt ? item : prev);
+        };
+        a.forEach(take);
+        b.forEach(take);
+        return Array.from(map.values());
     },
 
     // Default Settings
@@ -193,7 +220,10 @@ const DataManager = {
             'vouchers', 
             'inventory', 
             'gtes_services', 
-            'inventoryTransactions'
+            'inventoryTransactions',
+            'challans',
+            'gtes_inventory_items',
+            'gtes_expenses'
         ];
 
         console.log("[DataManager]: Prefetching all data modules in parallel...");
@@ -219,13 +249,15 @@ const DataManager = {
         await this.migrateEmployeesToV2();
         await this.migrateToSalaryRevisions();
         
-        // Background tasks
-        this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
-        this.scheduleSundayHolidayCheck();
-        
-        if (window.SyncManager) {
-            window.SyncManager.init();
-        }
+        // Background tasks (DEFERRED to unblock UI)
+        setTimeout(() => {
+            this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
+            this.scheduleSundayHolidayCheck();
+            
+            if (window.SyncManager) {
+                window.SyncManager.init();
+            }
+        }, 3000); // 3-second delay for background tasks
         })();
     },
 
@@ -292,15 +324,14 @@ const DataManager = {
 
         let markedCount = 0;
         
+        // OPTIMIZATION: Use a Set for O(1) lookups of existing records
+        const existingKeys = new Set(attendance.map(a => `${a.employee}_${this.formatDate(new Date(a.date))}`));
+        
         for (const employee of employees) {
+            const currentKey = `${employee.name}_${todayStr}`;
             // Check if this employee already has an attendance record for today
-            const existingRecord = attendance.find(a =>
-                a.employee === employee.name &&
-                this.formatDate(new Date(a.date)) === todayStr
-            );
-
-            if (existingRecord) {
-                // Already marked, skip
+            if (existingKeys.has(currentKey)) {
+                // Already marked or has status, skip
                 continue;
             }
 
@@ -380,15 +411,49 @@ const DataManager = {
     },
 
     async loadData(key) {
-        let data = await FileStorage.loadData(key);
-        
-        // If not in cloud, try local fallbacks
-        if (!data) {
-            data = this.getData(key); // Check memory/localStorage
-            if (!data) data = await this.getFromIDB(key); // Check IndexedDB
+        let localParsed = null;
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) localParsed = JSON.parse(raw);
+        } catch (e) {
+            localParsed = null;
         }
 
-        if (data) {
+        let data = await FileStorage.loadData(key);
+
+        if (data === null || data === undefined) {
+            data = localParsed;
+            if (data === null || data === undefined) {
+                data = await this.getFromIDB(key);
+            }
+        } else if (
+            Array.isArray(data) && data.length === 0 &&
+            Array.isArray(localParsed) && localParsed.length > 0
+        ) {
+            console.warn(`[DataManager] Cloud returned empty '${key}'; keeping ${localParsed.length} local record(s).`);
+            data = localParsed;
+        } else if (
+            Array.isArray(data) && data.length === 0 &&
+            this.MERGE_ON_LOAD_KEYS.has(key) &&
+            (!Array.isArray(localParsed) || localParsed.length === 0)
+        ) {
+            const idbArr = await this.getFromIDB(key);
+            if (Array.isArray(idbArr) && idbArr.length > 0) {
+                console.warn(`[DataManager] Cloud returned empty '${key}'; keeping ${idbArr.length} record(s) from IndexedDB.`);
+                data = idbArr;
+            }
+        }
+
+        if (this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
+            const loc = Array.isArray(localParsed) ? localParsed : [];
+            const merged = this._mergeRecordArraysById(loc, data);
+            if (merged.length !== data.length || merged.length !== loc.length) {
+                console.warn(`[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s).`);
+            }
+            data = merged;
+        }
+
+        if (data !== null && data !== undefined) {
             // Update memory cache for synchronous getData calls
             this._cache[key] = data;
             
@@ -409,8 +474,9 @@ const DataManager = {
 
     // Alias for loadData (used by delivery modules)
     getData(key) {
-        // Priority 1: Memory Cache (Safe & Instant)
-        if (this._cache[key]) return this._cache[key];
+        if (Object.prototype.hasOwnProperty.call(this._cache, key)) {
+            return this._cache[key];
+        }
 
         // Priority 2: LocalStorage
         const data = localStorage.getItem(key);
@@ -774,6 +840,17 @@ const DataManager = {
         }
 
         return label;
+    },
+
+    /**
+     * Indian FY: fyStartYear is the calendar year in which April falls (e.g. FY 2025–26 → 2025).
+     * Returns the calendar year for a month index 0–11 used in GST / FY month pickers.
+     */
+    calendarYearForIndianFYMonth(fyStartYear, monthIndex) {
+        const y = Number(fyStartYear);
+        const m = Number(monthIndex);
+        if (!Number.isFinite(y) || !Number.isFinite(m)) return y;
+        return m >= 3 ? y : y + 1;
     },
 
     // Get employees who were active during a specific month

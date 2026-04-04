@@ -131,6 +131,55 @@ const BookKeeperImport = {
     },
 
     /**
+     * Printed bill / invoice number should win over BookKeeper internal vch_no for links & balances.
+     */
+    buildDisplayVchNoBare(voucherTableName) {
+        const hasBillNo = this.hasColumn(voucherTableName, 'bill_no');
+        const hasRefNo = this.hasColumn(voucherTableName, 'ref_no');
+        const parts = [];
+        if (hasBillNo) parts.push(`NULLIF(TRIM(CAST(bill_no AS TEXT)), '')`);
+        if (hasRefNo) parts.push(`NULLIF(TRIM(CAST(ref_no AS TEXT)), '')`);
+        parts.push(`NULLIF(CAST(vch_no AS TEXT), '0')`);
+        parts.push(`NULLIF(TRIM(CAST(vch_no AS TEXT)), '')`);
+        return `COALESCE(${parts.join(', ')}, '')`;
+    },
+
+    buildDisplayVchNoAliased(voucherTableName, alias = 'v') {
+        const hasBillNo = this.hasColumn(voucherTableName, 'bill_no');
+        const hasRefNo = this.hasColumn(voucherTableName, 'ref_no');
+        const a = alias;
+        const parts = [];
+        if (hasBillNo) parts.push(`NULLIF(TRIM(CAST(${a}.bill_no AS TEXT)), '')`);
+        if (hasRefNo) parts.push(`NULLIF(TRIM(CAST(${a}.ref_no AS TEXT)), '')`);
+        parts.push(`NULLIF(CAST(${a}.vch_no AS TEXT), '0')`);
+        parts.push(`NULLIF(TRIM(CAST(${a}.vch_no AS TEXT)), '')`);
+        return `COALESCE(${parts.join(', ')}, '')`;
+    },
+
+    /**
+     * Company-issued purchase/sale voucher number only (bill_no then vch_no).
+     * Excludes ref_no — on purchases ref_no is usually the supplier's document no., not our PUR bill no.
+     */
+    buildCompanyVchNoBare(voucherTableName) {
+        const hasBillNo = this.hasColumn(voucherTableName, 'bill_no');
+        const parts = [];
+        if (hasBillNo) parts.push(`NULLIF(TRIM(CAST(bill_no AS TEXT)), '')`);
+        parts.push(`NULLIF(CAST(vch_no AS TEXT), '0')`);
+        parts.push(`NULLIF(TRIM(CAST(vch_no AS TEXT)), '')`);
+        return `COALESCE(${parts.join(', ')}, '')`;
+    },
+
+    buildCompanyVchNoAliased(voucherTableName, alias = 'v') {
+        const hasBillNo = this.hasColumn(voucherTableName, 'bill_no');
+        const a = alias;
+        const parts = [];
+        if (hasBillNo) parts.push(`NULLIF(TRIM(CAST(${a}.bill_no AS TEXT)), '')`);
+        parts.push(`NULLIF(CAST(${a}.vch_no AS TEXT), '0')`);
+        parts.push(`NULLIF(TRIM(CAST(${a}.vch_no AS TEXT)), '')`);
+        return `COALESCE(${parts.join(', ')}, '')`;
+    },
+
+    /**
      * Smartly detect a table based on its columns, regardless of name
      */
     detectTableByColumns(allTables, validNames, requiredColumns, minMatch = 1) {
@@ -159,18 +208,6 @@ const BookKeeperImport = {
             }
         }
         return null;
-    },
-
-    /**
-     * Get columns for a table
-     */
-    getColumns(tableName) {
-        if (!this.db) return [];
-        const res = this.db.exec(`PRAGMA table_info("${tableName}")`);
-        if (res.length > 0 && res[0].values) {
-            return res[0].values.map(v => v[1]); // Column name is at index 1
-        }
-        return [];
     },
 
     /**
@@ -1082,6 +1119,8 @@ const BookKeeperImport = {
         const existingVouchers = DataManager.getData('vouchers') || [];
         const existingIds = new Set(existingVouchers.map(v => v.bookkeeperId));
         const customers = CustomerManager.getAllCustomers();
+        const cachedExpenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const cachedInvoices = DataManager.getData('invoices') || [];
 
         let imported = 0;
         let skipped = 0;
@@ -1171,21 +1210,55 @@ const BookKeeperImport = {
                             const billVid = alloc.bill_v_id;
                             const amt = parseFloat(alloc.alloc_amt) || 0;
                             if (billVid && amt > 0) {
-                                // Try to find the actual bill/invoice number
-                                let billNo = billVid;
+                                let companyNo = String(billVid);
+                                const vidNum = parseInt(billVid, 10);
                                 try {
-                                    const billLookup = this.query(`SELECT vch_no, bill_no FROM vouchers WHERE v_id = ${billVid} LIMIT 1`);
-                                    if (billLookup.length > 0) {
-                                        billNo = (billLookup[0].vch_no || billLookup[0].bill_no || billVid).trim();
+                                    if (!isNaN(vidNum)) {
+                                        const bare = isReceipt
+                                            ? this.buildDisplayVchNoBare(tableName)
+                                            : this.buildCompanyVchNoBare(tableName);
+                                        const billLookup = this.query(`SELECT (${bare}) as display_no FROM ${tableName} WHERE v_id = ${vidNum} LIMIT 1`);
+                                        if (billLookup.length > 0 && billLookup[0].display_no != null && String(billLookup[0].display_no).trim() !== '') {
+                                            companyNo = String(billLookup[0].display_no).trim();
+                                        }
                                     }
-                                } catch (e) { }
+                                } catch (e) { /* ignore */ }
 
-                                linkedInvoices.push(billNo);
-                                allocations.push({
-                                    id: billNo,
-                                    no: billNo,
-                                    amount: amt
-                                });
+                                const bkPur = `BK-PUR-${billVid}`;
+                                const bkInv = `BK-INV-${billVid}`;
+                                const purDoc = cachedExpenses.find(e => e.bookkeeperId === bkPur);
+                                const saleDoc = cachedInvoices.find(i => i.bookkeeperId === bkInv);
+
+                                if (!isReceipt && purDoc) {
+                                    linkedInvoices.push(purDoc.id);
+                                    allocations.push({
+                                        id: purDoc.id,
+                                        billNo: companyNo,
+                                        no: companyNo,
+                                        amount: amt,
+                                        supplierBillNo: purDoc.supplierBillNo || ''
+                                    });
+                                } else if (isReceipt && saleDoc) {
+                                    const invNo = (saleDoc.invoiceNo || companyNo || saleDoc.id || '').toString().trim();
+                                    const poRef = (saleDoc.poNumber || saleDoc.referenceNo || '').toString().trim();
+                                    linkedInvoices.push(saleDoc.id);
+                                    allocations.push({
+                                        id: saleDoc.id,
+                                        invoiceNo: invNo,
+                                        billNo: invNo,
+                                        no: invNo,
+                                        amount: amt,
+                                        poRef
+                                    });
+                                } else {
+                                    linkedInvoices.push(companyNo);
+                                    allocations.push({
+                                        id: companyNo,
+                                        billNo: companyNo,
+                                        no: companyNo,
+                                        amount: amt
+                                    });
+                                }
                             }
                         });
                     }
@@ -1336,17 +1409,21 @@ const BookKeeperImport = {
         });
         const accSelect = accountDetailCols.length > 0 ? `, ${accountDetailCols.join(', ')}` : '';
 
-        const hasRefNo = this.hasColumn(voucherTable, 'ref_no');
-        const hasBillNo = this.hasColumn(voucherTable, 'bill_no');
-        const vchNoField = `COALESCE(NULLIF(CAST(v.vch_no AS TEXT), '0'), NULLIF(CAST(v.vch_no AS TEXT), ''), ${hasRefNo ? 'v.ref_no' : "''"}, ${hasBillNo ? 'v.bill_no' : "''"}, '') as vch_no`;
+        const vchNoField = `${this.buildCompanyVchNoAliased(voucherTable, 'v')} as vch_no`;
+        const hasVRefNo = this.hasColumn(voucherTable, 'ref_no');
+        const saleRefSelect = hasVRefNo
+            ? `, COALESCE(NULLIF(TRIM(CAST(v.ref_no AS TEXT)), ''), '') as bk_sale_ref_no`
+            : `, '' as bk_sale_ref_no`;
 
         // First get unique sales vouchers with customer details
         const salesVouchers = this.query(`
             SELECT DISTINCT v.v_id, v.debit as customer, v.date, ${amtField} as amount, v.narration, ${vchNoField}, 
+                   CAST(v.vch_no AS TEXT) as bk_internal_vch,
                    COALESCE(${balanceField}, 0) as balance_amount,
                    COALESCE(${paidField}, 0) as total_paid,
                    COALESCE(${roundOffField}, 0) as round_off,
                    v.v_type
+                   ${saleRefSelect}
                    ${accSelect}
             FROM ${voucherTable} v
             LEFT JOIN ${accountTable} acc ON v.debit = acc.aname
@@ -1355,6 +1432,8 @@ const BookKeeperImport = {
                OR v.v_type LIKE '%Invoice%'
                OR v.v_type LIKE '%Sale%')
                AND v.debit NOT LIKE '%Cash%' AND v.debit NOT LIKE '%Bank%'
+               AND v.v_type NOT LIKE '%Challan%'
+               AND v.v_type NOT LIKE '%Job Card%'
             ORDER BY v.date DESC
         `);
 
@@ -1369,6 +1448,7 @@ const BookKeeperImport = {
         for (const sale of salesVouchers) {
             const bkId = `BK-INV-${sale.v_id}`;
             const invNo = (sale.vch_no || '').trim();
+            const saleRefRaw = (sale.bk_sale_ref_no != null ? String(sale.bk_sale_ref_no) : '').trim();
 
             // Mapping for Customer
             let customerId = '';
@@ -1599,6 +1679,7 @@ const BookKeeperImport = {
             const invoice = {
                 id: invNo || `INV-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 bookkeeperId: bkId,
+                bookkeeperVchNo: (sale.bk_internal_vch != null ? String(sale.bk_internal_vch) : '').trim(),
                 date: this.formatDate(sale.date),
                 customerId: customerId,
                 customerName: bkCustomerName,
@@ -1675,15 +1756,20 @@ const BookKeeperImport = {
                     let lineSgst = parseFloat(item.sgst_amount || item.sgst_amt || item.tax_amt_sgst || 0);
                     let lineIgst = parseFloat(item.igst_amount || item.igst_amt || item.tax_amt_igst || 0);
 
+                    const descRaw = (
+                        item.item_desc || item.item_particulars || item.ite_particulars || item.ite_para ||
+                        item.desc || item.details || item.particulars ||
+                        item.vch_particulars || item.item_remarks || item.vch_item_remarks ||
+                        item.ite_remarks || item.i_remarks || item.item_note || item.service_desc ||
+                        item.remarks || item.notes || item.ite_desc || invItem?.description || ''
+                    ).trim();
+                    const descNorm = descRaw.toLowerCase();
+                    const nameNorm = (name || '').toLowerCase();
+                    const description = (descRaw && descNorm !== nameNorm) ? descRaw : '';
+
                     return {
                         name,
-                        // POWERFUL: Transaction-level description priority
-                        description: (
-                            item.item_particulars || item.vch_particulars || item.item_remarks || item.vch_item_remarks ||
-                            item.ite_remarks || item.ite_particulars || item.ite_para || item.i_remarks ||
-                            item.item_note || item.item_desc || item.service_desc || item.particulars ||
-                            item.remarks || item.narration || item.notes || item.ite_desc || invItem?.description || ''
-                        ).trim(),
+                        description,
                         hsn: hsn,
                         quantity: qty,
                         unit: (() => {
@@ -1705,6 +1791,9 @@ const BookKeeperImport = {
                 roundOff: parseFloat(sale.round_off) || 0,
                 status: status,
                 narration: sale.narration || '',
+                poNumber: saleRefRaw || undefined,
+                referenceNo: saleRefRaw || undefined,
+                billType: 'gst',
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper',
                 type: 'with-bill'
@@ -1778,7 +1867,7 @@ const BookKeeperImport = {
 
                 invoice.items.push({
                     name: sale.narration || 'BookKeeper Sale Item',
-                    description: sale.narration || 'General Sales from BookKeeper',
+                    description: '',
                     hsn: '',
                     quantity: 1,
                     unit: 'nos',
@@ -1859,8 +1948,7 @@ const BookKeeperImport = {
         const accSelect = accountDetailCols.length > 0 ? `, ${accountDetailCols.join(', ')}` : '';
 
         const hasRefNo = this.hasColumn('vouchers', 'ref_no');
-        const hasBillNo = this.hasColumn('vouchers', 'bill_no');
-        const vchNoField = `COALESCE(NULLIF(CAST(v.vch_no AS TEXT), '0'), NULLIF(CAST(v.vch_no AS TEXT), ''), ${hasRefNo ? 'v.ref_no' : "''"}, ${hasBillNo ? 'v.bill_no' : "''"}, '') as vch_no`;
+        const vchNoField = `${this.buildCompanyVchNoAliased('vouchers', 'v')} as vch_no`;
         const refNoField = hasRefNo ? "COALESCE(v.ref_no, '') as ref_no" : "'' as ref_no";
 
         // 1. Detect Line Item Table globally
@@ -1912,6 +2000,7 @@ const BookKeeperImport = {
         // Get purchases with vendor details
         const purchaseVouchers = this.query(`
             SELECT DISTINCT v.v_id, v.credit as vendor_name, v.date, ${amtFieldPurchase} as amount, v.narration, ${vchNoField},
+                   CAST(v.vch_no AS TEXT) as bk_internal_vch,
                    ${refNoField},
                    COALESCE(${balanceField}, 0) as balance_amount,
                    COALESCE(${paidField}, 0) as total_paid,
@@ -2222,7 +2311,13 @@ const BookKeeperImport = {
                     hsn: i.hsn_code || i.hsn || i.hsncode || i.tax_hsn || i.hsn_no || i.item_code || i.tax_hsn_code || i.sac_code || '',
                     gstRate: taxRate ? (taxRate + '%') : '',
                     name,
-                    description: i.desc || i.description || '',
+                    description: (() => {
+                        const d = (i.item_desc || i.item_particulars || i.ite_particulars || i.ite_para ||
+                            i.desc || i.description || i.particulars || i.vch_particulars || i.item_remarks || '').trim();
+                        const dn = d.toLowerCase();
+                        const nn = (name || '').toLowerCase();
+                        return (d && dn !== nn) ? d : '';
+                    })(),
                     quantity: qty,
                     rate: rate,
                     discount: discDisplay,
@@ -2239,11 +2334,23 @@ const BookKeeperImport = {
                 };
             });
 
+            const rawVendor = (purchase.vendor_name || '').trim();
+            const cleanVendor = (() => {
+                if (!rawVendor) return 'Unknown Vendor';
+                // If it looks like a list of items (many commas) and is very long, it's likely a description overlap
+                if (rawVendor.includes(',') && rawVendor.length > 50) {
+                    const parts = rawVendor.split(',').map(s => s.trim());
+                    if (parts.length > 3) return parts[0].length < 40 ? parts[0] : 'Multiple Items (Check Record)';
+                }
+                return rawVendor;
+            })();
+
             const expense = {
                 id: purchase.vch_no || `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 bookkeeperId: bkId,
+                bookkeeperVchNo: (purchase.bk_internal_vch != null ? String(purchase.bk_internal_vch) : '').trim(),
                 date: this.formatDate(purchase.date),
-                vendor: purchase.vendor_name || '',
+                vendor: cleanVendor,
                 vendorAddress: `${purchase.address || ''} ${purchase.address2 || ''} ${purchase.state || ''} ${purchase.pincode || ''} India`.trim(),
                 vendorGstin: purchase.gstin || '',
                 vendorPan: purchase.pan || '',
@@ -2445,7 +2552,7 @@ const BookKeeperImport = {
                 customerName: dc.customer || '',
                 items: items.map(item => ({
                     name: item.item || '',
-                    itemDescription: item.desc || '',
+                    description: item.desc || '',
                     quantity: parseFloat(item.units) || 1,
                     unit: 'pcs',
                     rate: parseFloat(item.sp_per_unit) || 0,
@@ -2619,9 +2726,9 @@ const BookKeeperImport = {
             customers: null,
             inventory: null,
             services: null,
+            warehouses: null,
             vouchers: null,
             sales: null,
-            purchases: null,
             purchases: null,
             batches: null,
             foundTables: [],
@@ -2728,35 +2835,24 @@ const BookKeeperImport = {
                 try { this.importStats.services = await this.importServices(serviceTable); } catch (e) { }
             }
 
+            if (options.warehouses !== false && tables.includes('warehouse')) {
+                try {
+                    this.importStats.warehouses = await this.importWarehouses();
+                } catch (e) {
+                    this.importStats.errors.push({ section: 'Warehouses', error: e.message });
+                }
+            }
+
             // Detect Voucher Table for next steps
             let voucherTable = this.detectTableByColumns(tables, ['vouchers', 'voucher', 'trans_vouchers', 'transactions'], ['v_date', 'v_amount', 'v_type'], 1) ||
                 this.detectTableByColumns(tables, ['vouchers', 'voucher'], ['date', 'amount', 'type'], 1);
             // Fallback
             if (!voucherTable && tables.includes('vouchers')) voucherTable = 'vouchers';
 
-            // 4. Vouchers & Orders
-            if (options.vouchers !== false) {
-                if (voucherTable) {
-                    try { this.importStats.vouchers = await this.importVouchers(voucherTable); } catch (e) { this.importStats.errors.push({ section: 'Vouchers', error: e.message }); }
-                }
-                if (tables.includes('po_so_vouchers')) {
-                    try { await this.importOrders(); } catch (e) { }
-                }
-            }
+            // 4–5. Sales & Purchases BEFORE vouchers so payment/receipt import can resolve BK-INV-*/BK-PUR-* against DataManager.
+            // 6. Estimates (reads sqlite; after master docs keeps a sensible order for one-file import)
 
-            // 5. Estimates
-            if (options.estimates !== false && voucherTable) {
-                try {
-                    // Note: importEstimates might need refactoring too if it uses hardcoded 'vouchers', 
-                    // but usually estimates are separate or in vouchers with v_type.
-                    // Assuming standard behavior for now or skipping deep refactor of estimates to focus on Sales.
-                    this.importStats.estimates = await this.importEstimates();
-                } catch (e) {
-                    this.importStats.errors.push({ section: 'Estimates', error: e.message });
-                }
-            }
-
-            // 6. Sales (Invoices)
+            // 4. Sales (Invoices)
             if (options.sales !== false && voucherTable && accountTable) {
                 try {
                     this.importStats.sales = await this.importSales(voucherTable, accountTable);
@@ -2765,7 +2861,7 @@ const BookKeeperImport = {
                 }
             }
 
-            // 7. Purchases (Expenses)
+            // 5. Purchases (Expenses)
             if (options.purchases !== false && tables.includes('vouchers')) {
                 try {
                     console.log('[Import] Starting purchases import...');
@@ -2774,8 +2870,26 @@ const BookKeeperImport = {
                 } catch (e) {
                     console.error('[Import] Purchases import error:', e);
                     this.importStats.errors.push({ section: 'Purchases', error: e.message });
-                    // Set a default value so it doesn't show as undefined
                     this.importStats.purchases = { imported: 0, updated: 0, total: 0, error: e.message };
+                }
+            }
+
+            // 6. Estimates
+            if (options.estimates !== false && voucherTable) {
+                try {
+                    this.importStats.estimates = await this.importEstimates();
+                } catch (e) {
+                    this.importStats.errors.push({ section: 'Estimates', error: e.message });
+                }
+            }
+
+            // 7. Vouchers & Orders (after sales/purchases so allocations link to imported invoices & bills)
+            if (options.vouchers !== false) {
+                if (voucherTable) {
+                    try { this.importStats.vouchers = await this.importVouchers(voucherTable); } catch (e) { this.importStats.errors.push({ section: 'Vouchers', error: e.message }); }
+                }
+                if (tables.includes('po_so_vouchers')) {
+                    try { await this.importOrders(); } catch (e) { }
                 }
             }
 

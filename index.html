@@ -567,45 +567,8 @@
                     </button>
                 </div>
 
-                <!-- Analytics Navigation Tabs -->
-                <ul class="nav nav-pills mb-4" id="analyticsTabs">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="#"
-                            onclick="AnalyticsUI.currentSection='dashboard'; AnalyticsUI.renderDashboard(); return false;">
-                            <i class="bi bi-speedometer2 me-1"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"
-                            onclick="AnalyticsUI.currentSection='gst'; AnalyticsUI.renderGSTReports(); return false;">
-                            <i class="bi bi-file-earmark-bar-graph me-1"></i> GST Reports
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"
-                            onclick="AnalyticsUI.currentSection='ledger'; AnalyticsUI.renderCustomerLedger(); return false;">
-                            <i class="bi bi-journal-text me-1"></i> Customer Ledger
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"
-                            onclick="AnalyticsUI.currentSection='stock'; AnalyticsUI.renderStockReports(); return false;">
-                            <i class="bi bi-box-seam me-1"></i> Stock Reports
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"
-                            onclick="AnalyticsUI.currentSection='reminders'; AnalyticsUI.renderDueReminders(); return false;">
-                            <i class="bi bi-bell me-1"></i> Due Reminders
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"
-                            onclick="AnalyticsUI.currentSection='import'; AnalyticsUI.renderDataImport(); return false;">
-                            <i class="bi bi-cloud-upload me-1"></i> Data Import
-                        </a>
-                    </li>
-                </ul>
+                <!-- Sub-nav built at runtime (first open + static HTML race in some builds) -->
+                <div id="analyticsSubNavMount" class="gtes-analytics-subnav-mount"></div>
 
                 <!-- Analytics Content Container -->
                 <div id="analyticsContainer">
@@ -745,6 +708,9 @@
                                 <i class="bi bi-truck display-4 text-info mb-3"></i>
                                 <h5>View DC</h5>
                                 <p class="small text-muted mb-0">Delivery Challan History</p>
+                                <button type="button" class="btn btn-sm btn-success mt-3" onclick="event.stopPropagation(); DeliveryUI.showSection('create');">
+                                    <i class="bi bi-plus-lg me-1"></i> Create DC
+                                </button>
                             </div>
                         </div>
                         <div class="col-md-4">
@@ -1589,11 +1555,20 @@
 
     <!-- PDF Preview Modal -->
     <div class="modal fade" id="pdfPreviewModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen">
             <div class="modal-content bg-dark text-white border-secondary">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title" id="pdfPreviewTitle">Document Preview</h5>
-                    <div class="ms-auto">
+                    <div class="ms-auto d-flex gap-2 align-items-center">
+                        <button type="button" class="btn btn-sm btn-outline-light border-secondary"
+                            onclick="typeof DeliveryUI !== 'undefined' && DeliveryUI.toggleModalFullscreen('pdfPreviewModal')"
+                            title="Toggle fullscreen">
+                            <i class="bi bi-fullscreen-exit"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-light border-secondary" id="pdfPrintBtn"
+                            title="Print">
+                            <i class="bi bi-printer me-1"></i> Print
+                        </button>
                         <button class="btn btn-sm btn-primary me-2" id="pdfDownloadBtn">
                             <i class="bi bi-download me-1"></i> Download PDF
                         </button>
@@ -1601,10 +1576,8 @@
                             aria-label="Close"></button>
                     </div>
                 </div>
-                <div class="modal-body p-0"
-                    style="background: #525659; min-height: 600px; display: flex; justify-content: center; align-items: flex-start; overflow-y: auto;">
-                    <div id="pdfPreviewContainer" class="p-4 shadow-lg"
-                        style="background: white; transform-origin: top center; margin: 20px 0;">
+                <div class="modal-body gtes-pdf-preview-body">
+                    <div id="pdfPreviewContainer" class="gtes-pdf-preview-sheet">
                         <!-- PDF content will be rendered here -->
                     </div>
                 </div>

@@ -5,11 +5,37 @@
  */
 
 const VoucherManager = {
+    _allocationsCache: null,
+    _lastVoucherCount: 0,
+
     /**
      * Initialize if needed
      */
     init() {
         console.log('VoucherManager initialized');
+    },
+
+    /** Stable key for per-mode serial tracking (GST vs Plain vs Purchase). */
+    _serialKey(type, mode) {
+        if (mode === undefined || mode === null || mode === '') return type;
+        return `${type}::${mode}`;
+    },
+
+    /** Whether a voucher belongs to the same Plain/GST/Purchase bucket as the UI mode. */
+    _voucherMatchesMode(v, type, mode) {
+        if (!v || v.type !== type || !v.id) return false;
+        if (!mode) return true;
+        if (mode === 'gst') {
+            return v.hasGst !== false;
+        }
+        if (mode === 'non-gst') {
+            return v.hasGst === false;
+        }
+        if (mode === 'purchase') {
+            // Purchase screen lists all outgoing payments; legacy rows may omit isPurchase
+            return v.type === 'payment' && v.isPurchase !== false;
+        }
+        return true;
     },
 
     /**
@@ -21,22 +47,25 @@ const VoucherManager = {
 
         // 1. Generate/Verify ID Uniqueness
         let id = data.id;
+        const voucherMode = data.isPurchase ? 'purchase' : (data.hasGst === false ? 'non-gst' : 'gst');
+
         if (!id) {
-            id = this.getNextVoucherNumber(data.type, data.date);
+            id = this.getNextVoucherNumber(data.type, data.date, voucherMode);
         }
 
         // Final Collision Check: If this ID is ALREADY in the database or our local session tracker, 
         // keep incrementing until we find a truly unique one.
+        const sk = this._serialKey(data.type, voucherMode);
         let uniqueId = id;
         let attempts = 0;
         while (attempts < 100) {
             const isDuplicate = vouchers.some(v => v.id === uniqueId) || 
-                               (this._lastSerials[data.type] === uniqueId);
+                               (this._lastSerials[sk] === uniqueId);
             
             if (!isDuplicate) break;
             
             // Increment
-            uniqueId = this.getNextVoucherNumber(data.type, data.date);
+            uniqueId = this.getNextVoucherNumber(data.type, data.date, voucherMode);
             attempts++;
         }
 
@@ -61,14 +90,17 @@ const VoucherManager = {
         };
 
         // Record it immediately to prevent the next call in a loop from taking the same ID
-        this.recordUsedSerial(data.type, uniqueId);
+        this.recordUsedSerial(data.type, uniqueId, voucherMode);
 
         vouchers.push(voucher);
         await DataManager.saveData('vouchers', vouchers);
 
-        // Update Invoice Statuses if linked
-        if (data.linkedInvoices && data.linkedInvoices.length > 0) {
-            await this.updateLinkedInvoices(data.linkedInvoices, data.type);
+        // Update linked document statuses from allocations + linked invoice ids (id and bill/invoice no)
+        const allocIds = (data.allocations || []).flatMap(a => [a.id, a.no, a.billNo, a.invoiceNo].filter(Boolean));
+        const linkIds = data.linkedInvoices || [];
+        const allLinked = [...new Set([...linkIds, ...allocIds])];
+        if (allLinked.length > 0) {
+            await this.updateLinkedInvoices(allLinked, data.type);
         }
 
         return voucher;
@@ -82,18 +114,54 @@ const VoucherManager = {
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
         const purchases = DataManager.getData('purchases') || [];
+        const mapFilter = voucherType === 'payment' ? 'payment' : 'receipt';
+        const allocMap = this.getVoucherAllocationsMap(null, mapFilter);
         
         let modifiedInv = false;
         let modifiedExp = false;
         let modifiedPur = false;
 
+        const findInvIdx = (raw) => {
+            let idx = invoices.findIndex(i => i.id === raw);
+            if (idx !== -1) return idx;
+            const s = (raw || '').toString().trim().toLowerCase();
+            if (!s) return -1;
+            return invoices.findIndex(i =>
+                (i.invoiceNo && i.invoiceNo.toString().trim().toLowerCase() === s) ||
+                (i.id && i.id.toString().trim().toLowerCase() === s)
+            );
+        };
+        const findExpIdx = (raw) => {
+            let idx = expenses.findIndex(e => e.id === raw);
+            if (idx !== -1) return idx;
+            const s = (raw || '').toString().trim().toLowerCase();
+            if (!s) return -1;
+            return expenses.findIndex(e =>
+                (e.billNo && e.billNo.toString().trim().toLowerCase() === s) ||
+                (e.vch_no && e.vch_no.toString().trim().toLowerCase() === s) ||
+                (e.invoiceNo && e.invoiceNo.toString().trim().toLowerCase() === s)
+            );
+        };
+        const findPurIdx = (raw) => {
+            if (purchases === expenses) return -1;
+            let idx = purchases.findIndex(p => p.id === raw);
+            if (idx !== -1) return idx;
+            const s = (raw || '').toString().trim().toLowerCase();
+            if (!s) return -1;
+            return purchases.findIndex(p =>
+                (p.billNo && p.billNo.toString().trim().toLowerCase() === s) ||
+                (p.vch_no && p.vch_no.toString().trim().toLowerCase() === s) ||
+                (p.invoiceNo && p.invoiceNo.toString().trim().toLowerCase() === s)
+            );
+        };
+
         for (const id of invoiceIds) {
             // 1. Check Sales Invoices
-            const invIndex = invoices.findIndex(i => i.id === id);
+            const invIndex = findInvIdx(id);
             if (invIndex !== -1) {
                 const doc = invoices[invIndex];
                 const total = parseFloat(doc.total || doc.amount || 0);
-                const balance = this.getDocumentBalance(id, total);
+                const balance = this.getDocumentBalance(doc.id, total, allocMap, doc.invoiceNo, doc);
                 
                 if (balance <= 0.05) { 
                     invoices[invIndex].status = 'paid';
@@ -104,12 +172,13 @@ const VoucherManager = {
                 continue;
             }
 
-            // 2. Check Expenses
-            const expIndex = expenses.findIndex(e => e.id === id);
+            // 2. Check Expenses (same storage key as purchases — KEYS.EXPENSES is 'purchases')
+            const expIndex = findExpIdx(id);
             if (expIndex !== -1) {
                 const doc = expenses[expIndex];
                 const total = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
-                const balance = this.getDocumentBalance(id, total);
+                const alt = doc.billNo || doc.vch_no || doc.invoiceNo;
+                const balance = this.getDocumentBalance(doc.id, total, allocMap, alt, doc);
                 
                 if (balance <= 0.05) {
                     expenses[expIndex].status = 'paid';
@@ -120,12 +189,13 @@ const VoucherManager = {
                 continue;
             }
 
-            // 3. Check Purchases
-            const purIndex = purchases.findIndex(p => p.id === id);
+            // 3. Check Purchases array (legacy duplicate key — skip if same ref as expenses)
+            const purIndex = findPurIdx(id);
             if (purIndex !== -1) {
                 const doc = purchases[purIndex];
                 const total = parseFloat(doc.total || doc.amount || 0);
-                const balance = this.getDocumentBalance(id, total);
+                const alt = doc.billNo || doc.vch_no || doc.invoiceNo;
+                const balance = this.getDocumentBalance(doc.id, total, allocMap, alt, doc);
                 
                 if (balance <= 0.05) {
                     purchases[purIndex].status = 'paid';
@@ -421,47 +491,53 @@ const VoucherManager = {
     _lastSerials: {},
 
     /**
-     * Track a used serial number in real-time
+     * Track a used serial number in real-time (per type + Plain/GST/Purchase mode).
      */
-    recordUsedSerial(type, id) {
+    recordUsedSerial(type, id, mode = null) {
         if (!type || !id) return;
-        this._lastSerials[type] = id;
+        this._lastSerials[this._serialKey(type, mode)] = id;
     },
 
     /**
-     * Get next sequential voucher number for a type
-     * Intelligently detects numeric suffixes and follows the LATEST used prefix.
+     * Get next sequential voucher number for a type.
+     * @param {string} type - receipt | payment | contra
+     * @param {Date|string|null} date - for financial year prefix
+     * @param {string|null} mode - 'gst' | 'non-gst' | 'purchase' — only count vouchers in this bucket (Plain vs GST vs Purchase)
      */
-    getNextVoucherNumber(type, date = null) {
+    getNextVoucherNumber(type, date = null, mode = null) {
         let vouchers = DataManager.getData('vouchers') || [];
         const year = DataManager.getFinancialYear(date || new Date());
         const typeCode = type === 'receipt' ? 'RCT' : (type === 'payment' ? 'PMT' : (type === 'contra' ? 'CNT' : 'VCH'));
         const defaultPrefix = `${typeCode}-${year}-`;
         
-        // 1. Combine with Bank Import Queue (Ready OR Converted)
+        // 1. Combine with Bank Import Queue (only vouchers that match this mode — avoids Plain next # jumping to GST/bank RCT-…1338)
         if (typeof VouchersUI !== 'undefined' && VouchersUI.currentBankTransactions) {
             const queueVouchers = VouchersUI.currentBankTransactions
                 .filter(tx => tx.mappedVoucher || tx.mappedData)
-                .map(tx => tx.mappedVoucher || tx.mappedData);
+                .map(tx => tx.mappedVoucher || tx.mappedData)
+                .filter(v => this._voucherMatchesMode(v, type, mode));
             vouchers = vouchers.concat(queueVouchers);
         }
 
-        // 2. Filter by type
-        const typeVouchers = vouchers.filter(v => v.type === type && v.id);
+        // 2. Filter by type and Plain/GST/Purchase bucket
+        const typeVouchers = vouchers.filter(v => this._voucherMatchesMode(v, type, mode));
+        const typeVouchersByDate = [...typeVouchers].sort((a, b) => {
+            const da = new Date(a.date || a.createdAt || 0).getTime();
+            const db = new Date(b.date || b.createdAt || 0).getTime();
+            return db - da;
+        });
         
-        // 3. Find the "Best" prefix to follow. 
-        // We prioritize the prefix used by the most recently added voucher of this type.
+        // 3. Find the "Best" prefix to follow (most recently dated voucher in this bucket).
         let targetPrefix = defaultPrefix;
         
-        // Use the last item in our session cache if available
-        const lastSessionId = this._lastSerials[type];
+        const serialKey = this._serialKey(type, mode);
+        const lastSessionId = this._lastSerials[serialKey];
         
         if (lastSessionId) {
             const lastMatch = lastSessionId.match(/^(.*?)(\d+)$/);
             if (lastMatch) targetPrefix = lastMatch[1];
-        } else if (typeVouchers.length > 0) {
-            // Use the last item in the list as the "most recent" reference
-            const lastVch = typeVouchers[typeVouchers.length - 1];
+        } else if (typeVouchersByDate.length > 0) {
+            const lastVch = typeVouchersByDate[0];
             const lastMatch = (lastVch.id || '').match(/^(.*?)(\d+)$/);
             if (lastMatch) targetPrefix = lastMatch[1];
         }
@@ -471,7 +547,7 @@ const VoucherManager = {
         let padding = 1;
 
         // Combine database vouchers with our local tracking cache for max number check
-        const allReferenceIds = typeVouchers.map(v => v.id);
+        const allReferenceIds = typeVouchersByDate.map(v => v.id);
         if (lastSessionId) allReferenceIds.push(lastSessionId);
 
         for (const vid of allReferenceIds) {
@@ -488,7 +564,7 @@ const VoucherManager = {
         // Fallback: If no vouchers match the latest prefix (rare), or if we are forced to default,
         // scan everything to find the globally highest record of this type.
         if (maxNum === 0) {
-            for (const v of typeVouchers) {
+            for (const v of typeVouchersByDate) {
                 const match = (v.id || '').match(/^(.*?)(\d+)$/);
                 if (match) {
                     const n = parseInt(match[2], 10);
@@ -502,8 +578,8 @@ const VoucherManager = {
         }
 
         // Also check our local cache for immediate override protection
-        if (this._lastSerials[type]) {
-            const match = this._lastSerials[type].match(/^(.*?)(\d+)$/);
+        if (this._lastSerials[serialKey]) {
+            const match = this._lastSerials[serialKey].match(/^(.*?)(\d+)$/);
             if (match && match[1] === targetPrefix) {
                 const n = parseInt(match[2], 10);
                 if (n > maxNum) {
@@ -513,35 +589,68 @@ const VoucherManager = {
         }
         
         if (maxNum === 0) {
+            // Plain numeric-only IDs (e.g. "10") use unpadded next number
+            if (!targetPrefix || targetPrefix === '') {
+                return String(1).padStart(Math.max(padding, 2), '0');
+            }
             return `${targetPrefix}001`;
         }
 
         const nextNum = maxNum + 1;
+        if (!targetPrefix || targetPrefix === '') {
+            return String(nextNum).padStart(Math.max(padding, 2), '0');
+        }
         return targetPrefix + String(nextNum).padStart(Math.max(padding, 3), '0');
     },
 
     /**
-     * Record the use of a serial number to ensure next increment is correct
+     * Older BookKeeper imports keyed allocations by internal vch_no (e.g. 8577) while bills use bill_no (00349).
+     * Mirror those amounts onto id / billNo / invoiceNo when the canonical key is missing.
      */
-    recordUsedSerial(type, id) {
-        if (!type || !id) return;
-        this._lastSerials[type] = id;
-    },
+    _applyBookkeeperVchAliasMirrors(map, filterType) {
+        if (filterType && filterType !== 'payment' && filterType !== 'receipt') return;
 
-    /**
-    _allocationsCache: null,
-    _lastVoucherCount: 0,
+        const mirrorIfMissing = (internalRaw, canonicalRaw) => {
+            const I = (internalRaw || '').toString().toLowerCase().trim();
+            const C = (canonicalRaw || '').toString().toLowerCase().trim();
+            if (!I || !C || I === C) return;
+            const amt = map.get(I);
+            if (!amt || amt <= 0) return;
+            if (!map.has(C)) map.set(C, amt);
+        };
+
+        if (!filterType || filterType === 'payment') {
+            const exps = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+            for (const e of exps) {
+                const internal = (e.bookkeeperVchNo || '').toString().toLowerCase().trim();
+                if (!internal) continue;
+                if (!map.get(internal)) continue;
+                mirrorIfMissing(internal, e.id);
+                mirrorIfMissing(internal, e.billNo);
+            }
+        }
+        if (!filterType || filterType === 'receipt') {
+            const invs = DataManager.getData('invoices') || [];
+            for (const inv of invs) {
+                const internal = (inv.bookkeeperVchNo || '').toString().toLowerCase().trim();
+                if (!internal) continue;
+                if (!map.get(internal)) continue;
+                mirrorIfMissing(internal, inv.id);
+                mirrorIfMissing(internal, inv.invoiceNo);
+            }
+        }
+    },
 
     /**
      * NEW: Get a map of all document allocations for fast lookup
      * @param {Array} extraTransactions - Optional list of pending bank transactions to include.
      */
-    getVoucherAllocationsMap(extraTransactions = null) {
+    getVoucherAllocationsMap(extraTransactions = null, filterType = null) {
         const vouchers = this.getAllVouchers();
         
-        // Use a more dynamic key for caching (including isReady count to detect session changes)
+        // Use a more dynamic key for caching (including filterType to prevent cross-contamination)
         const readyCount = (extraTransactions || []).filter(tx => tx.isReady || tx.converted).length;
-        const cacheKey = extraTransactions ? `v${vouchers.length}_e${extraTransactions.length}_r${readyCount}` : `v${vouchers.length}`;
+        const cacheKey = `${filterType || 'all'}_v${vouchers.length}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}`;
 
         if (this._allocationsCache && this._lastVoucherCount === cacheKey) {
             return this._allocationsCache;
@@ -551,31 +660,56 @@ const VoucherManager = {
 
         // 1. Existing Vouchers from Database
         vouchers.forEach(v => {
-            // 1. Check explicit allocations
+            const vType = (v.type || '').toString().toLowerCase();
+            // Type Segregation: Only include vouchers that match the requested document context
+            if (filterType) {
+                if (filterType === 'receipt' && vType !== 'receipt') return;
+                if (filterType === 'payment' && vType !== 'payment') return;
+            }
+
+            // 1. Check explicit allocations (register BOTH id and bill/invoice no — lookups use either)
             if (v.allocations && v.allocations.length > 0) {
                 v.allocations.forEach(a => {
-                    const id = a.id || a.no;
-                    if (id) {
-                        const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
-                        map.set(id, (map.get(id) || 0) + amount);
-                    }
+                    const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
+                    if (amount <= 0) return;
+                    const keySet = new Set();
+                    [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
+                        if (raw === undefined || raw === null || raw === '') return;
+                        const k = raw.toString().toLowerCase().trim();
+                        if (k) keySet.add(k);
+                    });
+                    keySet.forEach(k => {
+                        map.set(k, (map.get(k) || 0) + amount);
+                    });
                 });
-            } 
+            }
             // 2. Check legacy/imported linkedInvoices
             else if (v.linkedInvoices && Array.isArray(v.linkedInvoices)) {
                 v.linkedInvoices.forEach(link => {
-                    let id, amount;
+                    let amount;
+                    const addKey = (raw, amt) => {
+                        if (raw === undefined || raw === null || raw === '') return;
+                        const k = raw.toString().toLowerCase().trim();
+                        if (!k) return;
+                        map.set(k, (map.get(k) || 0) + amt);
+                    };
                     if (typeof link === 'string') {
-                        id = link;
                         const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
                         amount = totalSettlement / v.linkedInvoices.length;
+                        addKey(link, amount);
                     } else if (link && typeof link === 'object') {
-                        id = link.id || link.invoiceNo || link.billNo;
                         amount = parseFloat(link.amount) || 0;
-                    }
-
-                    if (id) {
-                        map.set(id, (map.get(id) || 0) + amount);
+                        if (amount <= 0) {
+                            const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
+                            amount = totalSettlement / Math.max(v.linkedInvoices.length, 1);
+                        }
+                        const ks = new Set();
+                        [link.id, link.invoiceNo, link.billNo].forEach(raw => {
+                            if (raw === undefined || raw === null || raw === '') return;
+                            const k = raw.toString().toLowerCase().trim();
+                            if (k) ks.add(k);
+                        });
+                        ks.forEach(k => addKey(k, amount));
                     }
                 });
             }
@@ -584,22 +718,29 @@ const VoucherManager = {
         // 3. Pending Bank Transactions (Session-Aware Balance)
         if (extraTransactions && Array.isArray(extraTransactions)) {
             extraTransactions.forEach(tx => {
+                // Filter extra transactions by type too
+                if (filterType && tx.type !== filterType) return;
+
                 // If it's linked but not yet imported
                 if ((tx.isReady || tx.converted) && !tx.imported) {
                     if (tx.linkedVoucherId) {
-                        map.set(tx.linkedVoucherId, (map.get(tx.linkedVoucherId) || 0) + parseFloat(tx.amount || 0));
+                        const lvid = tx.linkedVoucherId.toString().toLowerCase().trim();
+                        map.set(lvid, (map.get(lvid) || 0) + parseFloat(tx.amount || 0));
                     }
                     const mv = tx.mappedVoucher || tx.mappedData;
                     if (mv && mv.linkedInvoices) {
                         mv.linkedInvoices.forEach(id => {
+                            const cleanId = id.toString().toLowerCase().trim();
                             // If it's a bulk link, we assume the whole amount for simplicity or check allocations if present
-                            const amt = mv.allocations?.find(a => a.id === id)?.amount || (tx.amount / mv.linkedInvoices.length);
-                            map.set(id, (map.get(id) || 0) + parseFloat(amt));
+                            const amt = mv.allocations?.find(a => (a.id||'').toString().toLowerCase().trim() === cleanId)?.amount || (tx.amount / mv.linkedInvoices.length);
+                            map.set(cleanId, (map.get(cleanId) || 0) + parseFloat(amt));
                         });
                     }
                 }
             });
         }
+
+        this._applyBookkeeperVchAliasMirrors(map, filterType);
 
         this._allocationsCache = map;
         this._lastVoucherCount = cacheKey;
@@ -609,14 +750,68 @@ const VoucherManager = {
     /**
      * Updated: Get the remaining balance for a specific document
      */
-    getDocumentBalance(docId, totalAmount, allocationsMap = null, extraTransactions = null) {
+    getDocumentBalance(docId, totalAmount, allocationsMap = null, altId = null, doc = null) {
         let allocated = 0;
-        if (allocationsMap) {
-            allocated = allocationsMap.get(docId) || 0;
-        } else {
-            // Pass extraTransactions specifically if map not provided
-            const tempMap = this.getVoucherAllocationsMap(extraTransactions);
-            allocated = tempMap.get(docId) || 0;
+        const map = allocationsMap || this.getVoucherAllocationsMap();
+        
+        // 1. Try primary ID match (Case-Insensitive)
+        const cleanDocId = (docId || '').toString().toLowerCase().trim();
+        const cleanAltId = (altId || '').toString().toLowerCase().trim();
+        
+        allocated = map.get(cleanDocId) || 0;
+        
+        // 2. Try alternative ID match if primary ID has no allocation
+        if (allocated === 0 && cleanAltId && cleanAltId !== cleanDocId) {
+            allocated = map.get(cleanAltId) || 0;
+        }
+
+        // 2b. BookKeeper internal vch_no stored on imported invoice/purchase (e.g. 8577 vs bill 00349)
+        if (allocated === 0 && doc && doc.bookkeeperVchNo) {
+            const vn = doc.bookkeeperVchNo.toString().toLowerCase().trim();
+            if (vn) allocated = map.get(vn) || 0;
+        }
+
+        // 3. NEW: If it's a BookKeeper import, try to match by its internal numeric ID or full Id
+        if (allocated === 0 && doc && doc.bookkeeperId) {
+            const fullBkId = doc.bookkeeperId.toLowerCase().trim();
+            const numericVid = fullBkId.replace('bk-inv-', '').replace('bk-exp-', '').replace('bk-pur-', '');
+            
+            allocated = map.get(fullBkId) || (numericVid ? (map.get(numericVid) || map.get(parseInt(numericVid))) : 0) || 0;
+        }
+        
+        // 4. Fallback: match last path segment or long numeric id only (avoids false "paid" from short suffix collisions)
+        if (allocated === 0 && doc) {
+            const lastSeg = (s) => {
+                const t = (s || '').toString().trim().toLowerCase();
+                if (!t) return '';
+                const parts = t.split(/[\/\\]/);
+                return parts[parts.length - 1].trim();
+            };
+            const iLast = lastSeg(docId);
+            const aLast = lastSeg(altId);
+            const iNum = (docId || '').toString().replace(/[^0-9]/g, '');
+            const aNum = (altId || '').toString().replace(/[^0-9]/g, '');
+
+            for (const [key, val] of map.entries()) {
+                const cleanKey = key.toString().toLowerCase().trim();
+                const kLast = lastSeg(cleanKey);
+                const kNum = cleanKey.replace(/[^0-9]/g, '');
+
+                if (cleanKey === cleanDocId || cleanKey === cleanAltId) {
+                    allocated = val;
+                    break;
+                }
+                const segOk = (a, b) => a && b && a === b && a.length >= 2;
+                if (segOk(kLast, iLast) || segOk(kLast, aLast)) {
+                    allocated = val;
+                    break;
+                }
+                const numOk = (kn, n) => kn && n && kn === n && n.length >= 5;
+                if (numOk(kNum, iNum) || numOk(kNum, aNum)) {
+                    allocated = val;
+                    break;
+                }
+            }
         }
         
         return Math.max(0, totalAmount - allocated);

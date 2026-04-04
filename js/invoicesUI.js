@@ -6,6 +6,15 @@
 const InvoicesUI = {
     currentMode: 'gst', // 'gst' or 'non-gst'
 
+    escapePdfHtml(str) {
+        if (str == null || str === '') return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
     currentStatusFilter: 'all',
     searchTimeout: null,
 
@@ -92,18 +101,20 @@ const InvoicesUI = {
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card bg-dark border-secondary shadow-sm">
+                    <div class="card bg-dark border-secondary shadow-sm hover-lift" style="cursor: pointer;" role="button" tabindex="0" title="View list of pending bills" onclick="InvoicesUI.showSalesOutstandingModal('bills')" onkeydown="if(event.key==='Enter')InvoicesUI.showSalesOutstandingModal('bills')">
                         <div class="card-body p-3 text-center">
                             <div class="text-white-50 fw-bold small text-uppercase mb-1">Total Pending Bills</div>
                             <h3 class="mb-0 text-warning" id="summaryPendingBills">0</h3>
+                            <div class="text-white-50 extra-small mt-1">Click for details</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card bg-dark border-secondary shadow-sm">
+                    <div class="card bg-dark border-secondary shadow-sm hover-lift" style="cursor: pointer;" role="button" tabindex="0" title="View outstanding by customer" onclick="InvoicesUI.showSalesOutstandingModal('parties')" onkeydown="if(event.key==='Enter')InvoicesUI.showSalesOutstandingModal('parties')">
                         <div class="card-body p-3 text-center">
                             <div class="text-white-50 fw-bold small text-uppercase mb-1">Parties with Outstanding</div>
                             <h3 class="mb-0 text-info" id="summaryPendingParties">0</h3>
+                            <div class="text-white-50 extra-small mt-1">Click for details</div>
                         </div>
                     </div>
                 </div>
@@ -173,6 +184,9 @@ const InvoicesUI = {
                         <div class="spinner-border text-info" role="status"></div>
                     </div>
                 </div>
+                <p class="text-white-50 small mt-2 mb-0" id="invoicesDcHint" style="display: none;">
+                    <i class="bi bi-info-circle me-1"></i> Delivery challan bills (numbers containing DC) count toward totals above; open them from <strong>Accounting → Challans → View DC</strong>.
+                </p>
             </div>
         `;
 
@@ -207,7 +221,7 @@ const InvoicesUI = {
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
 
-        const filtered = invoices.filter(inv => {
+        const filteredAll = invoices.filter(inv => {
             const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
             const customerMatch = !customerFilter || inv.customerName === customerFilter;
             const statusMatch = statusFilter === 'all' || 
@@ -217,15 +231,18 @@ const InvoicesUI = {
             const searchMatch = !query || 
                                (inv.invoiceNo || '').toLowerCase().includes(query) || 
                                (inv.customerName || '').toLowerCase().includes(query) ||
-                               (inv.items || []).some(item => item.name.toLowerCase().includes(query));
+                               (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
 
             return yearMatch && customerMatch && statusMatch && searchMatch;
         });
 
-        // Summary Calculations (Based on filtered data)
-        const totalPending = filtered.reduce((sum, inv) => sum + (inv.balance || 0), 0);
-        const pendingCount = filtered.filter(inv => (inv.balance || 0) > 0.05).length;
-        const outstandingParties = new Set(filtered.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId)).size;
+        const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
+        const forTable = filteredAll.filter(inv => !isDc(inv));
+
+        // Summary includes DC-style bills (View DC) so totals match receipts / Book Keeper
+        const totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
+        const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
+        const outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
 
         // Update Summary Cards if visible
         const updateEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -233,16 +250,26 @@ const InvoicesUI = {
         updateEl('summaryPendingBills', pendingCount);
         updateEl('summaryPendingParties', outstandingParties);
 
+        const dcHint = document.getElementById('invoicesDcHint');
+        if (dcHint) {
+            const hasDcInScope = filteredAll.some(inv => isDc(inv));
+            dcHint.style.display = hasDcInScope ? 'block' : 'none';
+        }
+
         const container = document.getElementById('invoicesTableContainer');
         if (!container) return;
 
-        if (filtered.length === 0) {
-            container.innerHTML = `<div class="text-center py-5 text-muted">No invoices found matching current filters.</div>`;
+        if (forTable.length === 0) {
+            if (filteredAll.length > 0) {
+                container.innerHTML = `<div class="text-center py-5 text-muted">No standard GST invoices match this view. Delivery challan bills are listed under <strong>Accounting → Challans → View DC</strong>.</div>`;
+            } else {
+                container.innerHTML = `<div class="text-center py-5 text-muted">No invoices found matching current filters.</div>`;
+            }
             return;
         }
 
         // Sort by date desc
-        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+        forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         const html = `
             <table class="table table-dark table-hover align-middle border-secondary">
@@ -258,20 +285,27 @@ const InvoicesUI = {
                     </tr>
                 </thead>
                 <tbody>
-                    ${filtered.map(inv => {
+                    ${forTable.map(inv => {
             const statusBadge = inv.isPaid ? 
                 '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
                 (inv.isPartial ? 
                     '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>' : 
                     '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
+            
+            const itemsList = (inv.items || []).map(item => item.name).join(', ');
                     
             return `
                         <tr>
                             <td>${DataManager.formatDateDisplay(inv.date)}</td>
-                            <td class="fw-bold text-info">${inv.invoiceNo}</td>
+                            <td>
+                                <div class="fw-bold text-info">${inv.invoiceNo || inv.id}</div>
+                                <div style="font-size: 10px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                                    ${itemsList}
+                                </div>
+                            </td>
                             <td>${inv.customerName}</td>
-                            <td class="text-end">₹${inv.total.toFixed(2)}</td>
-                            <td class="text-end fw-bold ${inv.balance > 0 ? 'text-danger' : 'text-success'}">₹${inv.balance.toFixed(2)}</td>
+                            <td class="text-end">₹${(parseFloat(inv.total ?? inv.amount ?? 0) || 0).toFixed(2)}</td>
+                            <td class="text-end fw-bold ${inv.balance > 0 ? 'text-danger' : 'text-success'}">₹${(parseFloat(inv.balance) || 0).toFixed(2)}</td>
                             <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
                                 <div class="btn-group">
@@ -395,7 +429,7 @@ const InvoicesUI = {
                         opacity: 0.7;
                     }
                 </style>
-                <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width: 95vw;">
+                <div class="modal-dialog modal-fullscreen modal-dialog-scrollable" style="max-width: 100vw; margin: 0;">
                     <div class="modal-content bg-dark text-white border-secondary">
                         <div class="modal-header border-secondary d-flex justify-content-between align-items-center">
                             <div>
@@ -494,7 +528,7 @@ const InvoicesUI = {
                                 </div>
 
                                 <!-- Items Table -->
-                                <div class="table-responsive border border-secondary rounded overflow-hidden mb-4">
+                                <div class="table-responsive border border-secondary rounded overflow-hidden mb-4" style="max-height: 380px; overflow-y: auto;">
                                     <table class="table table-dark table-hover table-sm mb-0" id="invoiceItemsTable">
                                         <thead>
                                             <tr class="bg-black">
@@ -549,7 +583,7 @@ const InvoicesUI = {
                                             </div>
                                             <div class="col-md-12">
                                                 <div class="bk-form-label">Narration</div>
-                                                <textarea class="bk-form-control w-100" name="narration" rows="3" placeholder="Enter remarks..."></textarea>
+                                                <textarea class="bk-form-control w-100" name="narration" rows="2" placeholder="Enter remarks..."></textarea>
                                             </div>
                                         </div>
                                     </div>
@@ -577,8 +611,8 @@ const InvoicesUI = {
                                                 </div>
                                                 <hr class="border-secondary mt-0">
                                                 <div class="d-flex justify-content-between align-items-center">
-                                                    <h4 class="mb-0 text-info">TOTAL:</h4>
-                                                    <h3 class="mb-0 text-info" id="totalAmountDisplay">0.00</h3>
+                                                    <h6 class="mb-0 text-info">TOTAL:</h6>
+                                                    <h5 class="mb-0 text-info" id="totalAmountDisplay">0.00</h5>
                                                 </div>
                                             </div>
                                         </div>
@@ -629,7 +663,7 @@ const InvoicesUI = {
             popup.style.position = 'absolute';
             popup.style.top = '100%';
             popup.style.left = '0';
-            popup.style.zIndex = '1050';
+            popup.style.zIndex = '2000';
             popup.style.display = 'none';
             wrapper.appendChild(popup);
 
@@ -769,7 +803,7 @@ const InvoicesUI = {
         
         // Correctly read the type input which contains the actual invoice type
         const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-        const isGST = typeInput ? typeInput.value.includes('gst') : false;
+        const isGST = typeInput ? (typeof InvoiceManager !== 'undefined' ? InvoiceManager.isGSTType(typeInput.value) : typeInput.value.includes('gst')) : false;
         
         row.innerHTML = `
             <td class="ps-3 py-2">
@@ -778,7 +812,7 @@ const InvoicesUI = {
             </td>
             <td>
                 <input type="text" name="desc[]" class="bk-form-control w-100" 
-                    value="${data ? (data.itemDescription || '') : ''}" placeholder="Details">
+                    value="${data ? (data.description || data.itemDescription || '') : ''}" placeholder="Details">
             </td>
             ${isGST ? `
             <td>
@@ -1276,219 +1310,292 @@ const InvoicesUI = {
             pan: invoice.customerPan || ''
         };
 
+        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
-        element.style.width = '850px';
-        element.style.padding = '30px';
+        element.className = 'gtes-pdf-document';
+        element.style.width = `${pdfW}px`;
+        element.style.padding = '14px';
         element.style.background = 'white';
-        element.style.color = 'black';
-        element.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+        element.style.color = '#000';
+        element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
+
+        const isPlainPdf = invoice.type === 'non-gst-invoice' || invoice.type === 'without-bill';
+        const isGstPdf = !isPlainPdf && (invoice.billType === 'gst' || invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst');
 
         // Fetch Master Data for real-time HSN/Unit/Description lookup
-        const masterInventory = DataManager.getData('inventory') || [];
-        const masterServices = DataManager.getData('gtes_services') || [];
+        const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || [];
+        const masterServices = DataManager.getData(DataManager.KEYS.SERVICES || 'gtes_services') || [];
         const allMasterItems = [...masterInventory, ...masterServices];
 
+        const thBase = 'padding: 8px; border: 1px solid #64748b;';
+        const theadStyle = 'background: #4a5568; color: #fff; font-size: 10px; text-transform: uppercase; text-align: center;';
+
         const itemsHtml = invoice.items.map((item, idx) => {
-            // Lookup master item
-            const masterItem = allMasterItems.find(m => m.name.toLowerCase() === item.name.toLowerCase());
+            const details = this.getItemDisplayDetails(item, allMasterItems, isPlainPdf);
+            const nm = this.escapePdfHtml(item.name);
+            const ds = details.displayDesc ? this.escapePdfHtml(details.displayDesc) : '';
+            const qtyCell = `${details.qty}${details.unit !== 'nos' ? ' ' + this.escapePdfHtml(details.unit) : ''}`;
+            const cell = 'padding: 5px 6px; border: 1px solid #000; font-size: 10px;';
 
-            const qty = parseFloat(item.quantity) || 0;
-            const rate = parseFloat(item.rate) || 0;
-            const amount = parseFloat(item.amount) || (qty * rate);
-            const gstRate = parseFloat(item.gstRate?.toString().replace(/[^0-9.]/g, '')) || 0;
-            const isPlain = invoice.type === 'non-gst-invoice';
-            const cgstRate = gstRate / 2;
-            const cgstAmount = amount * (cgstRate / 100);
-
-            // Prioritize master data if available
-            const hsn = masterItem?.hsnCode || item.hsn || '-';
-            const unit = masterItem?.unit || item.unit || 'nos';
-
-            // Build a clean description to avoid redundant info (Prioritizing Transaction details)
-            let displayDesc = '';
-            const itemDesc = (item.description || '').trim();
-            const mstrDesc = (masterItem?.description || '').trim();
-
-            // 1. Transaction description is ALWAYS prioritized (as requested)
-            // Capture transaction-level notes (e.g., "1.5 Mtrs Long...")
-            if (itemDesc && itemDesc.toLowerCase().trim() !== item.name.toLowerCase().trim()) {
-                displayDesc = itemDesc;
-            }
-
-            // 2. ONLY append master description if transaction desc is empty OR significantly different
-            if (mstrDesc && mstrDesc !== 'NA' && mstrDesc.toLowerCase().trim() !== item.name.toLowerCase().trim()) {
-                if (!displayDesc) {
-                    displayDesc = mstrDesc;
-                } else if (!displayDesc.toLowerCase().includes(mstrDesc.toLowerCase())) {
-                    // Append if master has extra info not in transaction
-                    displayDesc += '<br>' + mstrDesc;
-                }
-            }
-
-            return `
-                <tr style="border-bottom: 1px solid #000; font-size: 11px;">
-                    <td style="padding: 8px; text-align: center; border-right: 1px solid #000;">${idx + 1}</td>
-                    <td style="padding: 8px; border-right: 1px solid #000;">
-                        <div style="font-weight: 600;">${item.name}</div>
-                        ${displayDesc ? `<div style="font-size: 9px; color: #444; margin-top: 3px; line-height: 1.2; white-space: pre-line;">${displayDesc}</div>` : ''}
+            if (isPlainPdf || details.isPlain) {
+                return `
+                <tr style="page-break-inside: avoid;">
+                    <td style="${cell} text-align: center;">${idx + 1}</td>
+                    <td style="${cell} vertical-align: top;">
+                        <div style="font-weight: 700;">${nm}</div>
+                        ${ds ? `<div style="font-size: 9px; font-style: italic; color: #222; margin-top: 3px; line-height: 1.35; white-space: pre-line;">${ds}</div>` : ''}
                     </td>
-                    <td style="padding: 8px; text-align: center; border-right: 1px solid #000;">${hsn}</td>
-                    <td style="padding: 8px; text-align: center; border-right: 1px solid #000;">${qty.toFixed(2)}</td>
-                    <td style="padding: 8px; text-align: center; border-right: 1px solid #000;">${unit}</td>
-                    <td style="padding: 8px; text-align: right; border-right: 1px solid #000;">${rate.toFixed(2)}</td>
-                    <td style="padding: 8px; text-align: right; border-right: 1px solid #000;">${item.discount || 0}%</td>
-                    ${isPlain ? '' : `
-                    <td style="padding: 8px; text-align: right; border-right: 1px solid #000;">${cgstRate}%</td>
-                    <td style="padding: 8px; text-align: right; border-right: 1px solid #000;">${cgstRate}%</td>
-                    `}
-                    <td style="padding: 8px; text-align: right; font-weight: 600;">${amount.toFixed(2)}</td>
-                </tr>
-            `;
+                    <td style="${cell} text-align: center; word-break: break-all; max-width: 88px;">${this.escapePdfHtml(details.hsn)}</td>
+                    <td style="${cell} text-align: center;">${qtyCell}</td>
+                    <td style="${cell} text-align: right;">${details.rate.toFixed(2)}</td>
+                    <td style="${cell} text-align: center;">${this.escapePdfHtml(details.unit)}</td>
+                    <td style="${cell} text-align: right;">${item.discount || 0}%</td>
+                    <td style="${cell} text-align: right; font-weight: 700;">${details.amount.toFixed(2)}</td>
+                </tr>`;
+            }
+            const cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
+            const sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
+            const cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
+            const sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            return `
+                <tr style="page-break-inside: avoid;">
+                    <td style="${cell} text-align: center;">${idx + 1}</td>
+                    <td style="${cell} vertical-align: top;">
+                        <div style="font-weight: 700;">${nm}</div>
+                        ${ds ? `<div style="font-size: 9px; font-style: italic; color: #222; margin-top: 3px; line-height: 1.35; white-space: pre-line;">${ds}</div>` : ''}
+                    </td>
+                    <td style="${cell} text-align: center; word-break: break-all; max-width: 88px;">${this.escapePdfHtml(details.hsn)}</td>
+                    <td style="${cell} text-align: center;">${qtyCell}</td>
+                    <td style="${cell} text-align: right;">${details.rate.toFixed(2)}</td>
+                    <td style="${cell} text-align: center;">${this.escapePdfHtml(details.unit)}</td>
+                    <td style="${cell} text-align: right;">${item.discount || 0}%</td>
+                    <td style="${cell} text-align: right;">${cgstR.toFixed(1)}%</td>
+                    <td style="${cell} text-align: right;">${cgstA.toFixed(2)}</td>
+                    <td style="${cell} text-align: right;">${sgstR.toFixed(1)}%</td>
+                    <td style="${cell} text-align: right;">${sgstA.toFixed(2)}</td>
+                    <td style="${cell} text-align: right; font-weight: 700;">${details.amount.toFixed(2)}</td>
+                </tr>`;
         }).join('');
 
         const totalQty = invoice.items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
         const subtotal = invoice.subtotal || invoice.items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
         const cgstAmount = invoice.gst?.cgst || invoice.items.reduce((sum, item) => {
             const amt = parseFloat(item.amount) || 0;
-            const rate = parseFloat(item.gstRate?.replace(/[^0-9.]/g, '')) || 0;
-            return sum + (amt * (rate / 200));
+            const rate = (parseFloat(item.cgstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) / 2) || 0);
+            return sum + (amt * (rate / 100));
         }, 0);
-        const sgstAmount = invoice.gst?.sgst || cgstAmount;
+        const sgstAmount = invoice.gst?.sgst || invoice.items.reduce((sum, item) => {
+            const amt = parseFloat(item.amount) || 0;
+            const rate = (parseFloat(item.sgstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) / 2) || 0);
+            return sum + (amt * (rate / 100));
+        }, 0);
+        const igstAmount = invoice.gst?.igst || invoice.items.reduce((sum, item) => {
+            const amt = parseFloat(item.amount) || 0;
+            const rate = (parseFloat(item.igstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) || 0));
+            return sum + (amt * (rate / 100));
+        }, 0);
 
-        // Get generic GST rate for display in summary if needed
-        const displayGstRate = parseFloat(invoice.items[0]?.gstRate?.replace(/[^0-9.]/g, '')) || 18;
+        const roundOff = invoice.roundOff !== undefined ? invoice.roundOff : 0;
+        const total = invoice.total != null ? invoice.total : (subtotal + cgstAmount + sgstAmount + igstAmount + roundOff);
 
-        const roundOff = invoice.roundOff !== undefined ? invoice.roundOff : (invoice.total - (subtotal + cgstAmount + sgstAmount));
+        const payStatus = (invoice.status || 'pending').toUpperCase();
+        const payColor = invoice.status === 'paid' ? '#27ae60' : '#e67e22';
+        const upiId = settings.upiId || '';
+        const qrUrl = upiId ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${total}&cu=INR`)}` : '';
+
+        const docTitle = isPlainPdf ? 'Invoice' : 'Tax Invoice';
+        const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
+        const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
+
+        const gstTableHead = isGstPdf ? `
+                    <tr style="${theadStyle}">
+                        <th rowspan="2" style="${thBase} vertical-align: middle;">#</th>
+                        <th rowspan="2" style="${thBase} text-align: left;">Description</th>
+                        <th rowspan="2" style="${thBase}">HSN</th>
+                        <th rowspan="2" style="${thBase}">Qty</th>
+                        <th rowspan="2" style="${thBase}">Rate</th>
+                        <th rowspan="2" style="${thBase}">Per</th>
+                        <th rowspan="2" style="${thBase}">Disc</th>
+                        <th colspan="2" style="${thBase}">CGST</th>
+                        <th colspan="2" style="${thBase}">SGST</th>
+                        <th rowspan="2" style="${thBase}">Amount</th>
+                    </tr>
+                    <tr style="${theadStyle}">
+                        <th style="${thBase}">%</th>
+                        <th style="${thBase}">Amt</th>
+                        <th style="${thBase}">%</th>
+                        <th style="${thBase}">Amt</th>
+                    </tr>` : `
+                    <tr style="${theadStyle}">
+                        <th style="${thBase}">#</th>
+                        <th style="${thBase} text-align: left;">Description</th>
+                        <th style="${thBase}">HSN</th>
+                        <th style="${thBase}">Qty</th>
+                        <th style="${thBase}">Rate</th>
+                        <th style="${thBase}">Per</th>
+                        <th style="${thBase}">Disc</th>
+                        <th style="${thBase}">Amount</th>
+                    </tr>`;
+
+        const summaryBox = isGstPdf ? `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${subtotal.toFixed(2)}</td></tr>
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">CGST Total</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${cgstAmount.toFixed(2)}</td></tr>
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">SGST Total</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${sgstAmount.toFixed(2)}</td></tr>
+                        ${igstAmount > 0 ? `<tr><td style="padding: 6px 8px; text-align: right; color: #334155;">IGST Total</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${igstAmount.toFixed(2)}</td></tr>` : ''}
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Round Off</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">${roundOff.toFixed(2)}</td></tr>
+                        <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
+                            <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
+                                <tr style="font-weight: bold; font-size: 17px;">
+                                    <td style="padding: 10px 8px; text-align: right;">Total Amount</td>
+                                    <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${total.toFixed(2)}</td>
+                                </tr>
+                            </table>
+                        </td></tr>
+                    </table>` : `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${subtotal.toFixed(2)}</td></tr>
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Round Off</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">${roundOff.toFixed(2)}</td></tr>
+                        <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
+                            <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
+                                <tr style="font-weight: bold; font-size: 17px;">
+                                    <td style="padding: 10px 8px; text-align: right;">Total Amount</td>
+                                    <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${total.toFixed(2)}</td>
+                                </tr>
+                            </table>
+                        </td></tr>
+                    </table>`;
+
+        const taxLeftBlock = isGstPdf ? `
+                    <div style="margin-bottom: 6px;"><strong>CGST Amt:</strong> ${cgstAmount.toFixed(2)}</div>
+                    <div style="margin-bottom: 6px;"><strong>SGST Amt:</strong> ${sgstAmount.toFixed(2)}</div>
+                    ${igstAmount > 0 ? `<div style="margin-bottom: 6px;"><strong>IGST Amt:</strong> ${igstAmount.toFixed(2)}</div>` : ''}
+                    <div style="margin-bottom: 12px;"><strong>Total Tax:</strong> ${(cgstAmount + sgstAmount + igstAmount).toFixed(2)}</div>
+                    <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>` : `
+                    <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>`;
 
         element.innerHTML = `
-            <!-- Header -->
-            <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-                <h2 style="margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;">${company.name}</h2>
-                <div style="font-size: 12px; margin-top: 5px;">
-                    ${company.address}<br>
-                    Work Address: ${company.workAddress}<br>
-                    Email: ${Array.isArray(company.emails) ? company.emails.join(', ') : company.emails} | Ph: ${Array.isArray(company.phones) ? company.phones.join(', ') : company.phones}<br>
-                    <strong>GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}</strong>
-                </div>
-            </div>
-
-            <h3 style="text-align: center; margin: 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">${invoice.type === 'non-gst-invoice' ? 'Invoice' : 'Tax Invoice'}</h3>
-
-            <!-- Info Grid -->
-            <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 11px; margin-bottom: 10px;">
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
                 <tr>
-                    <td style="width: 50%; border: 1px solid #000; padding: 5px;">
-                        <table style="width: 100%;">
-                            <tr><td style="width: 40%;"><strong>Invoice No</strong></td><td>: ${invoice.invoiceNo}</td></tr>
-                            <tr><td><strong>Date</strong></td><td>: ${invoice.date}</td></tr>
-                            <tr><td><strong>Due Date</strong></td><td>: ${invoice.date}</td></tr>
-                            <tr><td><strong>Customer DC / Ref No</strong></td><td>: ${invoice.poNumber || '-'}</td></tr>
-                        </table>
+                    <td style="width: 62%; vertical-align: top; padding: 0 12px 12px 0;">
+                        <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${this.escapePdfHtml(company.name)}</h1>
+                        <div style="font-size: 10px; color: #222; margin-top: 6px; line-height: 1.45;">
+                            ${this.escapePdfHtml(company.address)}<br>
+                            <strong>Work:</strong> ${this.escapePdfHtml(company.workAddress)}<br>
+                            ${emailLine ? `Email: ${this.escapePdfHtml(emailLine)}<br>` : ''}
+                            ${phoneLine ? `Ph: ${this.escapePdfHtml(phoneLine)}<br>` : ''}
+                            <strong>GSTIN:</strong> ${this.escapePdfHtml(company.gstin)} | <strong>PAN:</strong> ${this.escapePdfHtml(company.pan)}
+                            ${company.iec ? ` | <strong>IEC:</strong> ${this.escapePdfHtml(company.iec)}` : ''}
+                        </div>
                     </td>
-                    <td style="width: 50%; border: 1px solid #000; padding: 5px;">
-                        <table style="width: 100%;">
-                            <tr><td style="width: 40%;"><strong>Dispatch Via</strong></td><td>: ${invoice.dispatchDetails?.via || ''}</td></tr>
-                            <tr><td><strong>LR/Tracking No</strong></td><td>: ${invoice.dispatchDetails?.lrNo || ''}</td></tr>
-                            <tr><td><strong>Vehicle No</strong></td><td>: ${invoice.dispatchDetails?.vehicleNo || ''}</td></tr>
-                            <tr><td><strong>Dispatch Date</strong></td><td>: ${invoice.dispatchDetails?.date || ''}</td></tr>
-                        </table>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 5px; vertical-align: top;">
-                        <div style="background: #f0f0f0; padding: 2px 5px; font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #000;">Details of Receiver (Billed To)</div>
-                        <div style="font-weight: bold; font-size: 13px;">${customer.name}</div>
-                        <div style="white-space: pre-wrap;">${customer.address}</div>
-                        <p style="margin: 5px 0 0;"><strong>GSTIN:</strong> ${customer.gstin || '-'}</p>
-                        <p style="margin: 0;"><strong>PAN:</strong> ${customer.pan || '-'}</p>
-                    </td>
-                    <td style="border: 1px solid #000; padding: 5px; vertical-align: top;">
-                        <div style="background: #f0f0f0; padding: 2px 5px; font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #000;">Details of Consignee (Shipped To)</div>
-                        <div style="font-weight: bold; font-size: 13px;">${customer.name}</div>
-                        <div style="white-space: pre-wrap;">${customer.address}</div>
+                    <td style="width: 38%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
+                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 8px;">${docTitle}</div>
+                        <div style="font-size: 10px; color: #222; line-height: 1.5;">
+                            <strong>Invoice No:</strong> ${this.escapePdfHtml(invoice.invoiceNo || invoice.id)}<br>
+                            <strong>Date:</strong> ${this.escapePdfHtml(invoice.date)}
+                        </div>
                     </td>
                 </tr>
             </table>
 
-            <!-- Items Table -->
-            <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 11px; margin-bottom: 0;">
-                <thead>
-                    <tr style="background: #f8f8f8; border-bottom: 1px solid #000;">
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 4%;">#</th>
-                        <th style="padding: 8px; text-align: left; border-right: 1px solid #000; width: 24%;">Description</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 10%;">HSN</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 7%;">QTY</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 7%;">Units</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 10%;">Rate</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 5%;">Disc</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 6.5%;">CGST%</th>
-                        <th style="padding: 8px; border-right: 1px solid #000; width: 6.5%;">SGST%</th>
-                        <th style="padding: 8px; width: 20%;">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${itemsHtml}
-                </tbody>
-                <tfoot>
-                    <tr style="font-weight: bold; border-top: 1px solid #000; border-bottom: 1px solid #000;">
-                        <td colspan="9" style="padding: 8px; text-align: right; border-right: 1px solid #000; border-left: 1px solid #000;">Subtotal</td>
-                        <td style="padding: 8px; text-align: right; border-right: 1px solid #000; padding-right: 5px;">${subtotal.toFixed(2)}</td>
-                    </tr>
-                    ${cgstAmount > 0 ? `
-                    <tr style="font-weight: bold; border-bottom: 1px solid #000;">
-                        <td colspan="9" style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; border-left: 1px solid #000;">CGST@${(displayGstRate / 2).toFixed(1)}%</td>
-                        <td style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; padding-right: 5px;">${cgstAmount.toFixed(2)}</td>
-                    </tr>
-                    <tr style="font-weight: bold; border-bottom: 1px solid #000;">
-                        <td colspan="9" style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; border-left: 1px solid #000;">SGST@${(displayGstRate / 2).toFixed(1)}%</td>
-                        <td style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; padding-right: 5px;">${sgstAmount.toFixed(2)}</td>
-                    </tr>
-                    ` : ''}
-                    <tr style="font-weight: bold; border-bottom: 1px solid #000;">
-                        <td colspan="9" style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; border-left: 1px solid #000;">Round Off</td>
-                        <td style="padding: 4px 8px; text-align: right; border-right: 1px solid #000; padding-right: 5px;">${roundOff.toFixed(2)}</td>
-                    </tr>
-                    <tr style="font-weight: bold; font-size: 14px; background: #f8f8f8; border-bottom: 2px solid #000; border-left: 1px solid #000; border-right: 1px solid #000;">
-                        <td colspan="3" style="padding: 10px; border-right: 1px solid #000;">Total Qty: ${totalQty.toFixed(2)}</td>
-                        <td colspan="6" style="padding: 10px; text-align: right; border-right: 1px solid #000;">Total Amount</td>
-                        <td style="padding: 10px; text-align: right; font-weight: bold; padding-right: 5px;">Rs.${invoice.total.toFixed(2)}</td>
-                    </tr>
-                </tfoot>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
+                        <div style="border: 1px solid #000; padding: 10px; height: 100%;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Details of Receiver (Billed To)</div>
+                            <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: #111;">${this.escapePdfHtml(customer.name)}</div>
+                            <div style="font-size: 10px; line-height: 1.4; white-space: pre-wrap;">${this.escapePdfHtml(customer.address)}</div>
+                            ${customer.gstin ? `<div style="font-size: 10px; margin-top: 6px;"><strong>GSTIN:</strong> ${this.escapePdfHtml(customer.gstin)}</div>` : ''}
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 7px;">
+                        <div style="border: 1px solid #000; padding: 10px; height: 100%;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Invoice Details</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 110px; color: #444;">PO / Ref No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.poNumber || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Vehicle No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.vehicleNo || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">LR / WayBill:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.lrNo || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Dispatch Via:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.via || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${payColor};">${payStatus}</strong></td></tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
             </table>
 
-            <!-- Footer Details -->
-            <div style="display: flex; justify-content: space-between; margin-top: 20px; font-size: 11px;">
-                <div style="width: 60%;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>Bank Details :</strong> ${company.bank?.bankName || '-'}<br>
-                        <strong>Branch :</strong> ${company.bank?.branch || '-'}<br>
-                        <strong>A/c No. :</strong> ${company.bank?.accountNo || '-'}<br>
-                        <strong>Ifsc Code :</strong> ${company.bank?.ifsc || '-'}
-                    </div>
-                    ${invoice.narration ? `
-                    <div style="margin-top: 10px; border: 1px solid #eee; padding: 5px; background: #fafafa;">
-                        <strong>Narration:</strong><br>
-                        ${invoice.narration}
-                    </div>
-                    ` : ''}
-                    <div style="margin-top: 10px; color: #666; font-style: italic;">Amount in Words: ${this.numberToWords(invoice.total)} Only</div>
-                </div>
-                <div style="width: 35%; text-align: right;">
-                    <div style="margin-bottom: 40px;">For <strong>${company.name}</strong></div>
-                    <div style="border-top: 1px solid #000; padding-top: 5px; text-align: center;">Authorized Signatory.</div>
-                </div>
-            </div>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
+                <thead>${gstTableHead}</thead>
+                <tbody>${itemsHtml}</tbody>
+            </table>
 
-            <div style="margin-top: 20px; text-align: center; font-size: 10px; color: #888; border-top: 1px solid #eee; padding-top: 10px;">
-                This is computer generated invoice and does not require a physical signature.
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin: 0;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
+                        ${taxLeftBlock}
+                        <div style="margin-top: 16px; font-size: 10px; line-height: 1.45;">
+                            <strong>Terms &amp; Conditions:</strong><br>
+                            1. Goods once sold will not be taken back.<br>
+                            2. Subject to Chennai Jurisdiction.
+                        </div>
+                        <div style="margin-top: 12px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
+                            We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
+                        </div>
+                        ${invoice.narration ? `
+                        <div style="margin-top: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;">
+                            <span style="text-transform: uppercase; font-size: 9px; font-weight: bold; color: #64748b;">Narration</span><br>
+                            <span style="font-size: 10px; color: #111;">${this.escapePdfHtml(invoice.narration)}</span>
+                        </div>` : ''}
+                        <div style="margin-top: 10px; font-size: 10px; color: #333; font-style: italic;">Amount in Words: ${this.numberToWords(total)} Only</div>
+                        ${qrUrl ? `
+                        <table style="margin-top: 14px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; border-collapse: collapse;"><tr>
+                            <td style="padding: 8px; vertical-align: middle;"><img src="${qrUrl}" alt="UPI" style="width: 72px; height: 72px; display: block;" /></td>
+                            <td style="padding: 8px 12px 8px 0; vertical-align: middle;">
+                                <div style="font-size: 9px; font-weight: bold; text-transform: uppercase;">Pay via UPI</div>
+                                <div style="font-size: 10px; font-weight: bold;">${this.escapePdfHtml(upiId)}</div>
+                            </td>
+                        </tr></table>` : ''}
+                        <div style="margin-top: 14px; font-size: 10px;">
+                            <strong>Bank:</strong> ${this.escapePdfHtml(company.bank?.bankName || '-')}
+                            &nbsp;|&nbsp; <strong>A/c:</strong> ${this.escapePdfHtml(company.bank?.accountNo || '-')}
+                            &nbsp;|&nbsp; <strong>IFSC:</strong> ${this.escapePdfHtml(company.bank?.ifsc || '-')}
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            ${summaryBox}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+
+            <table style="width: 100%; margin-top: 36px; border-collapse: collapse;"><tr><td style="text-align: right;">
+                <div style="display: inline-block; text-align: right; width: 280px; max-width: 100%;">
+                    <div style="font-size: 11px; margin-bottom: 44px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(company.name)}</strong></div>
+                    <div style="border-top: 1px solid #000; padding-top: 8px; text-align: center;">
+                        <span style="font-weight: bold; font-size: 12px; text-transform: uppercase;">Authorized Signatory</span>
+                    </div>
+                </div>
+            </td></tr></table>
+
+            <div style="margin-top: 24px; text-align: center; font-size: 9px; color: #64748b; border-top: 1px solid #e5e7eb; padding-top: 10px;">
+                This is a computer generated invoice and does not require a physical signature.
             </div>
         `;
         return element;
     },
 
     generatePDF(invoiceId) {
-        if (typeof DeliveryUI !== 'undefined' && DeliveryUI.printInvoice) {
-            DeliveryUI.printInvoice(invoiceId);
+        if (typeof DeliveryUI !== 'undefined' && DeliveryUI.downloadInvoicePdf) {
+            void DeliveryUI.downloadInvoicePdf(invoiceId);
+        } else if (typeof DeliveryUI !== 'undefined' && DeliveryUI.printInvoice) {
+            void DeliveryUI.printInvoice(invoiceId);
         } else {
             App.showNotification('PDF generation not available', 'error');
         }
@@ -1500,6 +1607,57 @@ const InvoicesUI = {
         } else {
             App.showNotification('Preview not available in this context', 'error');
         }
+    },
+
+    getItemDisplayDetails(item, masterList, isPlainInvoice = false) {
+        const cleanName = (item.name || '').toLowerCase().trim();
+        let masterItem = (masterList || []).find(m => m.name.toLowerCase() === cleanName);
+        
+        // Fallback: If exact match has no description, try to find a related service with keywords
+        if (!masterItem || !(masterItem.description || masterItem.desc || masterItem.details)) {
+            const testingKeywords = ['testing', 'inspection', 'calibration', 'hydro', '300 bar', 'high pressure'];
+            if (testingKeywords.some(k => cleanName.includes(k))) {
+                const related = (masterList || []).find(m => 
+                    m.type === 'service' && 
+                    (m.name.toLowerCase().includes('testing') || m.name.toLowerCase().includes('cylinder')) &&
+                    (m.description || m.desc || m.details)
+                );
+                if (related && !masterItem) masterItem = related;
+                else if (related && masterItem) {
+                    // Merge description if possible
+                    masterItem = {...masterItem, description: related.description || related.desc || related.details};
+                }
+            }
+        }
+
+        const qty = parseFloat(item.quantity) || 0;
+        const rate = parseFloat(item.rate) || 0;
+        const amount = parseFloat(item.amount) || (qty * rate);
+        const gstRate = parseFloat(item.gstRate?.toString().replace(/[^0-9.]/g, '')) || 0;
+        const cgstRate = gstRate / 2;
+
+        const hsn = masterItem?.hsnCode || item.hsn || '-';
+        const unit = masterItem?.unit || item.unit || 'nos';
+
+        let displayDesc = '';
+        const itemDesc = (item.description || item.desc || item.details || item.itemDescription || '').trim();
+        const mstrDesc = (masterItem?.description || masterItem?.desc || masterItem?.details || '').trim();
+
+        if (itemDesc && itemDesc.toLowerCase().trim() !== item.name.toLowerCase().trim()) {
+            displayDesc = itemDesc;
+        }
+
+        if (mstrDesc && mstrDesc !== 'NA' && mstrDesc.toLowerCase().trim() !== item.name.toLowerCase().trim()) {
+            if (!displayDesc) {
+                displayDesc = mstrDesc;
+            } else if (!displayDesc.toLowerCase().includes(mstrDesc.toLowerCase())) {
+                displayDesc += '<br>' + mstrDesc;
+            }
+        }
+
+        return {
+            qty, rate, amount, gstRate, cgstRate, hsn, unit, displayDesc, isPlain: isPlainInvoice
+        };
     },
 
     numberToWords(num) {
@@ -1533,7 +1691,8 @@ const InvoicesUI = {
         if (!view) return;
 
         // Fetch purchases for filters
-        const purchases = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            .filter(p => (p.category || '').toLowerCase().includes('purchase'));
 
         // Financial Years (April - March)
         const fYears = [...new Set(purchases.map(p => DataManager.getFinancialYear(p.date)))].filter(Boolean).sort().reverse();
@@ -1565,18 +1724,20 @@ const InvoicesUI = {
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card bg-dark border-secondary shadow-sm">
+                        <div class="card bg-dark border-secondary shadow-sm hover-lift" style="cursor: pointer;" role="button" tabindex="0" title="View pending purchase bills" onclick="InvoicesUI.showPurchaseOutstandingModal('bills')" onkeydown="if(event.key==='Enter')InvoicesUI.showPurchaseOutstandingModal('bills')">
                             <div class="card-body p-3 text-center">
                                 <div class="text-white-50 fw-bold small text-uppercase mb-1">Pending Bills</div>
                                 <h3 class="mb-0 text-warning" id="summaryPurchasePendingBills">0</h3>
+                                <div class="text-white-50 extra-small mt-1">Click for details</div>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card bg-dark border-secondary shadow-sm">
+                        <div class="card bg-dark border-secondary shadow-sm hover-lift" style="cursor: pointer;" role="button" tabindex="0" title="View outstanding by supplier" onclick="InvoicesUI.showPurchaseOutstandingModal('vendors')" onkeydown="if(event.key==='Enter')InvoicesUI.showPurchaseOutstandingModal('vendors')">
                             <div class="card-body p-3 text-center">
                                 <div class="text-white-50 fw-bold small text-uppercase mb-1">Suppliers with O/S</div>
                                 <h3 class="mb-0 text-info" id="summaryPurchasePendingParties">0</h3>
+                                <div class="text-white-50 extra-small mt-1">Click for details</div>
                             </div>
                         </div>
                     </div>
@@ -1636,19 +1797,21 @@ const InvoicesUI = {
     },
 
     updatePurchasesTable() {
-        const purchasesRaw = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
-        const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap() : new Map();
+        const purchasesRaw = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            .filter(p => (p.category || '').toLowerCase().includes('purchase'));
+        const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap(null, 'payment') : new Map();
         
         // Enhance with balance and status
         const purchases = purchasesRaw.map(p => {
+            const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
             const balance = (typeof VoucherManager !== 'undefined') ? 
-                VoucherManager.getDocumentBalance(p.id, parseFloat(p.amount || 0), voucherMap) : 
-                parseFloat(p.amount || 0);
+                VoucherManager.getDocumentBalance(p.id, docTotal, voucherMap, p.billNo || p.vch_no || p.invoiceNo, p) : 
+                docTotal;
             return {
                 ...p,
                 balance,
                 isPaid: balance <= 0.05,
-                isPartial: balance > 0.05 && balance < (parseFloat(p.amount || 0) - 0.05)
+                isPartial: balance > 0.05 && balance < (docTotal - 0.05)
             };
         });
 
@@ -1710,6 +1873,8 @@ const InvoicesUI = {
                 </thead>
                 <tbody>
                     ${filtered.map(p => {
+            const itemsList = (p.items || []).map(item => item.name).join(', ');
+            const searchTerms = `${p.billNo} ${p.vendor} ${itemsList}`.toLowerCase();
             const statusBadge = p.isPaid ? 
                 '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
                 (p.isPartial ? 
@@ -1717,11 +1882,16 @@ const InvoicesUI = {
                     '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
 
             return `
-                        <tr>
+                        <tr data-search="${searchTerms}" data-year="${DataManager.getFinancialYear(p.date)}" data-vendor="${p.vendor}" data-status="${p.isPaid ? 'paid' : (p.isPartial ? 'partial' : 'pending')}">
                             <td>${DataManager.formatDateDisplay(p.date)}</td>
-                            <td class="fw-bold text-warning">${p.billNo || 'N/A'}</td>
+                            <td>
+                                <div class="fw-bold text-warning">${p.billNo || 'N/A'}</div>
+                                <div style="font-size: 11px; color: #aaa; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px;">
+                                    ${itemsList}
+                                </div>
+                            </td>
                             <td>${p.vendor || 'Unknown'}</td>
-                            <td class="text-end">₹${parseFloat(p.amount).toFixed(2)}</td>
+                            <td class="text-end">₹${(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0).toFixed(2)}</td>
                             <td class="text-end fw-bold ${p.balance > 0 ? 'text-danger' : 'text-success'}">₹${p.balance.toFixed(2)}</td>
                             <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
@@ -1768,120 +1938,155 @@ const InvoicesUI = {
         if (!p) return null;
 
         const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || {};
-        const company = settings.companyName || 'Gas Tech Engineering Service';
+        const companyData = {
+            name: settings.companyName || DataManager.COMPANY_PROFILE.name,
+            address: settings.registeredAddress || DataManager.COMPANY_PROFILE.registeredAddress,
+            workAddress: settings.workAddress || DataManager.COMPANY_PROFILE.workAddress,
+            gstin: settings.gstin || DataManager.COMPANY_PROFILE.gstin,
+            pan: settings.pan || DataManager.COMPANY_PROFILE.pan,
+            emails: settings.emails || DataManager.COMPANY_PROFILE.emails,
+            phones: settings.phones || DataManager.COMPANY_PROFILE.phones
+        };
 
+        // Robust Vendor Name Cleaning
+        const getCleanVendor = (val) => {
+            if (!val) return 'Unknown Vendor';
+            // If it looks like a list of items (many commas) and is very long, it might be the description
+            if (val.includes(',') && val.length > 50) {
+                const parts = val.split(',').map(s => s.trim());
+                if (parts.length > 3) {
+                    // Try to see if any part is a known vendor or just use first part if it's not too long
+                    return parts[0].length < 40 ? parts[0] : 'Multiple Items (Vendor Missing)';
+                }
+            }
+            return val;
+        };
+
+        const displayVendor = getCleanVendor(p.vendor || p.vendorName);
+
+        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
-        element.style.width = '850px';
-        element.style.padding = '30px';
+        element.className = 'gtes-pdf-document';
+        element.style.width = `${pdfW}px`;
+        element.style.padding = '14px';
         element.style.background = 'white';
-        element.style.color = 'black';
-        element.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+        element.style.color = '#000';
+        element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
 
-        const itemsHtml = (p.items || []).map((item, idx) => {
-            const qty = parseFloat(item.quantity) || 0;
-            const rate = parseFloat(item.rate) || 0;
-            const taxableValue = parseFloat(item.amount) || (qty * rate);
+        const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || DataManager.getData('gtes_inventory_items') || [];
+        const masterServices = DataManager.getData(DataManager.KEYS.SERVICES || 'gtes_services') || DataManager.getData('gtes_services') || [];
+        const allMasterItems = [...masterInventory, ...masterServices];
 
-            // Robust tax extraction with fallbacks
-            const cgstR = parseFloat(item.cgstRate || (item.gstRate ? (parseFloat(item.gstRate) / 2) : 0)) || 0;
-            const sgstR = parseFloat(item.sgstRate || (item.gstRate ? (parseFloat(item.gstRate) / 2) : 0)) || 0;
+        const itemsHtml = (p.items && p.items.length > 0) ? (p.items || []).map((item, idx) => {
+            const details = this.getItemDisplayDetails(item, allMasterItems, false);
+            const nm = this.escapePdfHtml(item.name);
+            const ds = details.displayDesc ? this.escapePdfHtml(details.displayDesc) : '';
 
-            const cgstA = parseFloat(item.cgstAmount || item.cgst || (taxableValue * cgstR / 100)) || 0;
-            const sgstA = parseFloat(item.sgstAmount || item.sgst || (taxableValue * sgstR / 100)) || 0;
-
-            const total = parseFloat(item.totalAmount) || (taxableValue + cgstA + sgstA + (parseFloat(item.igstAmount || item.igst) || 0));
+            const cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
+            const sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
+            const cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
+            const sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
 
             return `
-            <tr style="border-bottom: 1px solid #ddd; font-size: 11px;">
-                <td style="padding: 8px; text-align: center; border-right: 1px solid #eee;">${idx + 1}</td>
-                <td style="padding: 8px; border-right: 1px solid #eee;">
-                    <div style="font-weight: 600;">${item.name}</div>
-                    ${item.description ? `<div style="font-size: 9px; color: #666;">${item.description}</div>` : ''}
+            <tr style="font-size: 10px; page-break-inside: avoid;">
+                <td style="padding: 5px 6px; text-align: center; border: 1px solid #000;">${idx + 1}</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; vertical-align: top;">
+                    <div style="font-weight: 700;">${nm}</div>
+                    ${ds ? `<div style="font-size: 9px; font-style: italic; color: #222; margin-top: 3px; line-height: 1.35; white-space: pre-line;">${ds}</div>` : ''}
                 </td>
-                <td style="padding: 8px; text-align: center; border-right: 1px solid #eee;">${item.hsn || '-'}</td>
-                <td style="padding: 8px; text-align: center; border-right: 1px solid #eee;">${qty}</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${rate.toFixed(2)}</td>
-                <td style="padding: 8px; text-align: center; border-right: 1px solid #eee;">${item.per || 'nos'}</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${item.discount || 0}%</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${cgstR.toFixed(1)}%</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${cgstA.toFixed(2)}</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${sgstR.toFixed(1)}%</td>
-                <td style="padding: 8px; text-align: right; border-right: 1px solid #eee;">${sgstA.toFixed(2)}</td>
-                <td style="padding: 8px; text-align: right; font-weight: 600;">${taxableValue.toFixed(2)}</td>
+                <td style="padding: 5px 6px; text-align: center; border: 1px solid #000; word-break: break-all; max-width: 88px;">${this.escapePdfHtml(details.hsn)}</td>
+                <td style="padding: 5px 6px; text-align: center; border: 1px solid #000;">${details.qty}${details.unit !== 'nos' ? ' ' + this.escapePdfHtml(details.unit) : ''}</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${details.rate.toFixed(2)}</td>
+                <td style="padding: 5px 6px; text-align: center; border: 1px solid #000;">${this.escapePdfHtml(details.unit)}</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${item.discount || 0}%</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${cgstR.toFixed(1)}%</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${cgstA.toFixed(2)}</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${sgstR.toFixed(1)}%</td>
+                <td style="padding: 5px 6px; text-align: right; border: 1px solid #000;">${sgstA.toFixed(2)}</td>
+                <td style="padding: 5px 6px; text-align: right; font-weight: 700; border: 1px solid #000;">${details.amount.toFixed(2)}</td>
             </tr>
         `;
-        }).join('');
+        }).join('') : `
+            <tr style="font-size: 10px;">
+                <td style="padding: 5px 6px; text-align: center; border: 1px solid #000;">1</td>
+                <td style="padding: 5px 6px; border: 1px solid #000;">
+                    <div style="font-weight: 700;">${this.escapePdfHtml((p.description || 'Purchase').split('\n')[0].slice(0, 200))}</div>
+                </td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: center;">-</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: center;">1</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">${(parseFloat(p.amount) || 0).toFixed(2)}</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: center;">nos</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">0%</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">0%</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">0.00</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">0%</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right;">0.00</td>
+                <td style="padding: 5px 6px; border: 1px solid #000; text-align: right; font-weight: 700;">${(parseFloat(p.amount) || 0).toFixed(2)}</td>
+            </tr>`;
 
         element.innerHTML = `
-            <!-- Header Section (Company Branding) -->
-            <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
-                <h2 style="margin: 0; font-size: 22px; text-transform: uppercase;">${company}</h2>
-                <div style="font-size: 11px; color: #444; margin-top: 5px; line-height: 1.4;">
-                    ${settings.registeredAddress || 'No.232/233, Nageshwara Road, Athipet, Chennai - 600058'}
-                </div>
-                <div style="font-size: 11px; color: #444;">
-                    Work Address: ${settings.workAddress || '236/1A, 1st St, Nageshwara Rao Road, Athipet, Chennai - 600058'}
-                </div>
-                <div style="font-size: 11px; color: #444; margin-top: 3px;">
-                    Email: ${settings.emails || 'gastechengservice@gmail.com'} | Ph: ${settings.phones || '+91 9600019839'}
-                </div>
-                <div style="font-size: 11px; font-weight: bold; margin-top: 3px;">
-                    GSTIN: ${settings.gstin || '33AFXPR3235A3ZF'} | PAN: ${settings.pan || 'AFXPR3235A'} | IEC: ${settings.iec || 'AFXPR3235A'}
-                </div>
-            </div>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
+                <tr>
+                    <td style="width: 65%; vertical-align: top; padding: 0 12px 12px 0;">
+                        <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${this.escapePdfHtml(companyData.name)}</h1>
+                        <div style="font-size: 10px; color: #222; margin-top: 6px; line-height: 1.45;">
+                            ${this.escapePdfHtml(companyData.address)}<br>
+                            <strong>Work:</strong> ${this.escapePdfHtml(companyData.workAddress)}<br>
+                            <strong>GSTIN:</strong> ${this.escapePdfHtml(companyData.gstin)} | <strong>PAN:</strong> ${this.escapePdfHtml(companyData.pan)}
+                        </div>
+                    </td>
+                    <td style="width: 35%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
+                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 6px;">Purchase Bill</div>
+                        <div style="font-size: 10px; color: #222;">
+                            Date: <strong>${this.escapePdfHtml(p.date)}</strong><br>
+                            Bill No: <strong>${this.escapePdfHtml(p.billNo)}</strong>
+                        </div>
+                    </td>
+                </tr>
+            </table>
 
-            <h3 style="text-align: center; margin: 10px 0; text-transform: uppercase; letter-spacing: 5px; font-weight: bold; background: #f8f9fa; padding: 5px;">PURCHASE</h3>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Bill From (Supplier)</div>
+                            <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: #111;">${this.escapePdfHtml(displayVendor)}</div>
+                            <div style="font-size: 10px; line-height: 1.4; white-space: pre-wrap;">${this.escapePdfHtml(p.vendorAddress || 'Address not available')}</div>
+                            ${(p.vendorGstin || p.vendorGSTIN) ? `<div style="font-size: 10px; margin-top: 6px;"><strong>GSTIN:</strong> ${this.escapePdfHtml(p.vendorGstin || p.vendorGSTIN)}</div>` : ''}
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 7px;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Bill Details</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 120px; color: #444;">Supplier Bill No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(p.supplierBillNo || p.supplierInvoiceNo || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Ref No / PO:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(p.poNumber || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'}">${(p.status || 'pending').toUpperCase()}</strong></td></tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
 
-            <div style="display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 12px;">
-                <div style="width: 55%; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
-                    <strong style="text-transform: uppercase; color: #333; display: block; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">Bill From:</strong>
-                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px;">${p.vendor}</div>
-                    <div style="color: #555; line-height: 1.4; margin-bottom: 8px;">
-                        ${p.vendorAddress || 'No Address Provided'}
-                    </div>
-                    ${p.vendorGstin ? `<div><strong>GSTIN:</strong> ${p.vendorGstin}</div>` : ''}
-                </div>
-                <div style="width: 40%; text-align: right; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
-                    <div style="margin-bottom: 6px;"><strong>Purchase No:</strong> <span style="font-weight: bold; min-width: 80px; display: inline-block;">${p.billNo}</span></div>
-                    <div style="margin-bottom: 6px;"><strong>Date:</strong> <span style="min-width: 80px; display: inline-block;">${p.date}</span></div>
-                    <div style="margin-bottom: 6px;"><strong>Status:</strong> <span style="min-width: 80px; display: inline-block; color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'}; font-weight: bold;">${p.status?.toUpperCase()}</span></div>
-                    
-                    <div style="margin-top: 10px; padding-top: 5px; border-top: 1px solid #eee; text-align: right;">
-                        <div style="font-size: 11px; color: #666;">Supplier Invoice No:</div>
-                        <div style="font-size: 14px; color: #2c3e50; font-weight: bold;">${p.supplierBillNo || '-'}</div>
-                    </div>
-
-                    ${p.poNumber ? `
-                    <div style="margin-top: 5px; text-align: right;">
-                        <div style="font-size: 11px; color: #666;">Ref No / DC No:</div>
-                        <div style="font-size: 14px; color: #2c3e50; font-weight: bold;">${p.poNumber}</div>
-                    </div>
-                    ` : ''}
-                </div>
-v>
-            </div>
-
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #ddd;">
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
                 <thead>
-                    <tr style="background: #f8f9fa; border-bottom: 2px solid #333; font-size: 10px; text-transform: uppercase; text-align: center;">
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 30px;">#</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left; width: 25%;">Description</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 60px;">HSN</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 85px;">QTY</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 80px;">Rate</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 65px;">Per</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 40px;">Disc</th>
-                        <th style="padding: 8px; border: 1px solid #ddd;" colspan="2">CGST</th>
-                        <th style="padding: 8px; border: 1px solid #ddd;" colspan="2">SGST</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; width: 90px;">Amount</th>
+                    <tr style="background: #4a5568; color: #fff; font-size: 10px; text-transform: uppercase; text-align: center;">
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; vertical-align: middle; width: 30px;">#</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; text-align: left; width: 25%;">Description</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; min-width: 64px; max-width: 88px; word-break: break-all;">HSN</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; width: 85px;">Qty</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; width: 80px;">Rate</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; width: 65px;">Per</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; width: 40px;">Disc</th>
+                        <th colspan="2" style="padding: 8px; border: 1px solid #64748b;">CGST</th>
+                        <th colspan="2" style="padding: 8px; border: 1px solid #64748b;">SGST</th>
+                        <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; width: 90px; vertical-align: middle;">Amount</th>
                     </tr>
-                    <tr style="background: #f8f9fa; border-bottom: 1px solid #ddd; font-size: 9px; text-align: center;">
-                        <th colspan="7" style="border-right: 1px solid #ddd;"></th>
-                        <th style="border: 1px solid #ddd; padding: 4px; width: 30px;">%</th>
-                        <th style="border: 1px solid #ddd; padding: 4px; width: 50px;">Amt</th>
-                        <th style="border: 1px solid #ddd; padding: 4px; width: 30px;">%</th>
-                        <th style="border: 1px solid #ddd; padding: 4px; width: 50px;">Amt</th>
-                        <th style="border: 1px solid #ddd;"></th>
+                    <tr style="background: #4a5568; color: #fff; font-size: 9px; text-align: center;">
+                        <th style="border: 1px solid #64748b; padding: 4px; width: 30px;">%</th>
+                        <th style="border: 1px solid #64748b; padding: 4px; width: 50px;">Amt</th>
+                        <th style="border: 1px solid #64748b; padding: 4px; width: 30px;">%</th>
+                        <th style="border: 1px solid #64748b; padding: 4px; width: 50px;">Amt</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1889,66 +2094,223 @@ v>
                 </tbody>
             </table>
 
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div style="width: 50%; font-size: 11px;">
-                    <div style="margin-bottom: 5px;"><strong>CGST Amt:</strong> ${(p.cgst || 0).toFixed(2)}</div>
-                    <div style="margin-bottom: 5px;"><strong>SGST Amt:</strong> ${(p.sgst || 0).toFixed(2)}</div>
-                    ${p.igst > 0 ? `<div style="margin-bottom: 5px;"><strong>IGST Amt:</strong> ${(p.igst || 0).toFixed(2)}</div>` : ''}
-                    <div style="margin-bottom: 15px;"><strong>Total Tax:</strong> ${((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0)).toFixed(2)}</div>
-                    
-                    <div style="margin-top: 30px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
-                        We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
-                    </div>
-                </div>
-                
-                <div style="width: 40%; border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                        <tr>
-                            <td style="padding: 6px; text-align: right; color: #666;">Subtotal</td>
-                            <td style="padding: 6px; text-align: right; font-weight: 500;">₹${(p.subtotal || p.amount - ((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0))).toFixed(2)}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 6px; text-align: right; color: #666;">CGST Total</td>
-                            <td style="padding: 6px; text-align: right;">₹${(p.cgst || 0).toFixed(2)}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 6px; text-align: right; color: #666;">SGST Total</td>
-                            <td style="padding: 6px; text-align: right;">₹${(p.sgst || 0).toFixed(2)}</td>
-                        </tr>
-                        ${p.igst > 0 ? `
-                        <tr>
-                            <td style="padding: 6px; text-align: right; color: #666;">IGST Total</td>
-                            <td style="padding: 6px; text-align: right;">₹${(p.igst || 0).toFixed(2)}</td>
-                        </tr>
-                        ` : ''}
-                        ${p.roundOff ? `
-                        <tr>
-                            <td style="padding: 6px; text-align: right; color: #666;">Round Off</td>
-                            <td style="padding: 6px; text-align: right;">₹${parseFloat(p.roundOff).toFixed(2)}</td>
-                        </tr>
-                        ` : ''}
-                        <tr style="border-top: 2px solid #333; font-weight: bold; font-size: 16px; background: #f8f9fa;">
-                            <td style="padding: 10px 6px; text-align: right;">Total Amount</td>
-                            <td style="padding: 10px 6px; text-align: right; color: #000;">₹${parseFloat(p.amount).toFixed(2)}</td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
+                        <div style="margin-bottom: 5px;"><strong>CGST Amt:</strong> ${(p.cgst || 0).toFixed(2)}</div>
+                        <div style="margin-bottom: 5px;"><strong>SGST Amt:</strong> ${(p.sgst || 0).toFixed(2)}</div>
+                        ${p.igst > 0 ? `<div style="margin-bottom: 5px;"><strong>IGST Amt:</strong> ${(p.igst || 0).toFixed(2)}</div>` : ''}
+                        <div style="margin-bottom: 15px;"><strong>Total Tax:</strong> ${((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0)).toFixed(2)}</div>
+                        <div style="margin-top: 30px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
+                            We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
+                        </div>
+                    </td>
+                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
+                                <tr>
+                                    <td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${(p.subtotal || p.amount - ((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0))).toFixed(2)}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px 8px; text-align: right; color: #334155;">CGST Total</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.cgst || 0).toFixed(2)}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px 8px; text-align: right; color: #334155;">SGST Total</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.sgst || 0).toFixed(2)}</td>
+                                </tr>
+                                ${p.igst > 0 ? `
+                                <tr>
+                                    <td style="padding: 6px 8px; text-align: right; color: #334155;">IGST Total</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.igst || 0).toFixed(2)}</td>
+                                </tr>
+                                ` : ''}
+                                ${p.roundOff ? `
+                                <tr>
+                                    <td style="padding: 6px 8px; text-align: right; color: #334155;">Round Off</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${parseFloat(p.roundOff).toFixed(2)}</td>
+                                </tr>
+                                ` : ''}
+                                <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
+                                    <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
+                                        <tr style="font-weight: bold; font-size: 17px;">
+                                            <td style="padding: 10px 8px; text-align: right;">Total Amount</td>
+                                            <td style="padding: 10px 12px 10px 8px; text-align: right; color: #000; min-width: 110px;">₹${parseFloat(p.amount).toFixed(2)}</td>
+                                        </tr>
+                                    </table>
+                                </td></tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
 
-            <div style="margin-top: 50px; display: flex; justify-content: flex-end;">
-                <div style="text-align: right; width: 300px;">
-                    <div style="font-size: 12px; margin-bottom: 60px;">For <strong>${company}</strong></div>
-                    <div style="border-top: 1px solid #333; padding-top: 10px; text-align: center;">
+            <table style="width: 100%; margin-top: 40px; border-collapse: collapse;"><tr><td style="text-align: right;">
+                <div style="display: inline-block; text-align: right; width: 300px; max-width: 100%;">
+                    <div style="font-size: 11px; margin-bottom: 50px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(companyData.name)}</strong></div>
+                    <div style="border-top: 1px solid #000; padding-top: 10px; text-align: center;">
                         <span style="font-weight: bold; font-size: 13px; text-transform: uppercase;">Authorized Signatory</span>
                     </div>
                 </div>
-            </div>
+            </td></tr></table>
 
-            <div style="margin-top: 30px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px solid #eee; padding-top: 15px;">
+            <div style="margin-top: 30px; text-align: center; font-size: 10px; color: #64748b; border-top: 1px solid #e5e7eb; padding-top: 15px;">
                 This is a computer generated invoice and does not require a physical signature.
             </div>
         `;
         return element;
+    },
+
+    _getFilteredSalesInvoicesAll() {
+        const isGST = this.currentMode === 'gst';
+        const typeFilter = isGST ? 'with-bill' : 'without-bill';
+        let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
+        invoices = invoices.filter(inv => inv.type === typeFilter);
+        const yearFilter = document.getElementById('filterYear')?.value;
+        const customerFilter = document.getElementById('filterCustomer')?.value;
+        const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
+        const statusFilter = this.currentStatusFilter;
+        return invoices.filter(inv => {
+            const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
+            const customerMatch = !customerFilter || inv.customerName === customerFilter;
+            const statusMatch = statusFilter === 'all' ||
+                             (statusFilter === 'paid' && inv.isPaid) ||
+                             (statusFilter === 'pending' && !inv.isPaid && !inv.isPartial) ||
+                             (statusFilter === 'partial' && inv.isPartial);
+            const searchMatch = !query ||
+                               (inv.invoiceNo || '').toLowerCase().includes(query) ||
+                               (inv.customerName || '').toLowerCase().includes(query) ||
+                               (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
+            return yearMatch && customerMatch && statusMatch && searchMatch;
+        });
+    },
+
+    showSalesOutstandingModal(mode) {
+        const lines = this._getFilteredSalesInvoicesAll().filter(inv => (inv.balance || 0) > 0.05);
+        const isGST = this.currentMode === 'gst';
+        const title = mode === 'parties'
+            ? (isGST ? 'Outstanding by customer (GST)' : 'Outstanding by customer (Plain)')
+            : (isGST ? 'Pending bills (GST)' : 'Pending bills (Plain)');
+        let body = '';
+        const dcBadge = (inv) => (typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(inv))
+            ? ' <span class="badge bg-secondary">DC</span>' : '';
+        if (mode === 'parties') {
+            const map = new Map();
+            lines.forEach(inv => {
+                const key = inv.customerName || inv.customerId || 'Unknown';
+                map.set(key, (map.get(key) || 0) + (inv.balance || 0));
+            });
+            const rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
+            body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
+                <thead><tr><th>Customer</th><th class="text-end">Total pending</th></tr></thead>
+                <tbody>${rows.map(([name, amt]) => `<tr><td>${this.escapePdfHtml(name)}</td><td class="text-end text-danger fw-bold">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>`).join('')}</tbody>
+            </table></div>`;
+            if (rows.length === 0) body = '<p class="text-muted mb-0">No outstanding balances for the current filters.</p>';
+        } else {
+            const sorted = [...lines].sort((a, b) => new Date(b.date) - new Date(a.date));
+            body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
+                <thead><tr><th>Date</th><th>Invoice #</th><th>Customer</th><th class="text-end">Balance</th></tr></thead>
+                <tbody>${sorted.map(inv => `<tr>
+                    <td>${DataManager.formatDateDisplay(inv.date)}</td>
+                    <td><span class="text-info">${this.escapePdfHtml(inv.invoiceNo || inv.id)}</span>${dcBadge(inv)}</td>
+                    <td>${this.escapePdfHtml(inv.customerName || '')}</td>
+                    <td class="text-end text-danger fw-bold">₹${(inv.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>`;
+            if (lines.length === 0) body = '<p class="text-muted mb-0">No pending bills for the current filters.</p>';
+        }
+        document.getElementById('invoicesDrilldownModal')?.remove();
+        document.body.insertAdjacentHTML('beforeend', `
+        <div class="modal fade" id="invoicesDrilldownModal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content bg-dark text-white border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title">${title}</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">${body}</div>
+                </div>
+            </div>
+        </div>`);
+        new bootstrap.Modal(document.getElementById('invoicesDrilldownModal')).show();
+    },
+
+    _getFilteredPurchasesAll() {
+        const purchasesRaw = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            .filter(p => (p.category || '').toLowerCase().includes('purchase'));
+        const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap(null, 'payment') : new Map();
+        const purchases = purchasesRaw.map(p => {
+            const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
+            const balance = (typeof VoucherManager !== 'undefined') ?
+                VoucherManager.getDocumentBalance(p.id, docTotal, voucherMap, p.billNo || p.vch_no || p.invoiceNo, p) :
+                docTotal;
+            return { ...p, balance, isPaid: balance <= 0.05, isPartial: balance > 0.05 && balance < (docTotal - 0.05) };
+        });
+        const yearFilter = document.getElementById('filterPurchaseYear')?.value;
+        const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
+        const query = document.getElementById('purchaseSearch')?.value?.toLowerCase();
+        const statusFilter = this.currentStatusFilter;
+        return purchases.filter(p => {
+            const yearStr = DataManager.getFinancialYear(p.date);
+            const yearMatch = !yearFilter || yearStr === yearFilter;
+            const vendorMatch = !vendorFilter || p.vendor === vendorFilter;
+            const statusMatch = statusFilter === 'all' ||
+                             (statusFilter === 'paid' && p.isPaid) ||
+                             (statusFilter === 'pending' && !p.isPaid && !p.isPartial) ||
+                             (statusFilter === 'partial' && p.isPartial);
+            const searchMatch = !query ||
+                               (p.billNo || '').toLowerCase().includes(query) ||
+                               (p.vendor || '').toLowerCase().includes(query) ||
+                               (p.description || '').toLowerCase().includes(query) ||
+                               (p.items || []).some(it => (it.name || '').toLowerCase().includes(query));
+            return yearMatch && vendorMatch && statusMatch && searchMatch;
+        });
+    },
+
+    showPurchaseOutstandingModal(mode) {
+        const lines = this._getFilteredPurchasesAll().filter(p => (p.balance || 0) > 0.05);
+        const title = mode === 'vendors' ? 'Suppliers with outstanding' : 'Pending purchase bills';
+        let body = '';
+        if (mode === 'vendors') {
+            const map = new Map();
+            lines.forEach(p => {
+                const key = p.vendor || 'Unknown';
+                map.set(key, (map.get(key) || 0) + (p.balance || 0));
+            });
+            const rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
+            body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
+                <thead><tr><th>Supplier</th><th class="text-end">Total pending</th></tr></thead>
+                <tbody>${rows.map(([name, amt]) => `<tr><td>${this.escapePdfHtml(name)}</td><td class="text-end text-danger fw-bold">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>`).join('')}</tbody>
+            </table></div>`;
+            if (rows.length === 0) body = '<p class="text-muted mb-0">No outstanding balances for the current filters.</p>';
+        } else {
+            const sorted = [...lines].sort((a, b) => new Date(b.date) - new Date(a.date));
+            body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
+                <thead><tr><th>Date</th><th>Bill #</th><th>Vendor</th><th class="text-end">Balance</th></tr></thead>
+                <tbody>${sorted.map(p => `<tr>
+                    <td>${DataManager.formatDateDisplay(p.date)}</td>
+                    <td>${this.escapePdfHtml(p.billNo || p.id)}</td>
+                    <td>${this.escapePdfHtml(p.vendor || '')}</td>
+                    <td class="text-end text-danger fw-bold">₹${(p.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>`;
+            if (lines.length === 0) body = '<p class="text-muted mb-0">No pending bills for the current filters.</p>';
+        }
+        document.getElementById('purchaseDrilldownModal')?.remove();
+        document.body.insertAdjacentHTML('beforeend', `
+        <div class="modal fade" id="purchaseDrilldownModal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content bg-dark text-white border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title">${title}</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">${body}</div>
+                </div>
+            </div>
+        </div>`);
+        new bootstrap.Modal(document.getElementById('purchaseDrilldownModal')).show();
     },
 
     previewPurchase(id) {

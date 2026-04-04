@@ -44,6 +44,7 @@ const App = {
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
+        let loginScreenReady = false;
         try {
             // Initialize data (now async for file storage)
             await DataManager.init();
@@ -52,7 +53,7 @@ const App = {
             await UserManager.init();
 
             // Check authentication status
-            await this.checkLoginStatus();
+            const loggedIn = await this.checkLoginStatus();
 
             // Setup navigation
             this.setupNavigation();
@@ -60,38 +61,48 @@ const App = {
             // Setup event listeners
             this.setupEventListeners();
 
-            // Initialize Sync Manager if available
-            if (typeof SyncManager !== 'undefined') {
-                SyncManager.init();
-            }
-
-            // Initial indicator update
-            window.addEventListener('load', () => setTimeout(() => this.updateMagicIndicator(), 100));
-            window.addEventListener('resize', () => this.updateMagicIndicator());
-
             // Initialize theme
             this.initTheme();
 
             // Update Company Branding
             await this.updateCompanyBranding();
 
-            // Initialize Analytics UI
-            if (typeof AnalyticsUI !== 'undefined') {
-                AnalyticsUI.init();
-            }
-
-            // Initialize Payment Follow-up & Tasks
-            if (typeof PaymentsUI !== 'undefined') {
-                PaymentsUI.init();
-            }
-            if (typeof TasksUI !== 'undefined') {
-                TasksUI.init();
+            // When logged out, dismiss the full-screen loader immediately so the login form is usable.
+            // Remaining modules (sync, analytics, etc.) run on the next task so they do not block typing.
+            if (!loggedIn) {
+                this.hideLoader(0);
+                loginScreenReady = true;
+                setTimeout(() => this._initDeferredModules(), 0);
+            } else {
+                this._initDeferredModules();
             }
         } catch (error) {
             console.error('App initialization error:', error);
             alert('Application failed to initialize: ' + error.message);
         } finally {
-            this.hideLoader(1000);
+            if (!loginScreenReady) {
+                this.hideLoader(300);
+            }
+        }
+    },
+
+    /** Sync, analytics, and secondary UI — not required before login interaction. */
+    _initDeferredModules() {
+        if (typeof SyncManager !== 'undefined') {
+            SyncManager.init();
+        }
+
+        window.addEventListener('load', () => setTimeout(() => this.updateMagicIndicator(), 100));
+        window.addEventListener('resize', () => this.updateMagicIndicator());
+
+        if (typeof AnalyticsUI !== 'undefined') {
+            AnalyticsUI.init();
+        }
+        if (typeof PaymentsUI !== 'undefined') {
+            PaymentsUI.init();
+        }
+        if (typeof TasksUI !== 'undefined') {
+            TasksUI.init();
         }
     },
 
@@ -262,24 +273,26 @@ const App = {
 
             // Load landing view by default
             this.showLandingPage();
-        } else {
-            if (loginOverlay) {
-                loginOverlay.classList.remove('hidden');
-                loginOverlay.style.display = 'flex'; // Restore display
-            }
-            if (userInfo) userInfo.classList.add('d-none');
-            if (logoutBtn) logoutBtn.style.display = 'none';
-
-            // Hide all nav items when logged out
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.style.display = 'none';
-            });
-            // Ensure login overlay is visible
-            if (loginOverlay) {
-                loginOverlay.classList.remove('hidden');
-                loginOverlay.style.display = 'flex';
-            }
+            return true;
         }
+
+        if (loginOverlay) {
+            loginOverlay.classList.remove('hidden');
+            loginOverlay.style.display = 'flex'; // Restore display
+        }
+        if (userInfo) userInfo.classList.add('d-none');
+        if (logoutBtn) logoutBtn.style.display = 'none';
+
+        // Hide all nav items when logged out
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.style.display = 'none';
+        });
+        // Ensure login overlay is visible
+        if (loginOverlay) {
+            loginOverlay.classList.remove('hidden');
+            loginOverlay.style.display = 'flex';
+        }
+        return false;
     },
 
     initTheme() {
@@ -714,11 +727,11 @@ const App = {
                 console.error(`View element not found: ${viewName}View`);
             }
 
-            // Update active nav
-            document.querySelectorAll('.nav-link').forEach(link => {
+            // Update active nav (main navbar only — do not strip .active from Analytics sub-tabs, dropdowns, etc.)
+            document.querySelectorAll('a.nav-link[data-view]').forEach(link => {
                 link.classList.remove('active');
             });
-            const activeLink = document.querySelector(`[data-view="${viewName}"]`);
+            const activeLink = document.querySelector(`a.nav-link[data-view="${viewName}"]`);
             if (activeLink) {
                 activeLink.classList.add('active');
             }
@@ -737,20 +750,21 @@ const App = {
     },
 
     updateMagicIndicator() {
-        const activeLink = document.querySelector('.nav-link.active');
         const indicator = document.querySelector('.magic-indicator');
+        if (!indicator) return;
 
-        if (activeLink && indicator) {
-            const linkRect = activeLink.getBoundingClientRect();
-            const navRect = activeLink.closest('.navbar-nav').getBoundingClientRect();
-
-            const left = linkRect.left - navRect.left;
-            const width = linkRect.width;
-
-            indicator.style.left = `${left}px`;
-            indicator.style.width = `${width}px`;
-            indicator.style.opacity = '1';
+        const activeLink = document.querySelector('.navbar .navbar-nav a.nav-link.active');
+        const navbarNav = activeLink?.closest('.navbar-nav');
+        if (!activeLink || !navbarNav) {
+            indicator.style.opacity = '0';
+            return;
         }
+
+        const linkRect = activeLink.getBoundingClientRect();
+        const navRect = navbarNav.getBoundingClientRect();
+        indicator.style.left = `${linkRect.left - navRect.left}px`;
+        indicator.style.width = `${linkRect.width}px`;
+        indicator.style.opacity = '1';
     },
 
     goBack() {
@@ -771,16 +785,17 @@ const App = {
     },
 
     updateBackButton() {
-        // Find or create back button container
         let backButtonContainer = document.getElementById('backButtonContainer');
+        const mainContent = document.querySelector('.main-content-container');
+        if (!mainContent) return;
+
         if (!backButtonContainer) {
             backButtonContainer = document.createElement('div');
             backButtonContainer.id = 'backButtonContainer';
             backButtonContainer.className = 'back-button-container';
-            const containerFluid = document.querySelector('.container-fluid');
-            if (containerFluid) {
-                containerFluid.insertBefore(backButtonContainer, containerFluid.firstChild);
-            }
+            mainContent.insertBefore(backButtonContainer, mainContent.firstChild);
+        } else if (backButtonContainer.parentElement !== mainContent) {
+            mainContent.insertBefore(backButtonContainer, mainContent.firstChild);
         }
 
         // Show back button for all views except dashboard
@@ -882,6 +897,9 @@ const App = {
                 await AdminModule.load();
                 break;
             case 'analytics':
+                if (typeof AnalyticsUI.ensureSubNav === 'function') {
+                    AnalyticsUI.ensureSubNav();
+                }
                 AnalyticsUI.renderDashboard();
                 break;
             case 'payments':

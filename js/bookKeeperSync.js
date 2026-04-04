@@ -29,12 +29,15 @@ const BookKeeperSync = {
 
             // Check for orphaned inventory transactions and auto-repair
             const txns = DataManager.getData('inventoryTransactions') || [];
-            const orphanedTxns = txns.filter(t => !inventory.find(m => m.id === t.materialId));
+            
+            // OPTIMIZATION: Use a Set for O(1) lookups instead of .find() in a loop
+            const inventoryIds = new Set(inventory.map(m => m.id));
+            const orphanedTxns = txns.filter(t => !inventoryIds.has(t.materialId));
             
             if (orphanedTxns.length > 0) {
                 console.warn(`[Sync] Found ${orphanedTxns.length} orphaned inventory txns. Auto-repairing...`);
                 // Auto repair by saving only valid transactions
-                const validTxns = txns.filter(t => inventory.find(m => m.id === t.materialId));
+                const validTxns = txns.filter(t => inventoryIds.has(t.materialId));
                 DataManager.saveData('inventoryTransactions', validTxns);
                 
                 // Optional: log to sync manager so user knows a repair happened
@@ -59,22 +62,72 @@ const BookKeeperSync = {
 
     intervalId: null,
 
-    async init() {
+    init() {
         console.log('Initializing BookKeeper Sync Service...');
 
-        // Load saved config
         const savedConfig = localStorage.getItem('bk_sync_config');
         if (savedConfig) {
-            this.config = JSON.parse(savedConfig);
+            try {
+                const parsed = JSON.parse(savedConfig);
+                this.config = { ...this.config, ...parsed };
+            } catch (e) {
+                console.warn('[BK] Invalid bk_sync_config, using defaults:', e);
+            }
+        }
+        if (typeof this.config.autoSync !== 'boolean') {
+            this.config.autoSync = true;
         }
 
-        // Start watcher if path is configured
         if (this.config.backupPath && this.config.autoSync) {
             this.startWatcher();
         }
 
-        // Expose to window for UI interactions
         window.BookKeeperSync = this;
+
+        // After DataManager has loaded (SyncManager runs post–DataManager.init), restore BK data if storage was cleared but we still have a backup path + prior sync.
+        void this.maybeRehydrateFromBackup();
+    },
+
+    /**
+     * Hard refresh or cleared site data can empty invoices/vouchers while bk_sync_config remains.
+     * Auto re-import once from the saved .db path (Electron only). File watcher only detects *changes*, not empty storage.
+     */
+    async maybeRehydrateFromBackup() {
+        await new Promise((r) => setTimeout(r, 50));
+
+        if (!window.electronAPI || !window.electronAPI.readFileBuffer) {
+            return;
+        }
+        const path = this.config.backupPath;
+        if (!path) {
+            return;
+        }
+
+        const hadSuccessfulSync = !!(this.config.lastSyncDetails && this.config.lastSyncDetails.time);
+        if (!hadSuccessfulSync) {
+            return;
+        }
+
+        const invoices = DataManager.getData('invoices') || [];
+        const vouchers = DataManager.getData(DataManager.KEYS.VOUCHERS) || DataManager.getData('vouchers') || [];
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+        const challans = DataManager.getData('challans') || [];
+
+        const noTransactionalData =
+            invoices.length === 0 &&
+            vouchers.length === 0 &&
+            expenses.length === 0 &&
+            challans.length === 0;
+
+        if (!noTransactionalData) {
+            return;
+        }
+
+        console.log('[BK] Stored data empty but backup path + prior sync exist — re-importing from file...');
+        if (typeof App !== 'undefined' && App.showNotification) {
+            App.showNotification('Restoring Book Keeper data from your backup file…', 'info');
+        }
+        await this.triggerSync();
     },
 
     setBackupPath(path) {
@@ -286,8 +339,3 @@ const BookKeeperSync = {
         }
     }
 };
-
-// Auto-init
-document.addEventListener('DOMContentLoaded', () => {
-    BookKeeperSync.init();
-});

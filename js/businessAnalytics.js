@@ -107,48 +107,94 @@ const BusinessAnalytics = {
     // 2. GST REPORTS
     // ========================================
 
+    _getAllExpenseRecords() {
+        const K = (typeof DataManager !== 'undefined' && DataManager.KEYS) ? DataManager.KEYS.EXPENSES : 'purchases';
+        return DataManager.getData(K) || DataManager.getData('gtes_expenses') || DataManager.getData('expenses') || [];
+    },
+
+    _invoiceOutputTax(inv) {
+        const cgst = parseFloat(inv.cgst) || parseFloat(inv.gst?.cgst) || 0;
+        const sgst = parseFloat(inv.sgst) || parseFloat(inv.gst?.sgst) || 0;
+        const igst = parseFloat(inv.igst) || parseFloat(inv.gst?.igst) || 0;
+        return { cgst, sgst, igst };
+    },
+
+    _expenseTaxParts(exp) {
+        const cgst = parseFloat(exp.cgst) || parseFloat(exp.gst?.cgst) || 0;
+        const sgst = parseFloat(exp.sgst) || parseFloat(exp.gst?.sgst) || 0;
+        const igst = parseFloat(exp.igst) || parseFloat(exp.gst?.igst) || 0;
+        return { cgst, sgst, igst };
+    },
+
+    /** Purchases / ITC: BookKeeper uses key "purchases"; include common purchase categories and GST-bearing vendor bills. */
+    _isPurchaseExpenseForItc(exp) {
+        if (!exp) return false;
+        const cat = (exp.category || '').toLowerCase();
+        if (cat.includes('purchase') || cat.includes('inward') || cat.includes('supplier')) return true;
+        if (exp.source === 'local') return true;
+        const src = (exp.source || '').toLowerCase();
+        if (src === 'bookkeeper' || src === 'csv_import') {
+            if (exp.vendor || exp.vendorName) return true;
+            if (Array.isArray(exp.items) && exp.items.length > 0) return true;
+        }
+        const t = this._expenseTaxParts(exp);
+        const taxSum = t.cgst + t.sgst + t.igst;
+        if (taxSum > 0 && (exp.vendor || exp.vendorName)) return true;
+        return false;
+    },
+
+    _normalizeYmd(d) {
+        if (d == null || d === '') return '';
+        if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+        const x = new Date(d);
+        return isNaN(x.getTime()) ? '' : x.toISOString().slice(0, 10);
+    },
+
+    _inYmdRange(ymd, startYmd, endYmd) {
+        if (!ymd) return false;
+        if (startYmd && ymd < startYmd) return false;
+        if (endYmd && ymd > endYmd) return false;
+        return true;
+    },
+
     /**
-     * Generate GSTR-1 Report (Outward Supplies)
-     * @param {number} year - Financial year start
+     * Generate GSTR-1 Report (Outward Supplies) — **GST / tax-invoice sales only** (excludes plain invoices).
+     * @param {number} year - Calendar year (e.g. March of FY 2025–26 → 2026)
      * @param {number} month - Month (0-11)
      */
     generateGSTR1(year, month) {
         const invoices = DataManager.getData('invoices') || [];
-        const challans = DataManager.getData('challans') || [];
         const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
 
-        // Filter invoices for the month
         const monthInvoices = invoices.filter(inv => {
             const invDate = new Date(inv.date);
             return invDate.getFullYear() === year && invDate.getMonth() === month;
-        });
+        }).filter(inv => this._isGstSalesInvoice(inv));
 
-        // B2B (Business to Business with GSTIN)
         const b2b = [];
-        // B2C Large (> 2.5 Lakhs to consumers)
         const b2cl = [];
-        // B2C Small (< 2.5 Lakhs to consumers)
         const b2cs = [];
 
         monthInvoices.forEach(inv => {
             const customer = customers.find(c => c.id === inv.customerId || c.name === inv.customerName);
             const gstin = customer?.gstin || inv.customerGSTIN;
+            const tax = this._invoiceOutputTax(inv);
 
             const invoiceData = {
                 id: inv.id,
-                invoiceNumber: inv.id,
+                invoiceNumber: inv.invoiceNo || inv.id,
                 invoiceDate: inv.date,
                 customerName: inv.customerName,
                 gstin: gstin,
                 taxableValue: parseFloat(inv.subtotal) || 0,
-                cgst: parseFloat(inv.cgst) || 0,
-                sgst: parseFloat(inv.sgst) || 0,
-                igst: parseFloat(inv.igst) || 0,
+                cgst: tax.cgst,
+                sgst: tax.sgst,
+                igst: tax.igst,
                 total: parseFloat(inv.total) || 0,
                 placeOfSupply: customer?.state || 'Tamil Nadu'
             };
 
-            if (gstin && gstin.length === 15) {
+            if (gstin && String(gstin).replace(/\s/g, '').length === 15) {
                 b2b.push(invoiceData);
             } else if (invoiceData.total > 250000) {
                 b2cl.push(invoiceData);
@@ -157,16 +203,15 @@ const BusinessAnalytics = {
             }
         });
 
-        // Aggregate B2CS by rate
         const b2csAggregated = this._aggregateB2CS(b2cs);
 
-        // Calculate totals
         const totals = {
             totalTaxableValue: monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.subtotal) || 0), 0),
-            totalCGST: monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.cgst) || 0), 0),
-            totalSGST: monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.sgst) || 0), 0),
-            totalIGST: monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.igst) || 0), 0),
-            totalInvoices: monthInvoices.length
+            totalCGST: monthInvoices.reduce((sum, inv) => sum + this._invoiceOutputTax(inv).cgst, 0),
+            totalSGST: monthInvoices.reduce((sum, inv) => sum + this._invoiceOutputTax(inv).sgst, 0),
+            totalIGST: monthInvoices.reduce((sum, inv) => sum + this._invoiceOutputTax(inv).igst, 0),
+            totalInvoices: monthInvoices.length,
+            totalSalesAmount: monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0)
         };
 
         totals.totalTax = totals.totalCGST + totals.totalSGST + totals.totalIGST;
@@ -181,6 +226,215 @@ const BusinessAnalytics = {
         };
     },
 
+    /** Purchase-type expenses in a calendar month (ITC / purchase register). */
+    _getMonthPurchaseExpenses(year, month) {
+        return this._getAllExpenseRecords().filter(exp => {
+            const expDate = new Date(exp.date);
+            return expDate.getFullYear() === year && expDate.getMonth() === month && this._isPurchaseExpenseForItc(exp);
+        });
+    },
+
+    /**
+     * Totals for GST month report cards (GST sales + purchase bills used for ITC).
+     */
+    generateMonthlySalesPurchaseSummary(year, month) {
+        const gstr1 = this.generateGSTR1(year, month);
+        const monthPurchases = this._getMonthPurchaseExpenses(year, month);
+        const totalPurchase = monthPurchases.reduce((sum, e) =>
+            sum + (parseFloat(e.amount) || parseFloat(e.totalAmount) || 0), 0);
+        return {
+            period: `${this._getMonthName(month)} ${year}`,
+            totalSales: gstr1.totals.totalSalesAmount,
+            totalPurchase,
+            invoiceCount: gstr1.totals.totalInvoices,
+            purchaseBillCount: monthPurchases.length
+        };
+    },
+
+    /**
+     * Grand summary for footer: GST invoice count, taxable, tax, sales total; purchases count, taxable, ITC, purchase total.
+     */
+    generateGstMonthGrandSummary(year, month) {
+        const gstr1 = this.generateGSTR1(year, month);
+        const gstr3b = this.generateGSTR3B(year, month);
+        const purchases = this._getMonthPurchaseExpenses(year, month);
+        const purchaseTaxable = purchases.reduce((s, e) => s + (parseFloat(e.subtotal) || 0), 0);
+        const purchaseGrand = purchases.reduce((s, e) => s + (parseFloat(e.amount) || parseFloat(e.totalAmount) || 0), 0);
+        const itcTotal = gstr3b.inputTaxCredit.cgst + gstr3b.inputTaxCredit.sgst + gstr3b.inputTaxCredit.igst;
+        return {
+            period: gstr1.period,
+            sales: {
+                gstInvoiceCount: gstr1.totals.totalInvoices,
+                taxableValue: gstr1.totals.totalTaxableValue,
+                totalGst: gstr1.totals.totalTax,
+                grandTotal: gstr1.totals.totalSalesAmount
+            },
+            purchase: {
+                billCount: purchases.length,
+                taxableValue: purchaseTaxable,
+                itcTotal,
+                grandTotal: purchaseGrand
+            },
+            netTaxPayable: gstr3b.netTaxPayable.total
+        };
+    },
+
+    _isGstSalesInvoice(inv) {
+        if (!inv) return false;
+        if (inv.billType === 'gst') return true;
+        const t = (inv.type || '').toLowerCase();
+        return t === 'with-bill' || t === 'gst-invoice' || t === 'sales-gst';
+    },
+
+    /**
+     * HSN-wise outward supplies for GST invoices in the selected month.
+     */
+    generateHSNWiseSales(year, month) {
+        const invoices = (DataManager.getData('invoices') || []).filter(inv => {
+            const d = new Date(inv.date);
+            return d.getFullYear() === year && d.getMonth() === month;
+        }).filter(inv => this._isGstSalesInvoice(inv));
+
+        const map = {};
+        const bump = (hsnKey, taxable, cgst, sgst, igst, qty) => {
+            const k = hsnKey || '—';
+            if (!map[k]) {
+                map[k] = { hsn: k, taxableValue: 0, cgst: 0, sgst: 0, igst: 0, quantity: 0 };
+            }
+            map[k].taxableValue += taxable;
+            map[k].cgst += cgst;
+            map[k].sgst += sgst;
+            map[k].igst += igst;
+            map[k].quantity += qty;
+        };
+
+        invoices.forEach(inv => {
+            const subtotal = parseFloat(inv.subtotal) || 0;
+            const cgst = parseFloat(inv.cgst) || parseFloat(inv.gst?.cgst) || 0;
+            const sgst = parseFloat(inv.sgst) || parseFloat(inv.gst?.sgst) || 0;
+            const igst = parseFloat(inv.igst) || parseFloat(inv.gst?.igst) || 0;
+            const totalTax = cgst + sgst + igst;
+            const items = inv.items || [];
+
+            if (items.length === 0) {
+                if (subtotal > 0 || totalTax > 0) bump('—', subtotal, cgst, sgst, igst, 0);
+                return;
+            }
+
+            items.forEach(it => {
+                const lineTaxable = parseFloat(it.amount) || 0;
+                const qty = parseFloat(it.quantity != null ? it.quantity : it.qty) || 0;
+                const hsnRaw = (it.hsn || it.hsnCode || '').toString().trim();
+                let lc = parseFloat(it.cgst) || 0;
+                let ls = parseFloat(it.sgst) || 0;
+                let li = parseFloat(it.igst) || 0;
+                if (!lc && !ls && !li && subtotal > 0) {
+                    const r = lineTaxable / subtotal;
+                    lc = cgst * r;
+                    ls = sgst * r;
+                    li = igst * r;
+                } else if (!lc && !ls && !li && subtotal === 0 && items.length) {
+                    const r = 1 / items.length;
+                    lc = cgst * r;
+                    ls = sgst * r;
+                    li = igst * r;
+                }
+                bump(hsnRaw, lineTaxable, lc, ls, li, qty);
+            });
+        });
+
+        const rows = Object.values(map).sort((a, b) => String(a.hsn).localeCompare(String(b.hsn), undefined, { numeric: true }));
+        const totals = rows.reduce((acc, r) => ({
+            taxableValue: acc.taxableValue + r.taxableValue,
+            cgst: acc.cgst + r.cgst,
+            sgst: acc.sgst + r.sgst,
+            igst: acc.igst + r.igst,
+            quantity: acc.quantity + r.quantity,
+            totalTax: acc.totalTax + r.cgst + r.sgst + r.igst
+        }), { taxableValue: 0, cgst: 0, sgst: 0, igst: 0, quantity: 0, totalTax: 0 });
+
+        return { period: `${this._getMonthName(month)} ${year}`, rows, totals };
+    },
+
+    /**
+     * Line-level HSN rows for GST invoices (full HSN/SAC as stored, no truncation).
+     */
+    generateHSNWiseSalesLines(year, month) {
+        const invoices = (DataManager.getData('invoices') || []).filter(inv => {
+            const d = new Date(inv.date);
+            return d.getFullYear() === year && d.getMonth() === month;
+        }).filter(inv => this._isGstSalesInvoice(inv));
+
+        const lines = [];
+        invoices.forEach(inv => {
+            const subtotal = parseFloat(inv.subtotal) || 0;
+            const cgst = parseFloat(inv.cgst) || parseFloat(inv.gst?.cgst) || 0;
+            const sgst = parseFloat(inv.sgst) || parseFloat(inv.gst?.sgst) || 0;
+            const igst = parseFloat(inv.igst) || parseFloat(inv.gst?.igst) || 0;
+            const totalTax = cgst + sgst + igst;
+            const items = inv.items || [];
+            const invNo = inv.invoiceNo || inv.id;
+
+            if (items.length === 0) {
+                lines.push({
+                    invoiceId: inv.id,
+                    invoiceNo: invNo,
+                    invoiceDate: inv.date,
+                    customerName: inv.customerName || '',
+                    itemName: '—',
+                    hsnFull: '—',
+                    quantity: '',
+                    unit: '',
+                    taxableValue: subtotal,
+                    cgst,
+                    sgst,
+                    igst,
+                    lineTotal: subtotal + totalTax
+                });
+                return;
+            }
+
+            items.forEach(it => {
+                const lineTaxable = parseFloat(it.amount) || 0;
+                const qty = it.quantity != null ? it.quantity : it.qty;
+                const hsnFull = String(it.hsn || it.hsnCode || it.hsncode || it.sac_code || it.sac || '').trim() || '—';
+                const name = (it.name || it.description || '').toString().trim() || '—';
+                let lc = parseFloat(it.cgst) || 0;
+                let ls = parseFloat(it.sgst) || 0;
+                let li = parseFloat(it.igst) || 0;
+                if (!lc && !ls && !li && subtotal > 0) {
+                    const r = lineTaxable / subtotal;
+                    lc = cgst * r;
+                    ls = sgst * r;
+                    li = igst * r;
+                } else if (!lc && !ls && !li && subtotal === 0 && items.length) {
+                    const r = 1 / items.length;
+                    lc = cgst * r;
+                    ls = sgst * r;
+                    li = igst * r;
+                }
+                lines.push({
+                    invoiceId: inv.id,
+                    invoiceNo: invNo,
+                    invoiceDate: inv.date,
+                    customerName: inv.customerName || '',
+                    itemName: name,
+                    hsnFull,
+                    quantity: qty !== undefined && qty !== '' ? qty : '',
+                    unit: (it.unit || it.per || '').toString(),
+                    taxableValue: lineTaxable,
+                    cgst: lc,
+                    sgst: ls,
+                    igst: li,
+                    lineTotal: lineTaxable + lc + ls + li
+                });
+            });
+        });
+
+        lines.sort((a, b) => String(a.invoiceDate).localeCompare(String(b.invoiceDate)) || String(a.invoiceNo).localeCompare(String(b.invoiceNo)));
+        return { period: `${this._getMonthName(month)} ${year}`, lines };
+    },
+
     /**
      * Generate GSTR-3B Summary
      * @param {number} year - Year
@@ -188,18 +442,12 @@ const BusinessAnalytics = {
      */
     generateGSTR3B(year, month) {
         const gstr1 = this.generateGSTR1(year, month);
-        // Calculate Input Tax Credit (ITC) from expenses and purchases
-        const allExpenses = DataManager.getData('expenses') || [];
-        const monthExpenses = allExpenses.filter(exp => {
-            const expDate = new Date(exp.date);
-            return expDate.getFullYear() === year && expDate.getMonth() === month &&
-                ((exp.category || '').toLowerCase().includes('purchase') || exp.source === 'local');
-        });
+        const monthExpenses = this._getMonthPurchaseExpenses(year, month);
 
         const itc = {
-            cgst: monthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.cgst) || 0), 0),
-            sgst: monthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.sgst) || 0), 0),
-            igst: monthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.igst) || 0), 0)
+            cgst: monthExpenses.reduce((sum, exp) => sum + this._expenseTaxParts(exp).cgst, 0),
+            sgst: monthExpenses.reduce((sum, exp) => sum + this._expenseTaxParts(exp).sgst, 0),
+            igst: monthExpenses.reduce((sum, exp) => sum + this._expenseTaxParts(exp).igst, 0)
         };
         itc.total = itc.cgst + itc.sgst + itc.igst;
 
@@ -267,47 +515,67 @@ const BusinessAnalytics = {
     },
 
     // ========================================
-    // 3. CUSTOMER LEDGER
+    // 3. CUSTOMER / VENDOR LEDGER
     // ========================================
 
-    /**
-     * Get complete customer ledger
-     * @param {string} customerId - Customer ID or name
-     */
-    getCustomerLedger(customerId) {
+    _ledgerNormalizeDate(d) {
+        if (d == null || d === '') return '';
+        if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+        const x = new Date(d);
+        if (isNaN(x.getTime())) return '';
+        return x.toISOString().slice(0, 10);
+    },
+
+    _compareLedgerDates(a, b) {
+        return this._ledgerNormalizeDate(a).localeCompare(this._ledgerNormalizeDate(b));
+    },
+
+    _partyMatches(account, partyId, partyName) {
+        if (!account) return false;
+        if (partyId && partyId === account.id) return true;
+        const n = (partyName || '').trim().toLowerCase();
+        const an = (account.name || '').trim().toLowerCase();
+        return Boolean(n && an && n === an);
+    },
+
+    _ledgerRunningDelta(accountGroup, debit, credit) {
+        return accountGroup === 'vendor' ? (credit - debit) : (debit - credit);
+    },
+
+    _collectCustomerRawEntries(account) {
         const invoices = DataManager.getData('invoices') || [];
         const challans = DataManager.getData('challans') || [];
         const vouchers = DataManager.getData('vouchers') || [];
-        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
+        const entries = [];
 
-        const customer = customers.find(c => c.id === customerId || c.name === customerId);
-        if (!customer) return null;
-
-        const ledgerEntries = [];
-
-        // Add invoices (Debit - customer owes us)
         invoices
-            .filter(inv => inv.customerId === customer.id || inv.customerName === customer.name)
+            .filter(inv => inv.customerId === account.id || inv.customerName === account.name)
             .forEach(inv => {
-                ledgerEntries.push({
+                entries.push({
                     date: inv.date,
                     type: 'Invoice',
+                    vchType: 'Sales',
                     reference: inv.id,
-                    description: `Invoice #${inv.id}`,
+                    invoiceNo: inv.invoiceNo || '',
+                    refNo: inv.poNumber || inv.purchaseOrderNo || inv.refNo || '',
+                    particulars: account.name,
+                    description: `Invoice #${inv.invoiceNo || inv.id}`,
                     debit: parseFloat(inv.total) || 0,
                     credit: 0,
                     status: inv.status
                 });
             });
 
-        // Add challans (Debit)
         challans
-            .filter(ch => ch.customerId === customer.id || ch.customerName === customer.name)
+            .filter(ch => ch.customerId === account.id || ch.customerName === account.name)
             .forEach(ch => {
-                ledgerEntries.push({
+                entries.push({
                     date: ch.date,
                     type: ch.type === 'delivery' ? 'Delivery Challan' : 'Service Challan',
+                    vchType: ch.type === 'delivery' ? 'Delivery' : 'Service',
                     reference: ch.id,
+                    refNo: ch.referenceNumber || ch.lrNo || '',
+                    particulars: account.name,
                     description: `${ch.type === 'delivery' ? 'DC' : 'SC'} #${ch.id}`,
                     debit: parseFloat(ch.total) || 0,
                     credit: 0,
@@ -315,48 +583,174 @@ const BusinessAnalytics = {
                 });
             });
 
-        // Add vouchers/payments (Credit - customer paid us)
         vouchers
-            .filter(v => v.customerId === customer.id || v.customerName === customer.name)
+            .filter(v => v.customerId === account.id || v.customerName === account.name)
             .forEach(v => {
-                ledgerEntries.push({
+                if (v.type === 'contra') return;
+                const amt = parseFloat(v.amount) || 0;
+                const mode = (v.paymentMode || v.mode || 'Cash').toString();
+                if (v.type === 'payment' && v.isPurchase) return;
+                if (v.type === 'payment' && !v.isPurchase) {
+                    entries.push({
+                        date: v.date,
+                        type: 'Payment',
+                        vchType: 'Payment',
+                        reference: v.id,
+                        refNo: v.referenceId || v.billNo || '',
+                        particulars: account.name,
+                        description: `Payment — ${mode}`,
+                        debit: amt,
+                        credit: 0,
+                        status: 'completed'
+                    });
+                    return;
+                }
+                entries.push({
                     date: v.date,
-                    type: 'Payment',
+                    type: (v.type === 'receipt' || !v.type) ? 'Receipt' : 'Receipt',
+                    vchType: 'Receipt',
                     reference: v.id,
-                    description: `Payment - ${v.mode || 'Cash'}`,
+                    refNo: v.referenceId || v.billNo || '',
+                    particulars: account.name,
+                    description: `Receipt — ${mode}`,
                     debit: 0,
-                    credit: parseFloat(v.amount) || 0,
+                    credit: amt,
                     status: 'completed'
                 });
             });
 
-        // Sort by date
-        ledgerEntries.sort((a, b) => new Date(a.date) - new Date(b.date));
+        entries.sort((a, b) => this._compareLedgerDates(a.date, b.date) || String(a.reference).localeCompare(String(b.reference)));
+        return entries;
+    },
 
-        // Calculate running balance
-        let runningBalance = 0;
-        ledgerEntries.forEach(entry => {
-            runningBalance += entry.debit - entry.credit;
-            entry.balance = runningBalance;
+    _collectVendorRawEntries(account) {
+        const expenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
+        const vouchers = DataManager.getData('vouchers') || [];
+        const entries = [];
+
+        expenses
+            .filter(exp => this._partyMatches(account, exp.vendorId || exp.customerId, exp.vendor || exp.vendorName || exp.partyName))
+            .forEach(exp => {
+                const amt = parseFloat(exp.amount || exp.totalAmount) || 0;
+                entries.push({
+                    date: exp.date,
+                    type: 'Purchase',
+                    vchType: 'Purchase',
+                    reference: exp.id,
+                    refNo: exp.poNumber || exp.supplierInvoiceNo || exp.refNo || '',
+                    particulars: account.name,
+                    description: 'Purchase bill',
+                    debit: 0,
+                    credit: amt,
+                    status: exp.status || 'posted'
+                });
+            });
+
+        vouchers
+            .filter(v => v.type === 'payment' && v.isPurchase !== false &&
+                (v.customerId === account.id || this._partyMatches(account, v.customerId, v.customerName)))
+            .forEach(v => {
+                const amt = parseFloat(v.amount) || 0;
+                entries.push({
+                    date: v.date,
+                    type: 'Payment',
+                    vchType: 'Payment',
+                    reference: v.id,
+                    refNo: v.referenceId || v.billNo || '',
+                    particulars: account.name,
+                    description: `Payment to supplier`,
+                    debit: amt,
+                    credit: 0,
+                    status: 'completed'
+                });
+            });
+
+        entries.sort((a, b) => this._compareLedgerDates(a.date, b.date) || String(a.reference).localeCompare(String(b.reference)));
+        return entries;
+    },
+
+    /**
+     * Ledger for a customer (receivable) or vendor/supplier (payable).
+     * @param {string} accountId - Customer / supplier ID
+     * @param {object} options
+     * @param {'customer'|'vendor'} options.accountGroup
+     * @param {string} [options.startDate] - YYYY-MM-DD inclusive
+     * @param {string} [options.endDate] - YYYY-MM-DD inclusive
+     */
+    getAccountLedger(accountId, options = {}) {
+        const accountGroup = options.accountGroup === 'vendor' ? 'vendor' : 'customer';
+        const startDate = options.startDate ? this._ledgerNormalizeDate(options.startDate) : '';
+        const endDate = options.endDate ? this._ledgerNormalizeDate(options.endDate) : '';
+
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
+        const account = customers.find(c => c.id === accountId || c.name === accountId);
+        if (!account) return null;
+
+        const raw = accountGroup === 'vendor'
+            ? this._collectVendorRawEntries(account)
+            : this._collectCustomerRawEntries(account);
+
+        const sign = (d, c) => this._ledgerRunningDelta(accountGroup, d, c);
+
+        let openingBalance = 0;
+        const inPeriod = [];
+
+        raw.forEach(e => {
+            const ed = this._ledgerNormalizeDate(e.date);
+            const afterStart = !startDate || ed >= startDate;
+            const beforeEnd = !endDate || ed <= endDate;
+            const beforePeriod = startDate && ed < startDate;
+
+            if (beforePeriod) {
+                openingBalance += sign(e.debit, e.credit);
+            } else if ((!startDate && !endDate) || (afterStart && beforeEnd)) {
+                inPeriod.push({ ...e });
+            }
         });
 
+        let running = openingBalance;
+        inPeriod.forEach(entry => {
+            running += sign(entry.debit, entry.credit);
+            entry.balance = running;
+        });
+
+        const totalDebit = inPeriod.reduce((s, e) => s + e.debit, 0);
+        const totalCredit = inPeriod.reduce((s, e) => s + e.credit, 0);
+        const closingBalance = inPeriod.length ? inPeriod[inPeriod.length - 1].balance : openingBalance;
+
+        const groupLabel = accountGroup === 'vendor' ? 'Sundry Creditors' : 'Sundry Debtors';
+
         return {
+            accountGroup,
+            groupLabel,
             customer: {
-                id: customer.id,
-                name: customer.name,
-                phone: customer.phone,
-                gstin: customer.gstin,
-                address: customer.address
+                id: account.id,
+                name: account.name,
+                phone: account.phone,
+                email: account.email || '',
+                gstin: account.gstin || '',
+                pan: account.pan || '',
+                address: account.address || ''
             },
-            entries: ledgerEntries,
+            dateRange: { start: startDate || null, end: endDate || null },
+            openingBalance,
+            entries: inPeriod,
             summary: {
-                totalDebit: ledgerEntries.reduce((sum, e) => sum + e.debit, 0),
-                totalCredit: ledgerEntries.reduce((sum, e) => sum + e.credit, 0),
-                balance: runningBalance,
-                transactionCount: ledgerEntries.length
+                totalDebit,
+                totalCredit,
+                balance: closingBalance,
+                openingBalance,
+                transactionCount: inPeriod.length
             },
             generatedAt: new Date().toISOString()
         };
+    },
+
+    /**
+     * Full customer (receivables) ledger — all dates, same shape as getAccountLedger.
+     */
+    getCustomerLedger(customerId) {
+        return this.getAccountLedger(customerId, { accountGroup: 'customer' });
     },
 
     /**
@@ -391,13 +785,20 @@ const BusinessAnalytics = {
         const today = new Date();
         const currentMonth = today.getMonth();
         const currentYear = today.getFullYear();
+        const fy = (typeof DataManager.getFinancialYear === 'function')
+            ? DataManager.getFinancialYear(today, true)
+            : { startYear: currentMonth >= 3 ? currentYear : currentYear - 1, label: '' };
+        if (!fy.label && fy.startYear != null) {
+            fy.label = `${fy.startYear}-${(fy.startYear + 1).toString().slice(-2)}`;
+        }
 
         return {
             revenue: this.getRevenueMetrics(currentYear, currentMonth),
             expenses: this.getExpenseMetrics(currentYear, currentMonth),
             inventory: this.getInventoryMetrics(),
             customers: this.getCustomerMetrics(),
-            cashFlow: this.getCashFlowData(currentYear),
+            cashFlow: this.getCashFlowData(fy.startYear),
+            cashFlowFyLabel: fy.label,
             recentActivity: this.getRecentActivity(),
             alerts: this.getAlerts()
         };
@@ -538,36 +939,39 @@ const BusinessAnalytics = {
     /**
      * Get monthly cash flow data for chart
      */
-    getCashFlowData(year) {
+    /**
+     * @param {number} fyStartYear - Indian FY start (April year), e.g. 2025 for FY 2025–26
+     */
+    getCashFlowData(fyStartYear) {
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData('expenses') || [];
         const vouchers = DataManager.getData('vouchers') || [];
 
-        const monthlyData = [];
+        const ymKey = (y, m) => y * 12 + m;
+        const revenueByYm = new Map();
+        const expenseByYm = new Map();
+        const collectedByYm = new Map();
 
-        const fyMonths = [3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2]; // April to March
+        const addSum = (map, dateStr, delta) => {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return;
+            const k = ymKey(d.getFullYear(), d.getMonth());
+            map.set(k, (map.get(k) || 0) + delta);
+        };
+
+        invoices.forEach(inv => addSum(revenueByYm, inv.date, parseFloat(inv.total) || 0));
+        expenses.forEach(exp => addSum(expenseByYm, exp.date, parseFloat(exp.amount) || 0));
+        vouchers.forEach(v => addSum(collectedByYm, v.date, parseFloat(v.amount) || 0));
+
+        const monthlyData = [];
+        const fyMonths = [3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2];
 
         for (const month of fyMonths) {
-            const targetYear = month >= 3 ? year : year + 1;
-
-            const monthInvoices = invoices.filter(inv => {
-                const d = new Date(inv.date);
-                return d.getFullYear() === targetYear && d.getMonth() === month;
-            });
-
-            const monthExpenses = expenses.filter(exp => {
-                const d = new Date(exp.date);
-                return d.getFullYear() === targetYear && d.getMonth() === month;
-            });
-
-            const monthPayments = vouchers.filter(v => {
-                const d = new Date(v.date);
-                return d.getFullYear() === targetYear && d.getMonth() === month;
-            });
-
-            const revenue = monthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
-            const expense = monthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0);
-            const collected = monthPayments.reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0);
+            const targetYear = month >= 3 ? fyStartYear : fyStartYear + 1;
+            const k = ymKey(targetYear, month);
+            const revenue = revenueByYm.get(k) || 0;
+            const expense = expenseByYm.get(k) || 0;
+            const collected = collectedByYm.get(k) || 0;
 
             monthlyData.push({
                 month: this._getMonthName(month).substring(0, 3) + (month < 3 ? ` '${targetYear.toString().slice(-2)}` : ''),
@@ -640,9 +1044,8 @@ const BusinessAnalytics = {
     getAlerts() {
         const alerts = [];
 
-        // Low stock alerts
         const lowStock = this.getLowStockAlerts();
-        lowStock.forEach(item => {
+        lowStock.slice(0, 8).forEach(item => {
             alerts.push({
                 type: item.urgency === 'critical' ? 'danger' : 'warning',
                 icon: 'bi-box',
@@ -767,6 +1170,138 @@ Thank you for your business!
         }
     },
 
+    getSalesRegister(startYmd, endYmd, mode = 'gst') {
+        const invoices = DataManager.getData('invoices') || [];
+        const rows = [];
+        invoices.forEach(inv => {
+            const ymd = this._normalizeYmd(inv.date);
+            if (!this._inYmdRange(ymd, startYmd, endYmd)) return;
+            const isGst = this._isGstSalesInvoice(inv);
+            if (mode === 'gst' && !isGst) return;
+            if (mode === 'plain' && isGst) return;
+            const tax = this._invoiceOutputTax(inv);
+            rows.push({
+                invoiceNo: inv.invoiceNo || inv.id,
+                date: ymd,
+                customerName: inv.customerName || '',
+                taxable: parseFloat(inv.subtotal) || 0,
+                cgst: tax.cgst,
+                sgst: tax.sgst,
+                igst: tax.igst,
+                total: parseFloat(inv.total) || 0,
+                billType: isGst ? 'GST' : 'Plain'
+            });
+        });
+        rows.sort((a, b) => a.date.localeCompare(b.date) || String(a.invoiceNo).localeCompare(String(b.invoiceNo)));
+        const totals = rows.reduce((acc, r) => ({
+            taxable: acc.taxable + r.taxable,
+            cgst: acc.cgst + r.cgst,
+            sgst: acc.sgst + r.sgst,
+            igst: acc.igst + r.igst,
+            total: acc.total + r.total
+        }), { taxable: 0, cgst: 0, sgst: 0, igst: 0, total: 0 });
+        return { rows, totals, startYmd, endYmd, mode };
+    },
+
+    getPurchaseRegister(startYmd, endYmd) {
+        const rows = [];
+        this._getAllExpenseRecords().forEach(exp => {
+            if (!this._isPurchaseExpenseForItc(exp)) return;
+            const ymd = this._normalizeYmd(exp.date);
+            if (!this._inYmdRange(ymd, startYmd, endYmd)) return;
+            const t = this._expenseTaxParts(exp);
+            rows.push({
+                billNo: exp.billNo || exp.supplierBillNo || exp.id,
+                date: ymd,
+                vendor: exp.vendor || exp.vendorName || '',
+                taxable: parseFloat(exp.subtotal) || 0,
+                cgst: t.cgst,
+                sgst: t.sgst,
+                igst: t.igst,
+                total: parseFloat(exp.amount) || parseFloat(exp.totalAmount) || 0,
+                category: exp.category || ''
+            });
+        });
+        rows.sort((a, b) => a.date.localeCompare(b.date) || String(a.billNo).localeCompare(String(b.billNo)));
+        const totals = rows.reduce((acc, r) => ({
+            taxable: acc.taxable + r.taxable,
+            cgst: acc.cgst + r.cgst,
+            sgst: acc.sgst + r.sgst,
+            igst: acc.igst + r.igst,
+            total: acc.total + r.total
+        }), { taxable: 0, cgst: 0, sgst: 0, igst: 0, total: 0 });
+        return { rows, totals, startYmd, endYmd };
+    },
+
+    exportSalesRegisterCSV(startYmd, endYmd, mode) {
+        const rep = this.getSalesRegister(startYmd, endYmd, mode);
+        const label = mode === 'plain' ? 'Plain' : 'GST';
+        let csv = `Sales Register (${label}) ${startYmd} to ${endYmd}\n`;
+        csv += 'Invoice No,Date,Customer,Taxable,CGST,SGST,IGST,Total,Type\n';
+        rep.rows.forEach(r => {
+            csv += `"${r.invoiceNo}",${r.date},"${(r.customerName || '').replace(/"/g, '""')}",${r.taxable},${r.cgst},${r.sgst},${r.igst},${r.total},${r.billType}\n`;
+        });
+        csv += `TOTAL,,,${rep.totals.taxable},${rep.totals.cgst},${rep.totals.sgst},${rep.totals.igst},${rep.totals.total},\n`;
+        this._downloadCSV(csv, `Sales_Register_${label}_${startYmd}_${endYmd}.csv`);
+    },
+
+    exportPurchaseRegisterCSV(startYmd, endYmd) {
+        const rep = this.getPurchaseRegister(startYmd, endYmd);
+        let csv = `Purchase Register ${startYmd} to ${endYmd}\n`;
+        csv += 'Bill No,Date,Vendor,Taxable,CGST,SGST,IGST,Total,Category\n';
+        rep.rows.forEach(r => {
+            csv += `"${r.billNo}",${r.date},"${(r.vendor || '').replace(/"/g, '""')}",${r.taxable},${r.cgst},${r.sgst},${r.igst},${r.total},"${(r.category || '').replace(/"/g, '""')}"\n`;
+        });
+        csv += `TOTAL,,,${rep.totals.taxable},${rep.totals.cgst},${rep.totals.sgst},${rep.totals.igst},${rep.totals.total},\n`;
+        this._downloadCSV(csv, `Purchase_Register_${startYmd}_${endYmd}.csv`);
+    },
+
+    exportFullGstMonthExcel(year, month) {
+        const gstr1 = this.generateGSTR1(year, month);
+        const gstr3b = this.generateGSTR3B(year, month);
+        const grand = this.generateGstMonthGrandSummary(year, month);
+        const hsn = this.generateHSNWiseSales(year, month);
+        const hsnLines = this.generateHSNWiseSalesLines(year, month);
+
+        let csv = '';
+        csv += `GST Month Report (GST invoices only) — ${gstr1.period}\n\n`;
+        csv += 'SUMMARY\n';
+        csv += `GST invoices,${gstr1.totals.totalInvoices}\n`;
+        csv += `Total taxable (sales),${gstr1.totals.totalTaxableValue}\n`;
+        csv += `Total GST (sales),${gstr1.totals.totalTax}\n`;
+        csv += `Grand total sales,${gstr1.totals.totalSalesAmount}\n`;
+        csv += `Purchase bills (ITC),${grand.purchase.billCount}\n`;
+        csv += `Purchase taxable,${grand.purchase.taxableValue}\n`;
+        csv += `ITC total,${grand.purchase.itcTotal}\n`;
+        csv += `Purchase grand total,${grand.purchase.grandTotal}\n`;
+        csv += `Net tax payable,${grand.netTaxPayable}\n\n`;
+
+        csv += 'GSTR-3B ITC\n';
+        csv += `CGST,${gstr3b.inputTaxCredit.cgst}\n`;
+        csv += `SGST,${gstr3b.inputTaxCredit.sgst}\n`;
+        csv += `IGST,${gstr3b.inputTaxCredit.igst}\n\n`;
+
+        csv += 'HSN summary\n';
+        csv += 'HSN,Qty,Taxable,CGST,SGST,IGST,Tax\n';
+        hsn.rows.forEach(r => {
+            csv += `"${r.hsn}",${r.quantity || ''},${r.taxableValue},${r.cgst},${r.sgst},${r.igst},${r.cgst + r.sgst + r.igst}\n`;
+        });
+
+        csv += '\nHSN line detail (full HSN)\n';
+        csv += 'Invoice,Date,Customer,Item,HSN (full),Qty,Unit,Taxable,CGST,SGST,IGST,Line total\n';
+        hsnLines.lines.forEach(l => {
+            csv += `"${l.invoiceNo}",${l.invoiceDate},"${(l.customerName || '').replace(/"/g, '""')}","${(l.itemName || '').replace(/"/g, '""')}","${String(l.hsnFull).replace(/"/g, '""')}",${l.quantity},"${l.unit}",${l.taxableValue},${l.cgst},${l.sgst},${l.igst},${l.lineTotal}\n`;
+        });
+
+        csv += '\nB2B\n';
+        csv += 'Invoice,Date,Customer,GSTIN,Taxable,Tax,Total\n';
+        gstr1.b2b.forEach(inv => {
+            csv += `"${inv.invoiceNumber}",${inv.invoiceDate},"${(inv.customerName || '').replace(/"/g, '""')}",${inv.gstin},${inv.taxableValue},${inv.cgst + inv.sgst + inv.igst},${inv.total}\n`;
+        });
+
+        this._downloadCSV(csv, `GST_Report_${gstr1.period.replace(/\s+/g, '_')}.csv`);
+    },
+
     // ========================================
     // EXPORT FUNCTIONS
     // ========================================
@@ -808,31 +1343,63 @@ Thank you for your business!
         this._downloadCSV(csv, `GSTR1_${report.period.replace(' ', '_')}.csv`);
     },
 
+    exportHSNWiseSalesToCSV(year, month) {
+        const rep = this.generateHSNWiseSales(year, month);
+        let csv = `HSN-wise Sales - ${rep.period}\n`;
+        csv += 'HSN,Quantity,Taxable Value,CGST,SGST,IGST,Total Tax\n';
+        rep.rows.forEach(r => {
+            csv += `"${String(r.hsn).replace(/"/g, '""')}",${r.quantity || ''},${r.taxableValue},${r.cgst},${r.sgst},${r.igst},${r.cgst + r.sgst + r.igst}\n`;
+        });
+        csv += `"Total",${rep.totals.quantity || ''},${rep.totals.taxableValue},${rep.totals.cgst},${rep.totals.sgst},${rep.totals.igst},${rep.totals.totalTax}\n`;
+        this._downloadCSV(csv, `HSN_Sales_${rep.period.replace(/\s+/g, '_')}.csv`);
+    },
+
+    exportHSNWiseLinesToCSV(year, month) {
+        const { period, lines } = this.generateHSNWiseSalesLines(year, month);
+        let csv = `HSN line detail (full HSN) - ${period}\n`;
+        csv += 'Invoice,Date,Customer,Item,HSN (full),Qty,Unit,Taxable,CGST,SGST,IGST,Line total\n';
+        lines.forEach(l => {
+            csv += `"${l.invoiceNo}",${l.invoiceDate},"${(l.customerName || '').replace(/"/g, '""')}","${(l.itemName || '').replace(/"/g, '""')}","${String(l.hsnFull).replace(/"/g, '""')}",${l.quantity},"${l.unit}",${l.taxableValue},${l.cgst},${l.sgst},${l.igst},${l.lineTotal}\n`;
+        });
+        this._downloadCSV(csv, `HSN_Lines_${period.replace(/\s+/g, '_')}.csv`);
+    },
+
     /**
-     * Export Customer Ledger to CSV
+     * Export ledger to CSV (respects account group + date range options)
      */
-    exportLedgerToCSV(customerId) {
-        const ledger = this.getCustomerLedger(customerId);
+    exportLedgerToCSV(customerId, options = {}) {
+        const ledger = this.getAccountLedger(customerId, options);
         if (!ledger) return;
 
-        let csv = `Customer Ledger - ${ledger.customer.name}\n`;
+        const dr = ledger.dateRange.start || ledger.dateRange.end
+            ? `${ledger.dateRange.start || '…'} to ${ledger.dateRange.end || '…'}`
+            : 'All dates';
+
+        let csv = `${ledger.accountGroup === 'vendor' ? 'Vendor' : 'Customer'} Ledger - ${ledger.customer.name}\n`;
+        csv += `Group: ${ledger.groupLabel}\n`;
+        csv += `Period: ${dr}\n`;
         csv += `Phone: ${ledger.customer.phone || 'N/A'}\n`;
         csv += `GSTIN: ${ledger.customer.gstin || 'N/A'}\n\n`;
 
-        csv += 'Date,Type,Reference,Description,Debit,Credit,Balance\n';
+        if (ledger.dateRange.start) {
+            csv += `Opening Balance,${ledger.summary.openingBalance}\n\n`;
+        }
+
+        csv += 'Date,Type,Reference,Ref No,Description,Debit,Credit,Balance\n';
         ledger.entries.forEach(e => {
-            csv += `${e.date},${e.type},${e.reference},"${e.description}",${e.debit},${e.credit},${e.balance}\n`;
+            csv += `${e.date},${e.type},${e.reference},${e.refNo || ''},"${(e.description || '').replace(/"/g, '""')}",${e.debit},${e.credit},${e.balance}\n`;
         });
 
         csv += `\nTotal Debit,${ledger.summary.totalDebit}\n`;
         csv += `Total Credit,${ledger.summary.totalCredit}\n`;
-        csv += `Balance,${ledger.summary.balance}\n`;
+        csv += `Closing Balance,${ledger.summary.balance}\n`;
 
-        this._downloadCSV(csv, `Ledger_${ledger.customer.name.replace(/\s/g, '_')}.csv`);
+        const safe = ledger.customer.name.replace(/\s/g, '_').replace(/[^\w.-]/g, '');
+        this._downloadCSV(csv, `Ledger_${ledger.accountGroup}_${safe}.csv`);
     },
 
     _downloadCSV(content, filename) {
-        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = filename;

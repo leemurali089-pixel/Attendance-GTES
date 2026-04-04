@@ -80,7 +80,8 @@ const InvoiceManager = {
         const invoice = {
             id: finalId,
             invoiceNo: invoiceData.invoiceNo && invoiceData.invoiceNo !== invoiceData.id ? invoiceData.invoiceNo : finalId, // Preserve custom display numbers if explicitly set, else sync
-            type: normalizedType, 
+            type: normalizedType,
+            billType: normalizedType === 'with-bill' ? 'gst' : 'plain',
             challanId: invoiceData.challanId || null,
             jobCardId: invoiceData.jobCardId || null,
             date: invoiceData.date || new Date().toISOString().split('T')[0],
@@ -167,7 +168,16 @@ const InvoiceManager = {
         if (searchType === 'sales-gst' || searchType === 'gst-invoice') searchType = 'with-bill';
         if (searchType === 'sales-non-gst' || searchType === 'non-gst-invoice') searchType = 'without-bill';
         
-        return invoices.filter(inv => inv.type === searchType);
+        return invoices.filter(inv => inv.type === searchType && !this.isDcStyleSalesInvoice(inv));
+    },
+    
+    /**
+     * Helper to check if a type is GST
+     */
+    isGSTType(type) {
+        if (!type) return true; // Default to GST for safety if unknown
+        const t = (type || '').toString().toLowerCase();
+        return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
     },
 
     /**
@@ -238,30 +248,48 @@ const InvoiceManager = {
     _lastVoucherCount: 0,
 
     /**
+     * Delivery-challan billing documents (DC01, GTES/26-27/DC01, …): show under View DC, not GST invoice table,
+     * but still included in getInvoicesWithBalance() so receipts / pending totals stay correct.
+     */
+    isDcStyleSalesInvoice(inv) {
+        if (!inv) return false;
+        const no = (inv.invoiceNo || inv.id || '').toString().trim();
+        if (/^DC\d+$/i.test(no)) return true;
+        return /\bDC\d+\b/i.test(no);
+    },
+
+    /**
      * NEW: Get invoices with current balance (Calculated via VoucherManager)
      */
     getInvoicesWithBalance() {
         const invoices = this.getAllInvoices();
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
-        // Cache hit check
+        // Cache hit check (Force clear if logic updated)
+        const logicVersion = 7; // Include DC-style rows in balances; hide only from GST table UI
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
-            this._lastVoucherCount === voucherCount) {
+            this._lastVoucherCount === voucherCount &&
+            this._lastLogicVersion === logicVersion) {
             return this._balanceCache;
         }
 
-        if (typeof VoucherManager === 'undefined') return invoices.map(inv => ({ ...inv, balance: inv.total }));
+        this._lastLogicVersion = logicVersion;
 
-        const allocationsMap = VoucherManager.getVoucherAllocationsMap();
+        if (typeof VoucherManager === 'undefined') {
+            return invoices.map(inv => ({ ...inv, balance: parseFloat(inv.total ?? inv.amount ?? 0) || 0 }));
+        }
+
+        const allocationsMap = VoucherManager.getVoucherAllocationsMap(null, 'receipt');
 
         const result = invoices.map(inv => {
-            const balance = VoucherManager.getDocumentBalance(inv.id, inv.total, allocationsMap);
+            const invTotal = parseFloat(inv.total ?? inv.amount ?? 0) || 0;
+            const balance = VoucherManager.getDocumentBalance(inv.id, invTotal, allocationsMap, inv.invoiceNo, inv);
             return {
                 ...inv,
                 balance: balance,
                 isPaid: balance <= 0.05,
-                isPartial: balance > 0.05 && balance < (inv.total - 0.05)
+                isPartial: balance > 0.05 && balance < (invTotal - 0.05)
             };
         });
 

@@ -4,6 +4,15 @@
  */
 
 const DeliveryUI = {
+    /** html2canvas/jsPDF: keep under ~A4 printable width to avoid horizontal clipping */
+    GTES_PDF_DOCUMENT_WIDTH_PX: 760,
+    /** Lower = faster PDFs (scale 2 is ~4× pixels vs 1.25). Slight softness on dense tables. */
+    GTES_HTML2PDF_CANVAS_SCALE: 1.28,
+    /** Ledger multi-page: cap scale for shorter capture time */
+    GTES_LEDGER_HTML2PDF_SCALE: 1.12,
+    /** Invoice / purchase bills: denser DOM than vouchers — use a slightly lower scale */
+    GTES_INVOICE_PURCHASE_HTML2PDF_SCALE: 1.14,
+
     currentEditingChallan: null,
     currentEditingMaterialId: null,
     currentCustomerType: 'Customer',
@@ -1756,9 +1765,6 @@ const DeliveryUI = {
             return;
         }
 
-        // Diagnostic visual marker so we know the function ran
-        container.innerHTML = `<div class="p-3 bg-warning text-dark mb-3">Diagnostic: loadHistory is running...</div>`;
-
         if (container.classList.contains('view-section')) {
             const accId = 'accHistoryContainer_' + Date.now();
             container.innerHTML = `<div class="container-fluid p-4" id="${accId}"></div>`;
@@ -1767,7 +1773,14 @@ const DeliveryUI = {
         }
 
         const challans = DeliveryManager.getAllChallans();
-        const invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
+        const allInvoicesRaw = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
+        const dcInvoicesRaw = (typeof InvoiceManager !== 'undefined')
+            ? allInvoicesRaw.filter(inv => InvoiceManager.isDcStyleSalesInvoice(inv))
+            : [];
+        const invoices = allInvoicesRaw.filter(i => !InvoiceManager.isDcStyleSalesInvoice(i));
+        const deliveryChallans = challans.filter(c => c.type === 'delivery');
+        const linkedDcInvoiceIds = new Set(deliveryChallans.map(c => c.invoiceId).filter(Boolean));
+        const dcInvoicesForHistory = dcInvoicesRaw.filter(inv => !linkedDcInvoiceIds.has(inv.id));
         const jobCards = (typeof JobCardManager !== 'undefined') ? JobCardManager.getAllJobCards() : [];
         const vouchers = (typeof VoucherManager !== 'undefined') ? DataManager.getData('vouchers') || [] : [];
         const customers = CustomerManager.getAllCustomers();
@@ -1796,13 +1809,17 @@ const DeliveryUI = {
 
             data = [
                 ...challans.map(c => ({ ...c, _source: 'challan' })),
+                ...dcInvoicesForHistory.map(i => ({ ...i, _source: 'dc-invoice' })),
                 ...invoices.map(i => ({ ...i, _source: 'invoice' })),
                 ...jobCards.map(jc => ({ ...jc, _source: 'jobcard' })),
                 ...vouchers.map(v => ({ ...v, _source: 'voucher', total: parseFloat(v.amount) })),
                 ...purchases
             ];
         } else if (dataType === 'challan-dc') {
-            data = challans.filter(c => c.type === 'delivery').map(c => ({ ...c, _source: 'challan' }));
+            data = [
+                ...deliveryChallans.map(c => ({ ...c, _source: 'challan' })),
+                ...dcInvoicesForHistory.map(i => ({ ...i, _source: 'dc-invoice' }))
+            ];
         } else if (dataType === 'challan-sc') {
             data = challans.filter(c => c.type === 'service').map(c => ({ ...c, _source: 'challan' }));
         } else if (dataType === 'invoice-gst') {
@@ -1825,16 +1842,31 @@ const DeliveryUI = {
         // 2. Financial Year Helper - Optimized to avoid heavy Date objects if possible
         const getFY = (dateStr) => {
             if (!dateStr) return 'Unknown';
-            // Fast path for ISO strings or YYYY-MM-DD
-            if (typeof dateStr === 'string' && dateStr.length >= 10 && dateStr[4] === '-' && dateStr[7] === '-') {
-                const y = parseInt(dateStr.substring(0, 4));
-                const m = parseInt(dateStr.substring(5, 7));
-                const start = m >= 4 ? y : y - 1; // FY starts in April (m=4)
-                return `${start}-${(start + 1).toString().slice(2)}`;
+            const s = String(dateStr).trim();
+            // YYYY-MM-DD
+            if (s.length >= 10 && s[4] === '-' && s[7] === '-') {
+                const y = parseInt(s.substring(0, 4), 10);
+                const m = parseInt(s.substring(5, 7), 10);
+                if (!isNaN(y) && !isNaN(m)) {
+                    const start = m >= 4 ? y : y - 1;
+                    return `${start}-${(start + 1).toString().slice(2)}`;
+                }
             }
-            const d = new Date(dateStr);
-            const m = d.getMonth() + 1;
-            const y = d.getFullYear();
+            // DD/MM/YYYY or DD-MM-YYYY
+            const dm = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            if (dm) {
+                const d = parseInt(dm[1], 10);
+                const m = parseInt(dm[2], 10);
+                const y = parseInt(dm[3], 10);
+                if (!isNaN(y) && !isNaN(m)) {
+                    const start = m >= 4 ? y : y - 1;
+                    return `${start}-${(start + 1).toString().slice(2)}`;
+                }
+            }
+            const dt = new Date(dateStr);
+            if (isNaN(dt.getTime())) return 'Unknown';
+            const m = dt.getMonth() + 1;
+            const y = dt.getFullYear();
             const start = m >= 4 ? y : y - 1;
             return `${start}-${(start + 1).toString().slice(2)}`;
         };
@@ -1870,7 +1902,7 @@ const DeliveryUI = {
             let matchesStatus = true;
             const statusFilter = this.historyFilters.status;
             if (statusFilter !== 'all') {
-                if (item._source === 'invoice') {
+                if (item._source === 'invoice' || item._source === 'dc-invoice') {
                     matchesStatus = item.status === statusFilter;
                 } else if (item._source === 'challan') {
                     if (statusFilter === 'pending-invoice') matchesStatus = !item.invoiceId;
@@ -1888,9 +1920,12 @@ const DeliveryUI = {
             // Search
             const searchLower = this.historyFilters.search.toLowerCase();
             const custName = customerMap.get(item.customerId) || '';
+            const invNo = (item.invoiceNo || '').toString();
             const matchesSearch = !searchLower ||
                 (item.id && item.id.toLowerCase().includes(searchLower)) ||
+                (invNo.toLowerCase().includes(searchLower)) ||
                 (custName.toLowerCase().includes(searchLower)) ||
+                (item.customerName && item.customerName.toLowerCase().includes(searchLower)) ||
                 (item.customNumber && item.customNumber.toLowerCase().includes(searchLower));
 
             return matchesFY && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
@@ -1908,7 +1943,10 @@ const DeliveryUI = {
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h6 class="mb-0 text-muted">Data Filters</h6>
-                            <div class="d-flex gap-2">
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                <button type="button" class="btn btn-success btn-sm" id="historyCreateDcBtn" onclick="DeliveryUI.showSection('create')" style="display: none;">
+                                    <i class="bi bi-plus-lg me-1"></i> Create DC
+                                </button>
                                 <button class="btn btn-outline-warning btn-sm" onclick="RecycleBinUI.open()" title="Recycle Bin">
                                     <i class="bi bi-trash3 me-1"></i> Recycle Bin
                                 </button>
@@ -2038,6 +2076,8 @@ const DeliveryUI = {
                 }
                 const loadingStatus = document.getElementById('historyLoadingStatus');
                 if (loadingStatus) loadingStatus.classList.add('d-none');
+                const cdcBtn = document.getElementById('historyCreateDcBtn');
+                if (cdcBtn) cdcBtn.style.display = this.historyFilters.dataType === 'challan-dc' ? '' : 'none';
                 return;
             }
 
@@ -2074,6 +2114,21 @@ const DeliveryUI = {
                                 <i class="bi bi-download"></i>
                             </button>
                         `;
+                    } else if (item._source === 'dc-invoice') {
+                        typeBadge = 'bg-primary';
+                        const s = (item.status || 'pending').toUpperCase();
+                        statusHtml = `
+                            <span class="badge ${item.status === 'paid' ? 'bg-success' : 'bg-warning'}">${s}</span>
+                            <br><small class="text-muted">DC (from sales / sync)</small>
+                        `;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-success" onclick="DeliveryUI.viewInvoice('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editInvoice('${item.id}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        `;
                     } else if (item._source === 'invoice') {
                         const invType = (item.type || '').toLowerCase();
                         typeBadge = (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst') ? 'bg-success' : 'bg-secondary';
@@ -2105,6 +2160,14 @@ const DeliveryUI = {
                                 <i class="bi bi-pencil"></i>
                             </button>
                         `;
+                    } else if (item._source === 'purchase') {
+                        typeBadge = 'bg-warning text-dark';
+                        statusHtml = `<span class="badge bg-secondary">${(item.status || 'pending').toUpperCase()}</span>`;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        `;
                     } else if (item._source === 'voucher') {
                         typeBadge = 'bg-light text-dark';
                         const vType = (item.type || 'PAYMENT').toUpperCase();
@@ -2119,15 +2182,17 @@ const DeliveryUI = {
                         `;
                     }
                     
-                    const safeTotal = (parseFloat(item.total) || 0).toFixed(2);
+                    const safeTotal = (parseFloat(item.total ?? item.amount) || 0).toFixed(2);
                     const invType = (item.type || '').toLowerCase();
-                    const safeTypeStr = item._source === 'challan' ? (item.type || '').toUpperCase() : 
-                                      (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') : 
-                                      (item._source || '').toUpperCase());
+                    const safeTypeStr = item._source === 'challan' ? (item.type || '').toUpperCase() :
+                        item._source === 'dc-invoice' ? 'DELIVERY' :
+                            (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') :
+                                (item._source || '').toUpperCase());
+                    const rowId = item._source === 'dc-invoice' ? (item.invoiceNo || item.id) : item.id;
 
                     return `
                         <tr>
-                            <td><span class="fw-bold">${item.id}</span></td>
+                            <td><span class="fw-bold">${rowId}</span></td>
                             <td>${DataManager.formatDateDisplay(item.date || item.createdAt)}</td>
                             <td><span class="badge ${typeBadge}">${safeTypeStr}</span></td>
                             <td>${custName}</td>
@@ -2136,7 +2201,7 @@ const DeliveryUI = {
                             <td class="text-end">
                                 <div class="btn-group">
                                     ${actionHtml}
-                                    <button class="btn btn-sm btn-outline-danger" onclick="DeliveryUI.deleteGenericRecord('${item._source}', '${item.id}')" title="Delete">
+                                    <button class="btn btn-sm btn-outline-danger" onclick="DeliveryUI.deleteGenericRecord('${item._source === 'dc-invoice' ? 'invoice' : item._source}', '${item.id}')" title="Delete">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </div>
@@ -2307,6 +2372,9 @@ const DeliveryUI = {
                                 <button type="button" class="btn btn-outline-light btn-sm border-secondary" onclick="DeliveryUI.toggleModalFullscreen('challanViewModal')" title="Toggle Fullscreen">
                                     <i class="bi bi-fullscreen"></i>
                                 </button>
+                                <button type="button" class="btn btn-outline-info btn-sm" onclick="DeliveryUI.nativePrint()" title="Print">
+                                    <i class="bi bi-printer me-1"></i> Print
+                                </button>
                                 <button type="button" class="btn btn-primary" onclick="DeliveryUI.printChallan('${challan.id}')">
                                     <i class="bi bi-download me-1"></i> Download PDF
                                 </button>
@@ -2322,8 +2390,8 @@ const DeliveryUI = {
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-0">
-                            <div id="challanPrintArea" class="bg-white text-dark mx-auto my-4 shadow-lg p-5" style="max-width: 850px; min-height: 1050px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                        <div class="modal-body gtes-pdf-preview-body p-0 overflow-auto" style="max-height: 90vh;">
+                            <div id="challanPrintArea" class="bg-white text-dark mx-auto shadow-sm p-3 gtes-pdf-preview-sheet" style="max-width: 760px; min-height: 400px; margin: 8px auto 16px !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                                 <!-- Header Section -->
                                 <div class="row mb-5 border-bottom border-dark border-2 pb-3">
                                     <div class="col-7">
@@ -2430,7 +2498,7 @@ const DeliveryUI = {
                                                 <td class="text-center text-muted">${index + 1}</td>
                                                 <td>
                                                     <div class="fw-bold">${item.name || item.description || ''}</div>
-                                                    <div class="extra-small text-muted">${item.itemDescription || ''}</div>
+                                                    <div class="extra-small text-muted">${(item.description || item.itemDescription || '').trim()}</div>
                                                     ${item.materialChanged ? `<div class="extra-small text-danger mt-1 fst-italic"><i class="bi bi-repeat me-1"></i>Replaced: ${item.replacedDescription || 'Replaced'}</div>` : ''}
                                                 </td>
                                                 <td class="text-center font-monospace">${item.quantity}</td>
@@ -2542,41 +2610,30 @@ const DeliveryUI = {
         const subfolder = challan.type === 'service' ? 'Service' : 'Delivery';
         const filename = `${typeLabel}_${challanId}.pdf`;
 
-        const opt = {
-            margin: 0.5,
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-        };
+        const dcScale = this.GTES_INVOICE_PURCHASE_HTML2PDF_SCALE || 1.14;
+        const opt = this.buildGtesHtml2PdfOptions({
+            filename,
+            html2canvas: { scale: dcScale }
+        });
 
-        // Use html2pdf
         if (typeof html2pdf !== 'undefined') {
             App.showNotification('Generating PDF...', 'info');
 
-            // Generate PDF and save automatically
-            const worker = html2pdf().set(opt).from(element);
-
-            if (window.electronAPI && window.electronAPI.savePdf) {
-                // Get PDF as base64 for auto-saving
-                const pdfBase64 = await worker.output('base64');
-                const result = await window.electronAPI.savePdf({
-                    blobBase64: pdfBase64,
-                    filename: filename,
-                    subfolder: subfolder
-                });
-
-                if (result.success) {
-                    App.showNotification(`PDF saved to ChallanOutput/${subfolder}`, 'success');
-                } else {
-                    App.showNotification('Error saving PDF: ' + result.error, 'error');
-                }
+            let host = null;
+            try {
+                const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
+                const w = Math.min(maxW, Math.max(element.scrollWidth || maxW, 400));
+                const { host: h, clone } = this.beginPdfClone(element, w);
+                host = h;
+                await this.waitPdfImages(clone);
+                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                await this.finishPdfDownload(blob, filename, subfolder);
+            } catch (e) {
+                console.error('Challan PDF error:', e);
+                App.showNotification('Error generating PDF', 'error');
+            } finally {
+                this.endPdfClone(host);
             }
-
-            // Open in professional browser viewer instead of direct download
-            worker.output('bloburl').then(url => {
-                window.open(url, '_blank');
-            });
         } else {
             App.showNotification('PDF generation library not loaded', 'error');
         }
@@ -2660,6 +2717,11 @@ const DeliveryUI = {
             return;
         }
         this.historyFilters.dataType = type === 'delivery' ? 'challan-dc' : 'challan-sc';
+        this.historyFilters.fy = 'all';
+        this.historyFilters.status = 'all';
+        this.historyFilters.search = '';
+        const searchInput = document.getElementById('historySearchInput');
+        if (searchInput) searchInput.value = '';
         this.showSection('history');
     },
 
@@ -3547,34 +3609,16 @@ const DeliveryUI = {
         if (!jobCard) return;
 
         const filename = `JobCard_${id}.pdf`;
-        const opt = {
-            margin: [0.3, 0.3, 0.3, 0.3],
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        };
+        const opt = this.buildGtesHtml2PdfOptions({ filename, image: { type: 'jpeg', quality: 0.98 } });
 
         if (typeof html2pdf !== 'undefined') {
-            App.showNotification('Preparing PDF Viewer...', 'info');
-            const worker = html2pdf().set(opt).from(element);
-
-            if (window.electronAPI && window.electronAPI.savePdf) {
-                try {
-                    const pdfBase64 = await worker.output('base64');
-                    await window.electronAPI.savePdf({
-                        blobBase64: pdfBase64,
-                        filename: filename,
-                        subfolder: 'JobCards'
-                    });
-                } catch (e) {
-                    console.error('PDF Save Error:', e);
-                }
+            try {
+                const blob = await html2pdf().set(opt).from(element).output('blob');
+                await this.finishPdfDownload(blob, filename, 'JobCards');
+            } catch (e) {
+                console.error('Job card PDF error:', e);
+                App.showNotification('Error generating PDF', 'error');
             }
-
-            worker.output('bloburl').then(url => {
-                window.open(url, '_blank');
-            });
         } else {
             App.showNotification('PDF generation library not loaded', 'error');
         }
@@ -3770,213 +3814,120 @@ const DeliveryUI = {
         }
     },
 
-    viewInvoice(id) {
+    async viewInvoice(id) {
         const invoice = InvoiceManager.getInvoice(id);
         if (!invoice) {
             App.showNotification('Invoice not found', 'error');
             return;
         }
 
-        const customer = CustomerManager.getCustomer(invoice.customerId);
-        const typeLabel = invoice.type === 'with-bill' ? 'TAX INVOICE' : 'BILL OF SUPPLY';
-        const settings = DataManager.getData('gtes_settings') || {};
-        const companyName = settings.companyName || "Gas Tech Engineering Service";
-        const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
-        const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
-        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
-        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
-        const gstin = settings.gstin || "33AFXPR3235A32F";
-        const pan = settings.pan || "AFXPR3235A";
-        const iec = settings.iec || "AFXPR3235A";
-        const upiId = settings.upiId || 'gastechengservice@okicici';
+        const typeLabel = invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst' ? 'TAX INVOICE' : 'BILL OF SUPPLY';
 
-        const modalHtml = `
-            <div class="modal fade" id="invoicePreviewModal" tabindex="-1">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content bg-dark border-0 shadow-lg">
-                        <div class="modal-header border-0 pb-0">
-                            <div>
-                                <h5 class="modal-title text-white fw-bold"><i class="bi bi-file-earmark-check me-2"></i>${typeLabel} Preview</h5>
-                                <p class="small text-muted mb-0">${invoice.invoiceNo || invoice.id} | ${invoice.customerName}</p>
-                            </div>
-                            <div class="d-flex gap-2 align-items-center">
-                                <button type="button" class="btn btn-outline-light btn-sm border-secondary" onclick="DeliveryUI.toggleModalFullscreen('invoicePreviewModal')" title="Toggle Fullscreen">
-                                    <i class="bi bi-fullscreen"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-info" onclick="DeliveryUI.nativePrint()" title="Print (Faster)">
-                                    <i class="bi bi-printer me-1"></i> Print
-                                </button>
-                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.printInvoice('${invoice.id}')" title="Download PDF (Highest Quality)">
-                                    <i class="bi bi-download me-1"></i> Save PDF
-                                </button>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                            </div>
-                        </div>
-                        <div class="modal-body p-0 bg-secondary-subtle overflow-auto" style="max-height: 90vh;">
-                            <div id="invoicePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 10pt; box-sizing: border-box; border: 1px solid #dee2e6;">
-                                <!-- Company Header -->
-                                <div class="text-center border-bottom pb-3 mb-4">
-                                    <h2 class="fw-bold mb-1">${companyName.toUpperCase()}</h2>
-                                    <p class="mb-0 small">${companyAddress}</p>
-                                    <p class="mb-0 small">Work Address: ${workAddress}</p>
-                                    <p class="mb-0 small">Email: ${email} | Ph: ${phone}</p>
-                                    <p class="mb-0 small fw-bold">GSTIN: ${gstin} | PAN: ${pan} | IEC: ${iec}</p>
-                                </div>
-
-                                <!-- Invoice Title and Details -->
-                                <div class="row mb-4">
-                                    <div class="col-7">
-                                        <h6 class="text-uppercase text-muted small fw-bold mb-2">DETAILS OF RECEIVER (BILLED TO)</h6>
-                                        <h5 class="fw-bold mb-1">${invoice.customerName}</h5>
-                                        <p class="mb-0 small" style="white-space: pre-line;">${customer?.address || invoice.customerAddress || ''}</p>
-                                        ${customer?.phone ? `<p class="mb-0 small mt-1"><strong>Phone:</strong> ${customer.phone}</p>` : ''}
-                                        ${customer?.gstin ? `<p class="mb-0 small"><strong>GSTIN:</strong> ${customer.gstin}</p>` : ''}
-                                    </div>
-                                    <div class="col-5">
-                                        <div class="text-end mb-3">
-                                            <h3 class="fw-bold text-uppercase mb-0">${typeLabel}</h3>
-                                        </div>
-                                        <table class="table table-sm table-borderless mb-0 small" style="font-size: 8.5pt;">
-                                            <tr><td class="text-muted text-end pe-2 py-0">Invoice No:</td><td class="fw-bold py-0">${invoice.invoiceNo || invoice.id}</td></tr>
-                                            <tr><td class="text-muted text-end pe-2 py-0">Date:</td><td class="fw-bold py-0">${DataManager.formatDateDisplay(invoice.date)}</td></tr>
-                                            ${invoice.poNumber ? `<tr><td class="text-muted text-end pe-2 py-0">Customer Ref / DC No:</td><td class="fw-bold py-0">${invoice.poNumber}</td></tr>` : ''}
-                                            ${invoice.dispatchDetails?.via ? `<tr><td class="text-muted text-end pe-2 py-0">Dispatch Via:</td><td class="fw-bold py-0">${invoice.dispatchDetails.via}</td></tr>` : ''}
-                                            ${invoice.dispatchDetails?.lrNo ? `<tr><td class="text-muted text-end pe-2 py-0">LR/Track No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.lrNo}</td></tr>` : ''}
-                                            ${invoice.dispatchDetails?.vehicleNo ? `<tr><td class="text-muted text-end pe-2 py-0">Vehicle No:</td><td class="fw-bold py-0">${invoice.dispatchDetails.vehicleNo}</td></tr>` : ''}
-                                            ${invoice.dispatchDetails?.date ? `<tr><td class="text-muted text-end pe-2 py-0">Disp. Date:</td><td class="fw-bold py-0">${DataManager.formatDateDisplay(invoice.dispatchDetails.date)}</td></tr>` : ''}
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <!-- Items Table -->
-                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%;">
-                                    <thead style="background-color: #eee;" class="text-dark">
-                                        <tr class="text-center align-middle extra-small fw-bold">
-                                            <th style="width: 4%">#</th>
-                                            <th style="width: 28%">DESCRIPTION</th>
-                                            <th style="width: 10%">HSN</th>
-                                            <th style="width: 7%">QTY</th>
-                                            <th style="width: 6%">UNIT</th>
-                                            <th style="width: 9%">RATE</th>
-                                            <th style="width: 4%">DISC</th>
-                                            <th style="width: 6%">CGST%</th>
-                                            <th style="width: 6%">SGST%</th>
-                                            <th style="width: 20%">TOTAL</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${invoice.items.map((item, idx) => {
-                                            const itemGstRate = parseFloat(item.gstRate) || 0;
-                                            const cgstRate = itemGstRate / 2;
-                                            const sgstRate = itemGstRate / 2;
-                                            
-                                            return `
-                                            <tr class="align-middle text-dark">
-                                                <td class="text-center extra-small">${idx + 1}</td>
-                                                <td>
-                                                    <div class="fw-bold extra-small">${item.name || item.description || ''}</div>
-                                                </td>
-                                                <td class="text-center extra-small">${item.hsn || '-'}</td>
-                                                <td class="text-center extra-small">${item.quantity}</td>
-                                                <td class="text-center extra-small">${item.unit || 'nos'}</td>
-                                                <td class="text-end extra-small">${item.rate.toFixed(2)}</td>
-                                                <td class="text-center extra-small">${item.discount || 0}%</td>
-                                                <td class="text-center extra-small">${cgstRate.toFixed(1)}%</td>
-                                                <td class="text-center extra-small">${sgstRate.toFixed(1)}%</td>
-                                                <td class="text-end fw-bold extra-small">${item.amount.toFixed(2)}</td>
-                                            </tr>
-                                            `;
-                                        }).join('')}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr class="align-middle text-dark">
-                                            <td colspan="9" class="text-end fw-bold extra-small py-2" style="border: 1px solid #000;">Subtotal:</td>
-                                            <td class="text-end fw-bold extra-small py-2" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.subtotal.toFixed(2)}</td>
-                                        </tr>
-                                        ${invoice.gst && invoice.gst.cgst > 0 ? `
-                                        <tr class="align-middle text-dark">
-                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">CGST Amt:</td>
-                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.gst.cgst.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                        ${invoice.gst && invoice.gst.sgst > 0 ? `
-                                        <tr class="align-middle text-dark">
-                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">SGST Amt:</td>
-                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">₹${invoice.gst.sgst.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                        ${invoice.roundOff ? `
-                                        <tr class="align-middle text-dark">
-                                            <td colspan="9" class="text-end py-1 extra-small" style="border: 1px solid #000;">Round Off:</td>
-                                            <td class="text-end py-1 extra-small" style="border: 1px solid #000; padding-right: 5px;">${invoice.roundOff > 0 ? '+' : ''}${invoice.roundOff.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                         <tr style="background-color: #f8f9fa !important;">
-                                             <td colspan="9" class="text-end text-uppercase py-3 extra-small fw-bold" style="color: #000 !important; border: 2px solid #000;">Total Amount</td>
-                                             <td class="text-end py-3 extra-small fs-6 fw-bold" style="color: #000 !important; border: 2px solid #000; padding-right: 5px !important;">₹${invoice.total.toFixed(2)}</td>
-                                         </tr>
-                                    </tfoot>
-                                </table>
-
-                                <!-- Footer -->
-                                <div class="row mt-4">
-                                    <div class="col-8">
-                                        <h6 class="fw-bold small mb-2">Terms & Conditions:</h6>
-                                        <p class="extra-small text-muted mb-1">1. Goods once sold will not be taken back.</p>
-                                        <p class="extra-small text-muted mb-3">2. Subject to Chennai Jurisdiction.</p>
-
-                                        ${invoice.narration ? `
-                                        <div class="mb-3 p-2 border rounded bg-light" style="font-size: 8.5pt;">
-                                            <span class="text-muted text-uppercase fw-bold extra-small d-block mb-1">Narration:</span>
-                                            <div class="text-dark">${invoice.narration}</div>
-                                        </div>
-                                        ` : ''}
-                                        
-                                        <div class="d-flex align-items-center border rounded p-2 bg-light" style="width: fit-content;">
-                                            <div class="bg-white p-1 border me-3">
-                                                <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(companyName)}&am=${invoice.total}&cu=INR`)}" 
-                                                    alt="UPI QR" style="width: 80px; height: 80px;">
-                                            </div>
-                                            <div>
-                                                <h6 class="fw-bold extra-small mb-1 uppercase"><i class="bi bi-qr-code-scan me-1"></i>Pay via UPI</h6>
-                                                <p class="extra-small mb-0 fw-bold text-dark">${upiId}</p>
-                                                <p class="extra-small mb-0 text-muted">Scan to pay directly</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-4 text-center mt-auto">
-                                        <div class="mb-4 text-muted small">For ${companyName}</div>
-                                        <div class="border-bottom border-dark mb-2 mx-auto" style="width: 150px; height: 40px;"></div>
-                                        <p class="small fw-bold">Authorized Signatory</p>
-                                    </div>
-                                </div>
-
-                                <div class="mt-4 text-center text-muted border-top pt-3">
-                                    <small>This is a computer generated invoice and does not require a physical signature.</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Remove old modal if exists
-        const oldModal = document.getElementById('invoicePreviewModal');
-        if (oldModal) {
-            const inst = bootstrap.Modal.getInstance(oldModal);
-            if (inst) inst.hide();
-            oldModal.remove();
+        if (typeof InvoicesUI === 'undefined' || !InvoicesUI.getInvoiceElement) {
+            App.showNotification('Invoice preview unavailable', 'error');
+            return;
         }
 
-        // Insert modal HTML into DOM
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        let el;
+        try {
+            el = await InvoicesUI.getInvoiceElement(id);
+        } catch (e) {
+            console.error(e);
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
+        if (!el) {
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
 
-        // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('invoicePreviewModal'));
-        modal.show();
+        this.mountPdfPreview(el, {
+            title: `${typeLabel} — ${invoice.invoiceNo || invoice.id} | ${invoice.customerName || ''}`,
+            kind: 'invoice',
+            id,
+            onDownload: () => this.downloadInvoicePdf(id)
+        });
     },
 
+    mountPdfPreview(previewEl, { title, kind, id, onDownload }) {
+        const container = document.getElementById('pdfPreviewContainer');
+        const titleEl = document.getElementById('pdfPreviewTitle');
+        const dl = document.getElementById('pdfDownloadBtn');
+        const pr = document.getElementById('pdfPrintBtn');
+        if (!container || !titleEl || !dl || !pr) {
+            App.showNotification('PDF preview UI missing', 'error');
+            return;
+        }
+        container.innerHTML = '';
+        container.dataset.gtesPreviewKind = kind;
+        container.dataset.gtesPreviewId = String(id);
+        previewEl.style.margin = '0 auto';
+        previewEl.style.boxShadow = 'none';
+        container.appendChild(previewEl);
+        titleEl.textContent = title;
+        dl.disabled = false;
+        dl.innerHTML = '<i class="bi bi-download me-1"></i> Download PDF';
+        dl.onclick = () => {
+            if (typeof onDownload === 'function') void onDownload();
+        };
+        pr.onclick = () => this.nativePrint();
+        const modalEl = document.getElementById('pdfPreviewModal');
+        if (modalEl) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+    },
+
+    async getPdfCloneSource(kind, id, asyncFactory) {
+        const c = document.getElementById('pdfPreviewContainer');
+        if (c && c.dataset.gtesPreviewKind === kind && c.dataset.gtesPreviewId === String(id)) {
+            const root = c.querySelector('.gtes-pdf-document');
+            if (root) return root;
+        }
+        return typeof asyncFactory === 'function' ? await asyncFactory() : null;
+    },
+
+    blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onloadend = () => {
+                const s = r.result;
+                if (typeof s !== 'string') {
+                    reject(new Error('readAsDataURL failed'));
+                    return;
+                }
+                const i = s.indexOf(',');
+                resolve(i >= 0 ? s.slice(i + 1) : s);
+            };
+            r.onerror = () => reject(r.error || new Error('FileReader error'));
+            r.readAsDataURL(blob);
+        });
+    },
+
+    async finishPdfDownload(blob, filename, subfolder) {
+        if (!blob) return;
+        try {
+            if (window.electronAPI && window.electronAPI.savePdf) {
+                const blobBase64 = await this.blobToBase64(blob);
+                await window.electronAPI.savePdf({
+                    blobBase64,
+                    filename,
+                    subfolder: subfolder || 'Documents'
+                });
+            }
+        } catch (e) {
+            console.error('Electron PDF save:', e);
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+        App.showNotification('PDF downloaded', 'success');
+    },
 
     nativePrint() {
         window.focus();
@@ -3985,506 +3936,317 @@ const DeliveryUI = {
         }, 500);
     },
 
+    /** Shared html2pdf options: A4, margins, multi-page via css/legacy pagebreak */
+    buildGtesHtml2PdfOptions(extra = {}) {
+        const scale = this.GTES_HTML2PDF_CANVAS_SCALE || 1.28;
+        const baseHtml2 = {
+            scale,
+            useCORS: true,
+            allowTaint: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            scrollX: 0,
+            scrollY: 0
+        };
+        const mergedH2c = { ...baseHtml2, ...(extra.html2canvas || {}) };
+        const { html2canvas: _drop, ...restExtra } = extra;
+        return {
+            margin: [0.2, 0.2, 0.2, 0.2],
+            image: { type: 'jpeg', quality: 0.9 },
+            html2canvas: mergedH2c,
+            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] },
+            ...restExtra
+        };
+    },
+
+    /**
+     * Clone PDF DOM off-screen at a fixed width so html2canvas does not measure a clipped
+     * column width inside scrollable modals (fixes ~75% horizontal cut-off in saved PDFs).
+     */
+    beginPdfClone(pdfRoot, fixedWidthPx) {
+        const defW = this.GTES_PDF_DOCUMENT_WIDTH_PX || 760;
+        const px = Math.max(400, Number(fixedWidthPx) || defW);
+        const w = `${px}px`;
+        const host = document.createElement('div');
+        host.setAttribute('data-gtes-pdf-capture-host', '1');
+        host.style.cssText = `position:fixed;left:-12000px;top:0;width:${px + 4}px;max-width:${px + 4}px;margin:0;padding:0;background:#ffffff;overflow:visible;z-index:0;`;
+        const clone = pdfRoot.cloneNode(true);
+        clone.style.width = w;
+        clone.style.minWidth = w;
+        clone.style.maxWidth = w;
+        clone.style.margin = '0';
+        clone.style.boxSizing = 'border-box';
+        clone.style.position = 'relative';
+        clone.style.transform = 'none';
+        clone.style.left = 'auto';
+        clone.style.top = 'auto';
+        host.appendChild(clone);
+        document.body.appendChild(host);
+        void clone.offsetWidth;
+        return { host, clone };
+    },
+
+    endPdfClone(host) {
+        if (host && host.parentNode) {
+            host.parentNode.removeChild(host);
+        }
+    },
+
+    async waitPdfImages(root) {
+        if (!root) return;
+        const imgs = root.querySelectorAll('img');
+        await Promise.all(Array.from(imgs).map((img) => new Promise((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+                resolve();
+                return;
+            }
+            const done = () => resolve();
+            const t = setTimeout(done, 2800);
+            img.onload = () => { clearTimeout(t); done(); };
+            img.onerror = () => { clearTimeout(t); done(); };
+        })));
+    },
+
     async printInvoice(id) {
-        let element = document.getElementById('invoicePrintArea');
-        if (!element) {
-            this.viewInvoice(id);
-            await new Promise(r => setTimeout(r, 200));
-            element = document.getElementById('invoicePrintArea');
-        }
+        return this.downloadInvoicePdf(id);
+    },
 
-        if (!element) {
-            App.showNotification('Invoice print area not found', 'error');
-            return;
-        }
-
+    async downloadInvoicePdf(id) {
         const invoice = InvoiceManager.getInvoice(id);
         if (!invoice) return;
 
         const filename = `Invoice_${id}.pdf`;
-        const opt = {
-            margin: [0.3, 0.3, 0.3, 0.3],
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.90 },
-            html2canvas: { scale: 1.0, useCORS: true, logging: false },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        };
+        const invScale = this.GTES_INVOICE_PURCHASE_HTML2PDF_SCALE || 1.14;
+        const opt = this.buildGtesHtml2PdfOptions({
+            filename,
+            html2canvas: { scale: invScale }
+        });
 
-        if (typeof html2pdf !== 'undefined') {
-            const btn = document.querySelector('#invoicePreviewModal .btn-primary, #voucherPreviewModal .btn-primary');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
-
-            App.showNotification('Generating PDF...', 'info');
-            
-            try {
-                const worker = html2pdf().set(opt).from(element);
-
-                if (window.electronAPI && window.electronAPI.savePdf) {
-                    const pdfBase64 = await worker.output('base64');
-                    await window.electronAPI.savePdf({
-                        blobBase64: pdfBase64,
-                        filename: filename,
-                        subfolder: 'Invoices'
-                    });
-                }
-
-                // Open in professional browser viewer
-                const blob = await worker.output('blob');
-                const url = URL.createObjectURL(blob);
-                window.open(url, '_blank');
-                
-            } catch (e) {
-                console.error('PDF Generation Error:', e);
-                App.showNotification('Error generating PDF', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
-        } else {
+        if (typeof html2pdf === 'undefined') {
             window.print();
+            return;
+        }
+
+        const btn = document.getElementById('pdfDownloadBtn');
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
+        }
+
+        try {
+            const sourceRoot = await this.getPdfCloneSource('invoice', id, () =>
+                (typeof InvoicesUI !== 'undefined' && InvoicesUI.getInvoiceElement ? InvoicesUI.getInvoiceElement(id) : null));
+            if (!sourceRoot) {
+                App.showNotification('Invoice document not found', 'error');
+                return;
+            }
+
+            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
+            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
+            const { host, clone } = this.beginPdfClone(sourceRoot, w);
+            try {
+                await this.waitPdfImages(clone);
+                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                await this.finishPdfDownload(blob, filename, 'Invoices');
+            } finally {
+                this.endPdfClone(host);
+            }
+        } catch (e) {
+            console.error('PDF Generation Error:', e);
+            App.showNotification('Error generating PDF', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml || '<i class="bi bi-download me-1"></i> Download PDF';
+            }
         }
     },
 
     /**
-     * View Professional Voucher Details
+     * View voucher (shared pdfPreviewModal with invoices / purchases)
      */
-    viewVoucher(id) {
+    async viewVoucher(id) {
         const voucher = VoucherManager.getVoucher(id);
         if (!voucher) {
             App.showNotification('Voucher not found', 'error');
             return;
         }
-
-        const customer = CustomerManager.getCustomer(voucher.customerId);
-        const settings = DataManager.getData('gtes_settings') || {};
-        const companyName = settings.companyName || "Gas Tech Engineering Service";
-        const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
-        const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
-        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
-        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
-        const gstin = settings.gstin || "33AFXPR3235A32F";
-        const pan = settings.pan || "AFXPR3235A";
-
+        if (typeof VouchersUI === 'undefined' || !VouchersUI.getVoucherElement) {
+            App.showNotification('Voucher preview unavailable', 'error');
+            return;
+        }
+        let el;
+        try {
+            el = await VouchersUI.getVoucherElement(id);
+        } catch (e) {
+            console.error(e);
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
+        if (!el) {
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
         const isReceipt = voucher.type === 'receipt';
         const title = isReceipt ? 'Receipt' : 'Payment';
-
-        const modalHtml = `
-            <div class="modal fade" id="voucherPreviewModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content bg-dark border-0 shadow-lg text-white">
-                        <div class="modal-header border-0 pb-0">
-                            <div>
-                                <h5 class="modal-title text-white fw-bold"><i class="bi bi-wallet2 me-2"></i>VOUCHER PREVIEW</h5>
-                                <p class="small text-muted mb-0">${voucher.id} | ${voucher.customerName}</p>
-                            </div>
-                            <div class="ms-auto d-flex gap-2 align-items-center">
-                                <button class="btn btn-primary" onclick="DeliveryUI.printVoucher('${voucher.id}')">
-                                    <i class="bi bi-download me-1"></i> Download PDF
-                                </button>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                            </div>
-                        </div>
-                        <div class="modal-body p-4 bg-dark">
-                            <div class="bg-white text-dark p-4 shadow-lg mx-auto" id="voucherPrintArea" style="max-width: 800px; min-height: 600px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-                                <!-- Company Header -->
-                                <div class="text-center mb-4 pb-3 border-bottom border-dark">
-                                    <h3 class="fw-bold text-uppercase mb-1">${companyName}</h3>
-                                    <p class="mb-0 small">${companyAddress}</p>
-                                    <p class="mb-0 small">
-                                        ${settings.email ? `Email: ${settings.email} | ` : ''}
-                                        ${settings.phone ? `Phone: ${settings.phone} | ` : ''}
-                                        ${settings.gstin ? `GSTIN: ${settings.gstin}` : ''}
-                                    </p>
-                                </div>
-
-                                <!-- Voucher Info Row -->
-                                <div class="row mb-5">
-                                    <div class="col-7">
-                                        <h6 class="fw-bold border-bottom border-dark pb-1 text-muted small text-uppercase" style="width: fit-content;">${isReceipt ? 'Received From' : 'Paid To'}:</h6>
-                                        <h5 class="fw-bold mb-1">${voucher.customerName}</h5>
-                                        <p class="mb-0 small text-muted" style="white-space: pre-line;">${customer?.address || voucher.customerAddress || ''}</p>
-                                        ${customer?.gstin ? `<p class="mb-0 small"><strong>GSTIN:</strong> ${customer.gstin}</p>` : ''}
-                                    </div>
-                                    <div class="col-5 text-end">
-                                        <h2 class="fw-bold text-uppercase mb-1" style="letter-spacing: 2px;">${title}</h2>
-                                        <p class="mb-0 small"><strong>Voucher No:</strong> ${voucher.id}</p>
-                                        <p class="mb-0 small"><strong>Date:</strong> ${DataManager.formatDateDisplay(voucher.date)}</p>
-                                    </div>
-                                </div>
-
-                                <div class="mb-5 p-3 bg-light border border-dark rounded">
-                                    <p class="mb-0 fs-5">
-                                        ${isReceipt ? 'Received with thanks from' : 'Paid amount to'} 
-                                        <strong>${voucher.customerName}</strong> 
-                                        the sum of 
-                                        <span class="fw-bold fs-4 ms-2">₹${voucher.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                    </p>
-                                </div>
-
-                                <!-- Detail Table -->
-                                <table class="table table-bordered border-dark table-sm mb-5 text-dark">
-                                    <thead style="background-color: #f8f9fa;" class="text-dark">
-                                        <tr class="small text-uppercase fw-bold">
-                                            <th style="width: 40%;">Description / Reference</th>
-                                            <th style="width: 20%;">Date</th>
-                                            <th style="width: 20%;">Mode</th>
-                                            <th class="text-end" style="width: 20%;">Amount</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td class="py-3">${voucher.remarks || voucher.referenceId || 'General Account Payment'}</td>
-                                            <td class="py-3">${DataManager.formatDateDisplay(voucher.date)}</td>
-                                            <td class="text-center py-3">${(voucher.paymentMode || voucher.mode || 'Cash').toUpperCase()}</td>
-                                            <td class="text-end fw-bold py-3">₹${voucher.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                        </tr>
-                                        <tr class="fw-bold">
-                                            <td colspan="3" class="text-end text-uppercase small py-2">Total Amount (${title})</td>
-                                            <td class="text-end bg-light border-top border-dark border-double py-2">₹${voucher.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-
-                                <div class="row mt-5 pt-5">
-                                    <div class="col-4">
-                                        <div class="mt-4 pt-2 border-top border-dark text-center small">Receiver's Signature</div>
-                                    </div>
-                                    <div class="col-4 offset-4 text-center">
-                                        <div class="small mb-5">For <strong>${companyName}</strong></div>
-                                        <div class="mt-5 pt-2 border-top border-dark small fw-bold">Authorized Signatory</div>
-                                    </div>
-                                </div>
-
-                                <div class="mt-5 text-center text-muted small border-top pt-3">
-                                    This is a computer generated voucher and does not require a physical signature.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Remove old modal if exists
-        const oldModal = document.getElementById('voucherPreviewModal');
-        if (oldModal) {
-            const inst = bootstrap.Modal.getInstance(oldModal);
-            if (inst) inst.hide();
-            oldModal.remove();
-        }
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-        const modal = new bootstrap.Modal(document.getElementById('voucherPreviewModal'));
-        modal.show();
+        this.mountPdfPreview(el, {
+            title: `Voucher Preview — ${title} | ${voucher.id} | ${voucher.customerName || ''}`,
+            kind: 'voucher',
+            id,
+            onDownload: () => this.downloadVoucherPdf(id)
+        });
     },
 
     /**
-     * Print professional voucher to PDF
+     * Print / download voucher PDF (single html2pdf pass + file download)
      */
     async printVoucher(id) {
-        let element = document.getElementById('voucherPrintArea');
-        if (!element) {
-            this.viewVoucher(id);
-            await new Promise(r => setTimeout(r, 200));
-            element = document.getElementById('voucherPrintArea');
-        }
+        return this.downloadVoucherPdf(id);
+    },
 
-        if (!element) {
-            App.showNotification('Voucher print area not found', 'error');
-            return;
-        }
-
+    async downloadVoucherPdf(id) {
         const voucher = VoucherManager.getVoucher(id);
         if (!voucher) return;
 
         const filename = `${voucher.type === 'receipt' ? 'Receipt' : 'Payment'}_${id}.pdf`;
-        const opt = {
-            margin: [0.5, 0.5, 0.5, 0.5],
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        };
+        const opt = this.buildGtesHtml2PdfOptions({
+            filename,
+            margin: [0.35, 0.35, 0.35, 0.35]
+        });
 
-        if (typeof html2pdf !== 'undefined') {
-            App.showNotification('Preparing PDF Viewer...', 'info');
-            const worker = html2pdf().set(opt).from(element);
+        if (typeof html2pdf === 'undefined') {
+            window.print();
+            return;
+        }
 
-            if (window.electronAPI && window.electronAPI.savePdf) {
-                try {
-                    const pdfBase64 = await worker.output('base64');
-                    await window.electronAPI.savePdf({
-                        blobBase64: pdfBase64,
-                        filename: filename,
-                        subfolder: 'Vouchers'
-                    });
-                } catch (e) {
-                    console.error('PDF Save Error:', e);
-                }
+        const btn = document.getElementById('pdfDownloadBtn');
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
+        }
+
+        try {
+            const sourceRoot = await this.getPdfCloneSource('voucher', id, () =>
+                (typeof VouchersUI !== 'undefined' && VouchersUI.getVoucherElement ? VouchersUI.getVoucherElement(id) : null));
+            if (!sourceRoot) {
+                App.showNotification('Voucher document not found', 'error');
+                return;
             }
 
-            // Open in professional browser viewer
-            worker.output('bloburl').then(url => {
-                window.open(url, '_blank');
-            });
-        } else {
-            window.print();
+            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
+            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
+            const { host, clone } = this.beginPdfClone(sourceRoot, w);
+            try {
+                await this.waitPdfImages(clone);
+                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                await this.finishPdfDownload(blob, filename, 'Vouchers');
+            } finally {
+                this.endPdfClone(host);
+            }
+        } catch (e) {
+            console.error('PDF Generation Error:', e);
+            App.showNotification('Error generating PDF', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml || '<i class="bi bi-download me-1"></i> Download PDF';
+            }
         }
     },
 
-    viewPurchaseDetails(id) {
+    async viewPurchaseDetails(id) {
         const expense = ExpenseManager.getAllExpenses().find(e => e.id === id);
         if (!expense) {
             App.showNotification('Purchase record not found', 'error');
             return;
         }
 
-        const settings = DataManager.getData('gtes_settings') || {};
-        const companyName = settings.companyName || "Gas Tech Engineering Service";
-        const companyAddress = settings.registeredAddress || "No.232/233, Nageshwara Road, Athipet, Chennai-58";
-        const workAddress = settings.workAddress || "236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai - 600058";
-        const email = settings.email || "gastechengservice@gmail.com, rajmohan67raj@gmail.com";
-        const phone = settings.phone || "+91 9600015839, +91 95662 02856";
-        const gstin = settings.gstin || "33AFXPR3235A32F";
-        const pan = settings.pan || "AFXPR3235A";
-        const iec = settings.iec || "AFXPR3235A";
-
-        const modalHtml = `
-            <div class="modal fade" id="purchaseViewModal" tabindex="-1">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content bg-dark">
-                        <div class="modal-header border-0">
-                            <h5 class="modal-title text-white">Purchase Bill Preview</h5>
-                            <div class="d-flex gap-2">
-                                <button type="button" class="btn btn-outline-info" onclick="DeliveryUI.nativePrint()">
-                                    <i class="bi bi-printer"></i> Print
-                                </button>
-                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.printPurchase('${expense.id}')">
-                                    <i class="bi bi-download"></i> Save PDF
-                                </button>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                            </div>
-                        </div>
-                        <div class="modal-body p-0 bg-secondary-subtle overflow-auto" style="max-height: 90vh;">
-                            <div id="purchasePrintArea" class="bg-white text-dark p-4 mx-auto my-5 shadow-lg" style="width: 720px; font-size: 9pt; box-sizing: border-box; border: 1px solid #dee2e6; color: #000 !important; background-color: #fff !important;">
-                                <!-- Company Header -->
-                                <div class="text-center border-bottom pb-3 mb-4" style="color: #000 !important;">
-                                    <h2 class="fw-bold mb-1" style="color: #000 !important;">${companyName.toUpperCase()}</h2>
-                                    <p class="mb-0 small" style="color: #000 !important;">No.232/233, Nageshwara Road, Athipet, Chennai - 600058</p>
-                                    <p class="mb-0 small" style="color: #000 !important;">Work Address: ${workAddress}</p>
-                                    <p class="mb-0 small fw-bold" style="color: #000 !important;">GSTIN: ${gstin} | PAN: ${pan} | IEC: ${iec}</p>
-                                </div>
-
-                                <!-- Purchase Title -->
-                                <h3 class="text-center fw-bold text-uppercase mb-4" style="color: #000 !important;">PURCHASE</h3>
-
-                                <!-- Bill Details -->
-                                <div class="row mb-4" style="color: #000 !important;">
-                                    <div class="col-7">
-                                        <h6 class="text-uppercase text-muted small fw-bold mb-2" style="color: #6c757d !important;">BILL FROM:</h6>
-                                        <h5 class="fw-bold mb-1" style="color: #000 !important;">${expense.vendorName || (expense.description ? expense.description.split(':')[0] : 'Unknown Vendor')}</h5>
-                                        ${expense.vendorAddress ? `<p class="mb-0 small" style="color: #000 !important;">${expense.vendorAddress}</p>` : ''}
-                                        ${expense.supplierInvoiceNo ? `<p class="mb-0 small mt-2" style="color: #000 !important;"><strong>Supplier Invoice No:</strong> ${expense.supplierInvoiceNo}</p>` : ''}
-                                        ${expense.vendorGSTIN ? `<p class="mb-0 small" style="color: #000 !important;"><strong>GSTIN:</strong> ${expense.vendorGSTIN}</p>` : ''}
-                                    </div>
-                                    <div class="col-5 text-end">
-                                        <table class="table table-sm table-borderless mb-0 w-auto ms-auto" style="color: #000 !important;">
-                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Purchase No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.id}</td></tr>
-                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Date:</td><td class="fw-bold py-1" style="color: #000 !important;">${DataManager.formatDateDisplay(expense.date)}</td></tr>
-                                            <tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Status:</td><td class="fw-bold py-1" style="color: #000 !important;"><span class="badge bg-${expense.status === 'Paid' ? 'success' : 'warning'}">${expense.status || 'Pending'}</span></td></tr>
-                                            ${expense.supplierInvoiceNo ? `<tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Supplier Invoice No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.supplierInvoiceNo}</td></tr>` : ''}
-                                            ${expense.poNumber ? `<tr><td class="text-muted pe-3 py-1" style="color: #6c757d !important;">Ref No / DC No:</td><td class="fw-bold py-1" style="color: #000 !important;">${expense.poNumber}</td></tr>` : ''}
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <!-- Items Table -->
-                                <table class="table table-bordered border-dark mb-4 text-dark" style="table-layout: fixed; width: 100%; color: #000 !important; background-color: #fff !important;">
-                                    <thead style="background-color: #eee !important;" class="text-dark">
-                                        <tr class="text-center align-middle extra-small fw-bold" style="color: #000 !important; background-color: #eee !important; font-size: 8pt !important;">
-                                            <th style="width: 4%; color: #000 !important; background-color: #eee !important;">#</th>
-                                            <th style="width: 25%; color: #000 !important; background-color: #eee !important;">DESCRIPTION</th>
-                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">HSN</th>
-                                            <th style="width: 7%; color: #000 !important; background-color: #eee !important;">QTY</th>
-                                            <th style="width: 7%; color: #000 !important; background-color: #eee !important;">UNIT</th>
-                                            <th style="width: 12%; color: #000 !important; background-color: #eee !important;">RATE</th>
-                                            <th style="width: 8%; color: #000 !important; background-color: #eee !important;">DISC</th>
-                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">CGST%</th>
-                                            <th style="width: 9%; color: #000 !important; background-color: #eee !important;">SGST%</th>
-                                            <th style="width: 10%; color: #000 !important; background-color: #eee !important;">TOTAL</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${(expense.items && expense.items.length > 0) ? expense.items.map((it, idx) => {
-                                            const itGstRate = parseFloat(it.gstRate) || 0;
-                                            const cRate = itGstRate / 2;
-                                            const sRate = itGstRate / 2;
-                                            const cAmt = (it.amount * cRate / 100);
-                                            const sAmt = (it.amount * sRate / 100);
-                                            
-                                            return `
-                                            <tr class="align-middle text-dark" style="color: #000 !important; background-color: #fff !important; font-size: 8pt !important;">
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${idx + 1}</td>
-                                                <td style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">
-                                                    <div class="fw-bold" style="color: #000 !important;">${it.name || it.description}</div>
-                                                </td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${it.hsn || '-'}</td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${it.quantity || 1}</td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">nos</td>
-                                                <td class="text-end" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${(it.rate || 0).toFixed(2)}</td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">0%</td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${cRate.toFixed(1)}%</td>
-                                                <td class="text-center" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${sRate.toFixed(1)}%</td>
-                                                <td class="text-end fw-bold" style="color: #000 !important; background-color: #fff !important; border: 1px solid #000 !important; padding: 4px !important;">${(it.amount || 0).toFixed(2)}</td>
-                                            </tr>
-                                            `;
-                                        }).join('') : `
-                                            <tr class="align-middle text-dark" style="color: #000 !important; background-color: #fff !important; font-size: 8pt !important;">
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">1</td>
-                                                <td style="color: #000 !important; border: 1px solid #000 !important;">
-                                                    <div class="fw-bold" style="color: #000 !important;">${expense.description}</div>
-                                                </td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">-</td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">1</td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">unit</td>
-                                                <td class="text-end" style="color: #000 !important; border: 1px solid #000 !important;">${(expense.amount || 0).toFixed(2)}</td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
-                                                <td class="text-center" style="color: #000 !important; border: 1px solid #000 !important;">0%</td>
-                                                <td class="text-end fw-bold" style="color: #000 !important; border: 1px solid #000 !important;">${(expense.amount || 0).toFixed(2)}</td>
-                                            </tr>
-                                        `}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr style="color: #000 !important;">
-                                            <td colspan="9" class="text-end border-0 pt-3 fw-bold small" style="color: #000 !important;">Subtotal:</td>
-                                            <td class="text-end border-0 pt-3 fw-bold small" style="color: #000 !important;">₹${(expense.subtotal || expense.amount || 0).toFixed(2)}</td>
-                                        </tr>
-                                        ${(expense.cgst && expense.cgst > 0) ? `
-                                        <tr style="color: #000 !important;">
-                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">CGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.cgst.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                        ${(expense.sgst && expense.sgst > 0) ? `
-                                        <tr style="color: #000 !important;">
-                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">SGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.sgst.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                        ${(expense.igst && expense.igst > 0) ? `
-                                        <tr style="color: #000 !important;">
-                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">IGST Amt:</td>
-                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${expense.igst.toFixed(2)}</td>
-                                        </tr>
-                                        ` : ''}
-                                        <tr style="color: #000 !important;">
-                                            <td colspan="9" class="text-end border-0 py-1 small" style="color: #000 !important;">Total Tax:</td>
-                                            <td class="text-end border-0 py-1 small" style="color: #000 !important;">₹${((expense.cgst || 0) + (expense.sgst || 0) + (expense.igst || 0)).toFixed(2)}</td>
-                                        </tr>
-                                         <tr style="border: 2px solid #000; background-color: #f8f9fa !important; color: #000 !important;">
-                                              <td colspan="9" class="text-end text-uppercase py-3 fw-bold" style="color: #000 !important; background-color: #f8f9fa !important;">Total Amount</td>
-                                              <td class="text-end py-3 fs-6 fw-bold" style="color: #000 !important; background-color: #f8f9fa !important; padding-right: 15px !important;">₹${(expense.amount || 0).toFixed(2)}</td>
-                                         </tr>
-                                    </tfoot>
-                                </table>
-
-                                <!-- Footer -->
-                                <div class="row mt-4">
-                                    <div class="col-8">
-                                        <p class="small text-muted mb-1">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</p>
-                                    </div>
-                                    <div class="col-4 text-center mt-auto">
-                                        <div class="mb-4 text-muted small">For ${companyName}</div>
-                                        <div class="border-bottom border-dark mb-2 mx-auto" style="width: 150px; height: 40px;"></div>
-                                        <p class="small fw-bold">Authorized Signatory</p>
-                                    </div>
-                                </div>
-
-                                <div class="mt-4 text-center text-muted border-top pt-3">
-                                    <small>This is a computer generated invoice and does not require a physical signature.</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Remove old modal if exists
-        const oldModal = document.getElementById('purchaseViewModal');
-        if (oldModal) {
-            const inst = bootstrap.Modal.getInstance(oldModal);
-            if (inst) inst.hide();
-            oldModal.remove();
+        if (typeof InvoicesUI === 'undefined' || !InvoicesUI.getPurchaseElement) {
+            App.showNotification('Purchase preview unavailable', 'error');
+            return;
         }
 
-        // Insert modal HTML into DOM
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        let el;
+        try {
+            el = await InvoicesUI.getPurchaseElement(id);
+        } catch (e) {
+            console.error(e);
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
+        if (!el) {
+            App.showNotification('Preview failed', 'error');
+            return;
+        }
 
-        // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('purchaseViewModal'));
-        modal.show();
+        const vendor = expense.vendor || expense.vendorName || 'Purchase';
+        this.mountPdfPreview(el, {
+            title: `Purchase Bill — ${expense.id} | ${vendor}`,
+            kind: 'purchase',
+            id,
+            onDownload: () => this.downloadPurchasePdf(id)
+        });
     },
 
     async printPurchase(id) {
-        let element = document.getElementById('purchasePrintArea');
-        if (!element) {
-            this.viewPurchaseDetails(id);
-            await new Promise(r => setTimeout(r, 200));
-            element = document.getElementById('purchasePrintArea');
-        }
-    
-        if (!element) {
-            App.showNotification('Purchase print area not found', 'error');
+        return this.downloadPurchasePdf(id);
+    },
+
+    async downloadPurchasePdf(id) {
+        const expense = ExpenseManager.getAllExpenses().find(e => e.id === id);
+        if (!expense) {
+            App.showNotification('Purchase record not found', 'error');
             return;
         }
-    
+
         const filename = `Purchase_${id}.pdf`;
-        const opt = {
-            margin: [0.3, 0.3, 0.3, 0.3],
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.90 },
-            html2canvas: { scale: 1.0, useCORS: true, logging: false },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        };
-    
-        if (typeof html2pdf !== 'undefined') {
-            const btn = document.querySelector('#purchaseViewModal .btn-primary');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
-    
-            App.showNotification('Generating PDF...', 'info');
-            
-            try {
-                const worker = html2pdf().set(opt).from(element);
-    
-                if (window.electronAPI && window.electronAPI.savePdf) {
-                    const pdfBase64 = await worker.output('base64');
-                    await window.electronAPI.savePdf({
-                        blobBase64: pdfBase64,
-                        filename: filename,
-                        subfolder: 'Purchases'
-                    });
-                }
-    
-                // Open in professional browser viewer
-                const blob = await worker.output('blob');
-                const url = URL.createObjectURL(blob);
-                window.open(url, '_blank');
-                
-            } catch (e) {
-                console.error('PDF Generation Error:', e);
-                App.showNotification('Error generating PDF', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
-        } else {
+        const invScale = this.GTES_INVOICE_PURCHASE_HTML2PDF_SCALE || 1.14;
+        const opt = this.buildGtesHtml2PdfOptions({
+            filename,
+            html2canvas: { scale: invScale }
+        });
+
+        if (typeof html2pdf === 'undefined') {
             window.print();
+            return;
+        }
+
+        const btn = document.getElementById('pdfDownloadBtn');
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
+        }
+
+        try {
+            const sourceRoot = await this.getPdfCloneSource('purchase', id, () =>
+                (typeof InvoicesUI !== 'undefined' && InvoicesUI.getPurchaseElement ? InvoicesUI.getPurchaseElement(id) : null));
+            if (!sourceRoot) {
+                App.showNotification('Purchase document not found', 'error');
+                return;
+            }
+
+            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
+            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
+            const { host, clone } = this.beginPdfClone(sourceRoot, w);
+            try {
+                await this.waitPdfImages(clone);
+                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                await this.finishPdfDownload(blob, filename, 'Purchases');
+            } finally {
+                this.endPdfClone(host);
+            }
+        } catch (e) {
+            console.error('PDF Generation Error:', e);
+            App.showNotification('Error generating PDF', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml || '<i class="bi bi-download me-1"></i> Download PDF';
+            }
         }
     },
 
