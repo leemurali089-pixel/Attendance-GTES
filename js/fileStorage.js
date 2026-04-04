@@ -35,8 +35,13 @@ const FileStorage = {
 
     async loadData(key) {
         if (!this.isCloudReady) {
-            const data = localStorage.getItem(key);
-            return data ? JSON.parse(data) : null;
+            try {
+                const raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.warn(`[FileStorage] Corrupt localStorage for '${key}', ignoring:`, e);
+                return null;
+            }
         }
 
         try {
@@ -48,8 +53,13 @@ const FileStorage = {
             return null;
         } catch (error) {
             console.error(`Error loading ${key} from Cloud:`, error);
-            const data = localStorage.getItem(key);
-            return data ? JSON.parse(data) : null;
+            try {
+                const raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.warn(`[FileStorage] Corrupt localStorage fallback for '${key}':`, e);
+                return null;
+            }
         }
     }
 };

@@ -53,8 +53,21 @@ const DataManager = {
         RECYCLE_BIN: 'gtes_recycle_bin'
     },
 
-    /** On load, union-merge with localStorage so cloud snapshots cannot drop newer invoices/DCs/vouchers */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans']),
+    /** On load, union-merge with localStorage so cloud snapshots cannot drop newer rows (incl. gtes_users for web login). */
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_users']),
+
+    _normalizeGtesUsersPayload(raw) {
+        if (raw == null) return raw;
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw !== 'object') return [];
+        return Object.entries(raw)
+            .map(([k, v]) => {
+                if (!v || typeof v !== 'object') return null;
+                if (v.id == null || v.id === '') return { ...v, id: k };
+                return v;
+            })
+            .filter(Boolean);
+    },
 
     _mergeRecordArraysById(localArr, cloudArr) {
         const a = Array.isArray(localArr) ? localArr : [];
@@ -426,12 +439,20 @@ const DataManager = {
             localParsed = null;
         }
 
+        if (key === 'gtes_users') {
+            localParsed = this._normalizeGtesUsersPayload(localParsed);
+        }
+
         let data;
         try {
             data = await FileStorage.loadData(key);
         } catch (err) {
             console.error(`[DataManager] FileStorage.loadData('${key}') failed:`, err);
             data = null;
+        }
+
+        if (key === 'gtes_users') {
+            data = this._normalizeGtesUsersPayload(data);
         }
 
         if (data === null || data === undefined) {

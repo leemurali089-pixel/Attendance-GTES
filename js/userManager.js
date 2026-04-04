@@ -60,7 +60,10 @@ const UserManager = {
     // Get all users
     async getUsers() {
         const data = await DataManager.loadData(this.STORAGE_KEY);
-        return data || [];
+        const norm = typeof DataManager._normalizeGtesUsersPayload === 'function'
+            ? DataManager._normalizeGtesUsersPayload(data)
+            : data;
+        return Array.isArray(norm) ? norm : [];
     },
 
     // Save users
@@ -108,37 +111,52 @@ const UserManager = {
     // Authenticate user
     async authenticate(username, password) {
         const users = await this.getUsers();
-        const user = users.find(u => u.username === username && u.isActive);
+        const uq = (username || '').trim();
+        const user = users.find(u =>
+            u &&
+            (u.username || '').trim().toLowerCase() === uq.toLowerCase() &&
+            u.isActive !== false
+        );
 
         if (user) {
             let isValid = false;
+            const storedPass = user.password != null && user.password !== undefined
+                ? String(user.password)
+                : '';
 
             if (window.electronAPI) {
-                // Use secure verification (Electron desktop app)
-                isValid = await window.electronAPI.verifyPassword(password, user.password);
+                try {
+                    isValid = await window.electronAPI.verifyPassword(password, storedPass);
+                } catch (e) {
+                    console.error('verifyPassword IPC error:', e);
+                    isValid = false;
+                }
 
                 // Auto-migrate plain text password to hash
-                if (isValid && !user.password.includes(':')) {
+                if (isValid && storedPass && !storedPass.includes(':')) {
                     console.log('Migrating password to hash for user:', username);
                     user.password = await window.electronAPI.hashPassword(password);
                     await this.saveUsers(users);
                 }
             } else {
                 // Browser/PWA mode: verify using Web Crypto API (same PBKDF2 algorithm as Electron)
-                if (user.webPassword) {
-                    // Simple plain-text fallback if webPassword is set
-                    isValid = user.webPassword === password;
-                } else if (user.password && user.password.includes(':')) {
-                    // Hash stored in salt:hash format — verify using browser's PBKDF2
+                if (user.webPassword != null && user.webPassword !== '') {
+                    isValid = String(user.webPassword) === password;
+                } else if (storedPass && storedPass.includes(':')) {
+                    if (!globalThis.crypto || !globalThis.crypto.subtle) {
+                        return {
+                            success: false,
+                            message: 'Use https:// or localhost — secure login requires Web Crypto (desktop app works without this).'
+                        };
+                    }
                     try {
-                        isValid = await UserManager.verifyPasswordBrowser(password, user.password);
+                        isValid = await UserManager.verifyPasswordBrowser(password, storedPass);
                     } catch (e) {
                         console.error('PBKDF2 verify error:', e);
                         isValid = false;
                     }
                 } else {
-                    // Plain text password (no hash, browser-created account)
-                    isValid = user.password === password;
+                    isValid = storedPass === password;
                 }
             }
 
@@ -334,14 +352,18 @@ const UserManager = {
     // Algorithm: PBKDF2, SHA-512, 1000 iterations, 64 bytes, salt:hash format
     async verifyPasswordBrowser(password, storedHash) {
         try {
-            const [saltHex, originalHashHex] = storedHash.split(':');
+            if (!storedHash || typeof storedHash !== 'string') return false;
+            const ci = storedHash.indexOf(':');
+            if (ci <= 0 || ci >= storedHash.length - 1) return false;
+            const saltHex = storedHash.slice(0, ci);
+            const originalHashHex = storedHash.slice(ci + 1);
             if (!saltHex || !originalHashHex) return false;
 
-            // Convert salt hex string to Uint8Array
-            const salt = new Uint8Array(saltHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+            // Node/Electron crypto.pbkdf2(password, salt, ...) encodes string salt as UTF-8 — must match here.
+            const enc = new TextEncoder();
+            const salt = enc.encode(saltHex);
 
             // Import the password as a key
-            const enc = new TextEncoder();
             const keyMaterial = await crypto.subtle.importKey(
                 'raw',
                 enc.encode(password),

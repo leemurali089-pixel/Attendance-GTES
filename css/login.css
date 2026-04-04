@@ -143,6 +143,24 @@
     fill: currentColor;
 }
 
+/* Above the Login button so it is never below the fold */
+.login-error-banner {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #ffb4b4 !important;
+    background: rgba(220, 38, 38, 0.2);
+    border: 1px solid rgba(248, 113, 113, 0.45);
+    line-height: 1.35;
+}
+
+.login-error-banner.d-none {
+    display: none !important;
+}
+
 .login-btn-wrapper {
     display: flex;
     justify-content: center;
