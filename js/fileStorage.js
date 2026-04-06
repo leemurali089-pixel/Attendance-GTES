@@ -51,6 +51,15 @@ const FileStorage = {
             try {
                 const result = await window.electronAPI.loadData(key);
                 if (result && result.success) {
+                    // If the main process returned a raw string (optimization for large files), parse it here
+                    if (result.isRaw && typeof result.data === 'string') {
+                        try {
+                            return JSON.parse(result.data);
+                        } catch (pe) {
+                            console.error(`[FileStorage] Failed to parse raw data for '${key}':`, pe);
+                            return null;
+                        }
+                    }
                     return result.data;
                 }
                 console.warn(`[FileStorage] Local File load failed/empty for '${key}':`, result?.error);
