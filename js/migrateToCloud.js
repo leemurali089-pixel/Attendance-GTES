@@ -6,10 +6,7 @@
 
 if (!window.DeepCloudMigrator) {
     const DeepCloudMigrator = {
-    // Files that are too large for standard IPC (10MB+ or close)
-    LARGE_FILES: ['gtes_employees', 'inventoryTransactions'],
-    
-    // Core database files to sync
+        // Core database files to sync
     DB_FILES: [
         'invoices', 
         'vouchers', 
@@ -114,22 +111,9 @@ if (!window.DeepCloudMigrator) {
             console.log(`[Migrator]: Pushing Local data for ${key}...`);
             let localData = DataManager.getData(key) || [];
             
-            // Check if special handling is needed for large files via main process direct sync
-            if (this.LARGE_FILES.includes(key) && typeof window.electronAPI !== 'undefined' && window.electronAPI.syncToCloud) {
-                console.log(`[Migrator]: ⚡ Using Direct-to-Cloud Export for large file: ${key}`);
-                const result = await window.electronAPI.syncToCloud(key, localData);
-                if (result.success) {
-                    console.log(`[Migrator]: ✅ ${key} exported via Main Process.`);
-                    return true;
-                } else {
-                    throw new Error(result.error || "Main process sync failed");
-                }
-            }
-
-            // Normal file export
+            // Normal file export (Authorized via Renderer SDK)
             const success = await FileStorage.saveData(key, localData);
             return success;
-
         } catch (error) {
             console.error(`[Migrator]: ❌ Export failed for ${key}:`, error);
             return false;

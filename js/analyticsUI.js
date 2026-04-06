@@ -1117,10 +1117,11 @@ const AnalyticsUI = {
         const list = g === 'vendor'
             ? customers.filter(c => (c.accountType || '').toLowerCase() === 'supplier')
             : customers.filter(c => (c.accountType || '').toLowerCase() !== 'supplier');
-        const prev = sel.value;
+        const prev = (sel.value || '').toString();
+        const keyOf = (c) => ((c.id != null && c.id !== '') ? String(c.id) : String(c.name || '').trim());
         sel.innerHTML = '<option value="">-- Select account --</option>' +
-            list.map(c => `<option value="${c.id}">${c.name.replace(/</g, '&lt;')}</option>`).join('');
-        if (prev && list.some(c => c.id === prev)) sel.value = prev;
+            list.map(c => `<option value="${keyOf(c)}">${(c.name || '').replace(/</g, '&lt;')}</option>`).join('');
+        if (prev && list.some(c => keyOf(c) === prev)) sel.value = prev;
     },
 
     getLedgerExportOptions() {
@@ -1337,9 +1338,17 @@ const AnalyticsUI = {
         const customerId = document.getElementById('ledgerCustomer').value;
         if (!customerId) return;
 
-        const opts = this.getLedgerExportOptions();
-        const ledger = BusinessAnalytics.getAccountLedger(customerId, opts);
-        if (!ledger) return;
+        let ledger = null;
+        try {
+            const opts = this.getLedgerExportOptions();
+            ledger = BusinessAnalytics.getAccountLedger(customerId, opts);
+        } catch (e) {
+            console.error('Ledger load error:', e);
+        }
+        if (!ledger) {
+            if (typeof App !== 'undefined') App.showNotification('Unable to load ledger for selected account', 'error');
+            return;
+        }
 
         const periodLine = ledger.dateRange.start && ledger.dateRange.end
             ? `${this.formatDate(ledger.dateRange.start)} → ${this.formatDate(ledger.dateRange.end)}`

@@ -12952,18 +12952,49 @@
   },
   {
     "id": "010",
-    "bookkeeperId": "BK-5392",
-    "date": "2024-03-14",
+    "bookkeeperId": "BK-5394",
+    "date": "2024-07-12",
     "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 150000,
+    "amount": 200000,
     "type": "receipt",
     "paymentMode": "RTGS",
     "mode": "RTGS",
     "narration": "",
     "voucherNo": "010",
-    "linkedInvoiceId": "",
+    "linkedInvoiceId": "00496",
+    "linkedInvoices": [
+      "00496",
+      "0196",
+      "0229"
+    ],
+    "allocations": [
+      {
+        "id": "00496",
+        "invoiceNo": "00496",
+        "billNo": "00496",
+        "no": "00496",
+        "amount": 8240,
+        "poRef": ""
+      },
+      {
+        "id": "0196",
+        "invoiceNo": "0196",
+        "billNo": "0196",
+        "no": "0196",
+        "amount": 63740,
+        "poRef": ""
+      },
+      {
+        "id": "0229",
+        "invoiceNo": "0229",
+        "billNo": "0229",
+        "no": "0229",
+        "amount": 128020,
+        "poRef": ""
+      }
+    ],
     "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.931Z",
+    "createdAt": "2026-04-06T10:53:22.704Z",
     "source": "bookkeeper"
   },
   {
@@ -15132,18 +15163,31 @@
   },
   {
     "id": "110",
-    "bookkeeperId": "BK-4517",
-    "date": "2023-08-30",
-    "customerName": "TAGORE HEALTH CARE PVT LTD",
-    "amount": 100000,
+    "bookkeeperId": "BK-5410",
+    "date": "2024-02-15",
+    "customerName": "DEVI INDUSTRIAL GASES - C",
+    "amount": 1316,
     "type": "receipt",
-    "paymentMode": "Cash",
-    "mode": "Cash",
+    "paymentMode": "Cash Card",
+    "mode": "Cash Card",
     "narration": "",
     "voucherNo": "110",
-    "linkedInvoiceId": "",
+    "linkedInvoiceId": "00428",
+    "linkedInvoices": [
+      "00428"
+    ],
+    "allocations": [
+      {
+        "id": "00428",
+        "invoiceNo": "00428",
+        "billNo": "00428",
+        "no": "00428",
+        "amount": 1316,
+        "poRef": ""
+      }
+    ],
     "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.936Z",
+    "createdAt": "2026-04-06T10:53:22.705Z",
     "source": "bookkeeper"
   },
   {
@@ -31214,53 +31258,6 @@
     "source": "bookkeeper"
   },
   {
-    "id": "010",
-    "bookkeeperId": "BK-5394",
-    "date": "2024-07-12",
-    "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 200000,
-    "type": "receipt",
-    "paymentMode": "RTGS",
-    "mode": "RTGS",
-    "narration": "",
-    "voucherNo": "010",
-    "linkedInvoiceId": "00496",
-    "linkedInvoices": [
-      "00496",
-      "0196",
-      "0229"
-    ],
-    "allocations": [
-      {
-        "id": "00496",
-        "invoiceNo": "00496",
-        "billNo": "00496",
-        "no": "00496",
-        "amount": 8240,
-        "poRef": ""
-      },
-      {
-        "id": "0196",
-        "invoiceNo": "0196",
-        "billNo": "0196",
-        "no": "0196",
-        "amount": 63740,
-        "poRef": ""
-      },
-      {
-        "id": "0229",
-        "invoiceNo": "0229",
-        "billNo": "0229",
-        "no": "0229",
-        "amount": 128020,
-        "poRef": ""
-      }
-    ],
-    "referenceId": "",
-    "createdAt": "2026-04-06T10:53:22.704Z",
-    "source": "bookkeeper"
-  },
-  {
     "id": "001",
     "bookkeeperId": "BK-5393",
     "date": "2024-04-02",
@@ -31299,32 +31296,61 @@
     "source": "bookkeeper"
   },
   {
-    "id": "110",
-    "bookkeeperId": "BK-5410",
-    "date": "2024-02-15",
+    "id": "010",
+    "bookkeeperId": "BK-5392",
+    "date": "2024-03-14",
     "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 1316,
+    "amount": 150000,
     "type": "receipt",
-    "paymentMode": "Cash Card",
-    "mode": "Cash Card",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
     "narration": "",
-    "voucherNo": "110",
-    "linkedInvoiceId": "00428",
+    "voucherNo": "010",
+    "linkedInvoiceId": "00496",
     "linkedInvoices": [
-      "00428"
+      "00496"
     ],
     "allocations": [
       {
-        "id": "00428",
-        "invoiceNo": "00428",
-        "billNo": "00428",
-        "no": "00428",
-        "amount": 1316,
+        "id": "00496",
+        "invoiceNo": "00496",
+        "billNo": "00496",
+        "no": "00496",
+        "amount": 150000,
         "poRef": ""
       }
     ],
     "referenceId": "",
-    "createdAt": "2026-04-06T10:53:22.705Z",
+    "createdAt": "2026-04-06T11:59:31.608Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "110",
+    "bookkeeperId": "BK-4517",
+    "date": "2023-08-30",
+    "customerName": "TAGORE HEALTH CARE PVT LTD",
+    "amount": 100000,
+    "type": "receipt",
+    "paymentMode": "Cash",
+    "mode": "Cash",
+    "narration": "",
+    "voucherNo": "110",
+    "linkedInvoiceId": "299",
+    "linkedInvoices": [
+      "299"
+    ],
+    "allocations": [
+      {
+        "id": "299",
+        "invoiceNo": "299",
+        "billNo": "299",
+        "no": "299",
+        "amount": 100000,
+        "poRef": "THCPL - 001/21-22. Dt:17.03.2022."
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T11:59:31.611Z",
     "source": "bookkeeper"
   }
 ]

@@ -532,14 +532,73 @@ const BusinessAnalytics = {
 
     _partyMatches(account, partyId, partyName) {
         if (!account) return false;
-        if (partyId && partyId === account.id) return true;
-        const n = (partyName || '').trim().toLowerCase();
-        const an = (account.name || '').trim().toLowerCase();
+        if (partyId && account.id && String(partyId) === String(account.id)) return true;
+        const n = this._normalizePartyName(partyName);
+        const an = this._normalizePartyName(account.name);
         return Boolean(n && an && n === an);
+    },
+
+    _normalizePartyName(name) {
+        return (name || '')
+            .toString()
+            .toLowerCase()
+            .replace(/[,\s]+/g, ' ')
+            .trim();
     },
 
     _ledgerRunningDelta(accountGroup, debit, credit) {
         return accountGroup === 'vendor' ? (credit - debit) : (debit - credit);
+    },
+
+    _ledgerKey(v) {
+        return (v == null ? '' : String(v)).trim().toLowerCase();
+    },
+
+    _sumVoucherAllocationsForKeySet(voucher, keySet) {
+        if (!voucher || !keySet || keySet.size === 0) return 0;
+        let sum = 0;
+        const allocs = Array.isArray(voucher.allocations) ? voucher.allocations : [];
+        allocs.forEach(a => {
+            const keys = [a.id, a.no, a.billNo, a.invoiceNo].map(x => this._ledgerKey(x)).filter(Boolean);
+            if (!keys.length) return;
+            if (keys.some(k => keySet.has(k))) {
+                const base = parseFloat(a.amount) || 0;
+                const tds = parseFloat(a.tdsAmount) || 0;
+                const disc = parseFloat(a.discountAmount) || 0;
+                sum += base + tds + disc;
+            }
+        });
+        return sum;
+    },
+
+    _sumVoucherLinkedShareForKeySet(voucher, keySet) {
+        if (!voucher || !keySet || keySet.size === 0) return 0;
+        const linked = Array.isArray(voucher.linkedInvoices) ? voucher.linkedInvoices : [];
+        if (!linked.length) return 0;
+        const clean = linked.map(x => this._ledgerKey(x)).filter(Boolean);
+        const totalLinked = clean.length;
+        if (!totalLinked) return 0;
+        const matches = clean.filter(k => keySet.has(k)).length;
+        if (!matches) return 0;
+        const totalAmt = (parseFloat(voucher.amount) || 0) + (parseFloat(voucher.tdsAmount) || 0) + (parseFloat(voucher.discountAmount) || 0);
+        return totalAmt * (matches / totalLinked);
+    },
+
+    _resolveVoucherAmountForAccount(voucher, account, docKeySet) {
+        // Priority 1: explicit allocations on voucher
+        const allocAmt = this._sumVoucherAllocationsForKeySet(voucher, docKeySet);
+        if (allocAmt > 0) return allocAmt;
+
+        // Priority 2: linked invoice/bill ids (pro-rata when one voucher links multiple docs)
+        const linkedAmt = this._sumVoucherLinkedShareForKeySet(voucher, docKeySet);
+        if (linkedAmt > 0) return linkedAmt;
+
+        // Priority 3: direct party match fallback
+        if (this._partyMatches(account, voucher.customerId, voucher.customerName)) {
+            return (parseFloat(voucher.amount) || 0) + (parseFloat(voucher.tdsAmount) || 0) + (parseFloat(voucher.discountAmount) || 0);
+        }
+
+        return 0;
     },
 
     _collectCustomerRawEntries(account) {
@@ -547,10 +606,16 @@ const BusinessAnalytics = {
         const challans = DataManager.getData('challans') || [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
+        const customerInvoices = invoices.filter(inv => inv.customerId === account.id || inv.customerName === account.name);
+        const customerInvoiceKeys = new Set();
+        customerInvoices.forEach(inv => {
+            [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo].forEach(k => {
+                const ck = this._ledgerKey(k);
+                if (ck) customerInvoiceKeys.add(ck);
+            });
+        });
 
-        invoices
-            .filter(inv => inv.customerId === account.id || inv.customerName === account.name)
-            .forEach(inv => {
+        customerInvoices.forEach(inv => {
                 entries.push({
                     date: inv.date,
                     type: 'Invoice',
@@ -583,11 +648,10 @@ const BusinessAnalytics = {
                 });
             });
 
-        vouchers
-            .filter(v => v.customerId === account.id || v.customerName === account.name)
-            .forEach(v => {
+        vouchers.forEach(v => {
                 if (v.type === 'contra') return;
-                const amt = parseFloat(v.amount) || 0;
+                const amt = this._resolveVoucherAmountForAccount(v, account, customerInvoiceKeys);
+                if (amt <= 0) return;
                 const mode = (v.paymentMode || v.mode || 'Cash').toString();
                 if (v.type === 'payment' && v.isPurchase) return;
                 if (v.type === 'payment' && !v.isPurchase) {
@@ -627,10 +691,16 @@ const BusinessAnalytics = {
         const expenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
+        const vendorExpenses = expenses.filter(exp => this._partyMatches(account, exp.vendorId || exp.customerId, exp.vendor || exp.vendorName || exp.partyName));
+        const vendorBillKeys = new Set();
+        vendorExpenses.forEach(exp => {
+            [exp.id, exp.billNo, exp.supplierBillNo, exp.vch_no, exp.bookkeeperVchNo].forEach(k => {
+                const ck = this._ledgerKey(k);
+                if (ck) vendorBillKeys.add(ck);
+            });
+        });
 
-        expenses
-            .filter(exp => this._partyMatches(account, exp.vendorId || exp.customerId, exp.vendor || exp.vendorName || exp.partyName))
-            .forEach(exp => {
+        vendorExpenses.forEach(exp => {
                 const amt = parseFloat(exp.amount || exp.totalAmount) || 0;
                 entries.push({
                     date: exp.date,
@@ -647,10 +717,10 @@ const BusinessAnalytics = {
             });
 
         vouchers
-            .filter(v => v.type === 'payment' && v.isPurchase !== false &&
-                (v.customerId === account.id || this._partyMatches(account, v.customerId, v.customerName)))
+            .filter(v => v.type === 'payment' && v.isPurchase !== false)
             .forEach(v => {
-                const amt = parseFloat(v.amount) || 0;
+                const amt = this._resolveVoucherAmountForAccount(v, account, vendorBillKeys);
+                if (amt <= 0) return;
                 entries.push({
                     date: v.date,
                     type: 'Payment',
@@ -683,7 +753,14 @@ const BusinessAnalytics = {
         const endDate = options.endDate ? this._ledgerNormalizeDate(options.endDate) : '';
 
         const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
-        const account = customers.find(c => c.id === accountId || c.name === accountId);
+        const requestedRaw = (accountId == null ? '' : String(accountId)).trim();
+        const requestedNorm = this._normalizePartyName(requestedRaw);
+        const account = customers.find(c => {
+            const idMatch = c.id != null && String(c.id) === requestedRaw;
+            const nameRawMatch = (c.name || '').toString().trim() === requestedRaw;
+            const nameNormMatch = requestedNorm && this._normalizePartyName(c.name) === requestedNorm;
+            return idMatch || nameRawMatch || nameNormMatch;
+        });
         if (!account) return null;
 
         const raw = accountGroup === 'vendor'
