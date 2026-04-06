@@ -26,9 +26,9 @@ const SyncManager = {
         // Initial check
         this.updateNetworkStatus();
 
-        // Automatic backup on startup (to default location)
+        // Automatic backup on startup - Delay by 5s to avoid initial main-thread contention
         if (window.electronAPI) {
-            this.checkBackup();
+            setTimeout(() => this.checkBackup(), 5000);
         }
 
         // NEW: Initialize BookKeeper Sync if available

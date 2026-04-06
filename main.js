@@ -298,8 +298,8 @@ ipcMain.handle('create-backup', async () => {
             }
         }
 
-        // Save single file
-        await fs.writeFile(backupFilePath, JSON.stringify(fullBackup, null, 2), 'utf8');
+        // Save single file - Remove pretty-printing (null, 2) which is extremely slow on 5MB+ objects
+        await fs.writeFile(backupFilePath, JSON.stringify(fullBackup), 'utf8');
 
         console.log(`Automatic backup created: ${fileCount} data sets to ${backupFilePath}`);
         return { success: true, path: backupFilePath, fileCount };
