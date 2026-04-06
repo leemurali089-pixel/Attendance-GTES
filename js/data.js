@@ -54,7 +54,7 @@ const DataManager = {
     },
 
     /** On load, union-merge with localStorage so cloud snapshots cannot drop newer rows (incl. gtes_users for web login). */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_users']),
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_employees', 'gtes_users']),
 
     _normalizeGtesUsersPayload(raw) {
         if (raw == null) return raw;
@@ -419,7 +419,7 @@ const DataManager = {
     },
 
     // Helper methods for storage operations
-    async saveData(key, data) {
+    async saveData(key, data, options = {}) {
         // Update memory cache for synchronous access
         this._cache[key] = data;
 
@@ -441,7 +441,7 @@ const DataManager = {
             if (!canProceed) return false;
         }
         let payload = data;
-        if (this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
+        if (!options.skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
             try {
                 const cloudExisting = await FileStorage.loadData(key);
                 if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {

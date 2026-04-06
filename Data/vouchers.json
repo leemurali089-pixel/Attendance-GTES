@@ -27753,11 +27753,11 @@
   },
   {
     "id": "010",
-    "bookkeeperId": "BK-5392",
-    "date": "2024-03-14",
+    "bookkeeperId": "BK-5394",
+    "date": "2024-07-12",
     "customerId": "CUST-1775479805860-namds",
     "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 150000,
+    "amount": 200000,
     "type": "receipt",
     "paymentMode": "RTGS",
     "mode": "RTGS",
@@ -27765,7 +27765,9 @@
     "voucherNo": "010",
     "linkedInvoiceId": "00496",
     "linkedInvoices": [
-      "00496"
+      "00496",
+      "0196",
+      "0229"
     ],
     "allocations": [
       {
@@ -27773,12 +27775,28 @@
         "invoiceNo": "00496",
         "billNo": "00496",
         "no": "00496",
-        "amount": 150000,
+        "amount": 8240,
+        "poRef": ""
+      },
+      {
+        "id": "0196",
+        "invoiceNo": "0196",
+        "billNo": "0196",
+        "no": "0196",
+        "amount": 63740,
+        "poRef": ""
+      },
+      {
+        "id": "0229",
+        "invoiceNo": "0229",
+        "billNo": "0229",
+        "no": "0229",
+        "amount": 128020,
         "poRef": ""
       }
     ],
     "referenceId": "",
-    "createdAt": "2026-04-06T14:06:13.573Z",
+    "createdAt": "2026-04-06T14:51:02.538Z",
     "source": "bookkeeper"
   },
   {
@@ -32995,32 +33013,32 @@
   },
   {
     "id": "110",
-    "bookkeeperId": "BK-4517",
-    "date": "2023-08-30",
-    "customerId": "CUST-1775479805861-s4vo8",
-    "customerName": "TAGORE HEALTH CARE PVT LTD",
-    "amount": 100000,
+    "bookkeeperId": "BK-5410",
+    "date": "2024-02-15",
+    "customerId": "CUST-1775479805860-namds",
+    "customerName": "DEVI INDUSTRIAL GASES - C",
+    "amount": 1316,
     "type": "receipt",
-    "paymentMode": "Cash",
-    "mode": "Cash",
+    "paymentMode": "Cash Card",
+    "mode": "Cash Card",
     "narration": "",
     "voucherNo": "110",
-    "linkedInvoiceId": "299",
+    "linkedInvoiceId": "00428",
     "linkedInvoices": [
-      "299"
+      "00428"
     ],
     "allocations": [
       {
-        "id": "299",
-        "invoiceNo": "299",
-        "billNo": "299",
-        "no": "299",
-        "amount": 100000,
-        "poRef": "THCPL - 001/21-22. Dt:17.03.2022."
+        "id": "00428",
+        "invoiceNo": "00428",
+        "billNo": "00428",
+        "no": "00428",
+        "amount": 1316,
+        "poRef": ""
       }
     ],
     "referenceId": "",
-    "createdAt": "2026-04-06T14:06:13.574Z",
+    "createdAt": "2026-04-06T14:51:02.542Z",
     "source": "bookkeeper"
   },
   {

@@ -1008,10 +1008,18 @@ const InvoicesUI = {
 
     async saveInvoice(e) {
         if (e) e.preventDefault();
+
+        // Prevent duplicate creation on double-click / repeated submit
+        if (this._saveInvoiceInProgress) return;
+        this._saveInvoiceInProgress = true;
+        const saveBtn = document.querySelector('#createInvoiceModal .btn-primary[onclick*="saveInvoice"], #createInvoiceForm button[type="submit"]');
+        if (saveBtn) saveBtn.disabled = true;
         
         const form = document.getElementById('createInvoiceForm');
         if (!form.checkValidity()) {
             form.reportValidity();
+            this._saveInvoiceInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
             return;
         }
 
@@ -1125,6 +1133,9 @@ const InvoicesUI = {
         } catch (e) {
             console.error(e);
             alert('Error creating invoice: ' + e.message);
+        } finally {
+            this._saveInvoiceInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
         }
     },
 

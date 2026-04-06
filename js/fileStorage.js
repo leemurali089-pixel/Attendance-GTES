@@ -54,6 +54,7 @@ const FileStorage = {
 
     async loadData(key) {
         // Handle Electron first
+        let localData = null;
         if (window.electronAPI) {
             try {
                 const result = await window.electronAPI.loadData(key);
@@ -61,13 +62,14 @@ const FileStorage = {
                     // If the main process returned a raw string (optimization for large files), parse it here
                     if (result.isRaw && typeof result.data === 'string') {
                         try {
-                            return JSON.parse(result.data);
+                            localData = JSON.parse(result.data);
                         } catch (pe) {
                             console.error(`[FileStorage] Failed to parse raw data for '${key}':`, pe);
-                            return null;
+                            localData = null;
                         }
+                    } else {
+                        localData = result.data;
                     }
-                    return result.data;
                 }
                 console.warn(`[FileStorage] Local File load failed/empty for '${key}':`, result?.error);
             } catch (err) {
@@ -89,9 +91,19 @@ const FileStorage = {
             console.log(`☁️ Fetching ${key} from Realtime Database...`);
             const snapshot = await window.db.ref(key).once('value');
             if (snapshot.exists()) {
-                return snapshot.val();
+                const cloudVal = snapshot.val();
+                // If we're on desktop and have both local + cloud, prefer merged/newer for array datasets.
+                if (window.electronAPI && localData != null) {
+                    if (Array.isArray(localData) && Array.isArray(cloudVal) && window.DataManager && typeof window.DataManager._mergeRecordArraysById === 'function') {
+                        return window.DataManager._mergeRecordArraysById(localData, cloudVal);
+                    }
+                    // For non-array (or if merge is not possible), prefer cloud as source of truth.
+                    return cloudVal;
+                }
+                return cloudVal;
             }
-            return null;
+            // No cloud value; fall back to local if any.
+            return localData;
         } catch (error) {
             console.error(`Error loading ${key} from Cloud:`, error);
             try {
@@ -99,7 +111,7 @@ const FileStorage = {
                 return raw ? JSON.parse(raw) : null;
             } catch (e) {
                 console.warn(`[FileStorage] Corrupt localStorage fallback for '${key}':`, e);
-                return null;
+                return localData;
             }
         }
     }

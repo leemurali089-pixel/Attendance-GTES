@@ -1,5 +1,12 @@
 [
   {
+    "id": "1775485969479",
+    "timestamp": "2026-04-06T14:32:49.479Z",
+    "user": "GTES67",
+    "action": "BACKUP_IMPORT",
+    "details": "Imported full backup from backup_full_2026-04-06T14-30-01.json"
+  },
+  {
     "id": "1774073387442",
     "timestamp": "2026-03-21T06:09:47.442Z",
     "user": "GTES67",

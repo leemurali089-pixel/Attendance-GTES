@@ -1641,6 +1641,7 @@ const VouchersUI = {
         }
         if (hiddenId) hiddenId.value = '';
         if (container) container.classList.add('d-none');
+        this._editingVoucher = null;
     },
 
     onPartySelect(input) {
@@ -1721,7 +1722,7 @@ const VouchersUI = {
         if (currentIndex >= 0 && VouchersUI.currentBankTransactions) {
             tx = VouchersUI.currentBankTransactions[currentIndex];
         }
-        const mv = tx ? tx.mappedVoucher : null;
+        const mv = tx ? tx.mappedVoucher : (this._editingVoucher || null);
 
         if (pendingDocs.length > 0) {
             container.classList.remove('d-none');
@@ -1799,7 +1800,7 @@ const VouchersUI = {
             container.classList.add('d-none');
         }
 
-        // RESTORE: Advance Payment if already set in session
+        // RESTORE: Advance Payment if already set in session / editing voucher
         if (mv && mv.amount !== undefined) {
             const advanceInput = document.getElementById('advanceAmount');
             if (advanceInput) {
@@ -1946,9 +1947,17 @@ const VouchersUI = {
     },
 
     async saveVoucher() {
+        // Prevent duplicate creation on double-click / repeated taps
+        if (this._saveVoucherInProgress) return;
+        this._saveVoucherInProgress = true;
+        const saveBtn = document.querySelector('#createVoucherModal .btn-primary[onclick*="saveVoucher"]');
+        if (saveBtn) saveBtn.disabled = true;
+
         const form = document.getElementById('createVoucherForm');
         if (!form.checkValidity()) {
             form.reportValidity();
+            this._saveVoucherInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
             return;
         }
 
@@ -1972,6 +1981,8 @@ const VouchersUI = {
                 // Allow a small floating point tolerance (e.g., 0.01)
                 if (Math.abs(allocatedAmount - tx.amount) > 0.02) {
                     App.showNotification(`Please allocate the exact bank transaction amount (₹${tx.amount.toFixed(2)}) using invoices or the Advance Payment field. Current allocation: ₹${allocatedAmount.toFixed(2)}`, 'warning');
+                    this._saveVoucherInProgress = false;
+                    if (saveBtn) saveBtn.disabled = false;
                     return; // Block saving
                 }
             }
@@ -2028,6 +2039,8 @@ const VouchersUI = {
                         modal.hide();
                     }
                     App.showNotification(`Details for ${data.id} saved to session. Use "Import Saved" to finish.`, 'info');
+                    this._saveVoucherInProgress = false;
+                    if (saveBtn) saveBtn.disabled = false;
                     return; 
                 }
             }
@@ -2054,6 +2067,9 @@ const VouchersUI = {
         } catch (e) {
             console.error(e);
             alert('Error creating voucher: ' + e.message);
+        } finally {
+            this._saveVoucherInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
         }
     },
 
@@ -2622,6 +2638,8 @@ const VouchersUI = {
         setField('discountAmount', voucher.discountAmount || 0);
         setField('remarks', voucher.remarks || '');
         setField('refNo', voucher.referenceId || '');
+        // Provide allocation context so invoice linking section can restore allocated amounts
+        this._editingVoucher = voucher;
 
         // Payment mode
         const modeEl = form.querySelector('[name="paymentMode"]');
@@ -2635,6 +2653,19 @@ const VouchersUI = {
         const hiddenId = document.getElementById('voucherCustomerId');
         if (partyInput) partyInput.value = voucher.customerName || '';
         if (hiddenId) hiddenId.value = voucher.customerId || '';
+
+        // Trigger invoice/bill linking list and restore allocations/amounts
+        if (partyInput) {
+            // Ensure linking section is visible during edit if there are any links/allocations
+            const hasLinks = (voucher.allocations && voucher.allocations.length > 0) ||
+                (voucher.linkedInvoices && voucher.linkedInvoices.length > 0) ||
+                !!voucher.linkedInvoiceId;
+            if (hasLinks) {
+                const section = document.getElementById('invoiceLinkingSection');
+                if (section) section.classList.remove('d-none');
+            }
+            this.onPartySelect(partyInput);
+        }
 
         // Override save button
         const saveBtn = document.querySelector('#createVoucherModal .btn-primary[onclick*="saveVoucher"]');

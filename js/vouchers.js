@@ -264,7 +264,8 @@ const VoucherManager = {
 
         // Remove the voucher
         vouchers.splice(index, 1);
-        await DataManager.saveData('vouchers', vouchers);
+        // Deletion must not be union-merged with cloud, otherwise deleted row can reappear.
+        await DataManager.saveData('vouchers', vouchers, { skipPreSaveMerge: true });
 
         // Revert linked invoice/bill statuses
         await this.revertLinkedInvoices(linkedInvoices, voucher, vouchers);
