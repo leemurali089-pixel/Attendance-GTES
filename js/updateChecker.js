@@ -3,13 +3,13 @@
  * Checks for application updates and notifies users
  */
 const UpdateChecker = {
-    APP_VERSION: '1.3.1', // Match package.json version
+    APP_VERSION: '1.3.2', // Match package.json version
     
     /**
      * Get current application version
      */
     getCurrentVersion() {
-        return this.currentVersion;
+        return this.APP_VERSION;
     },
 
     /**
@@ -21,8 +21,8 @@ const UpdateChecker = {
         // Future: fetch('https://yourserver.com/version.json')
         return {
             updateAvailable: false, // Set to true to test the notification modal
-            latestVersion: '1.3.1',
-            releaseNotes: '• Fixed User Array iteration bug preventing Desktop/Web sync via Cloud\n• Resolved Electron Startup errors preventing DB access\n• Merged critical user credential fixes',
+            latestVersion: '1.3.2',
+            releaseNotes: '• Stable & Optimized Core\n• Fixed 24MB Cloud Sync Failure\n• Indian Financial Year (FY) Month Mapping Fix\n• Improved Book Keeper Sync (Dr/Cr signs, automatic upserts)\n• Unified Account Ledgers and Inventory Recalculation',
             downloadUrl: 'https://github.com/leemurali089-pixel/Attendance-GTES/releases'
         };
     },
