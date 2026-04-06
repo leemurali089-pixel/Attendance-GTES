@@ -585,9 +585,10 @@ const App = {
         }
     },
 
-    // NEW: Return to Landing Page
     showLandingPage() {
         this.currentView = 'landing';
+        this.viewHistory = ['landing'];
+        
         const landingView = document.getElementById('landingView');
         const nav = document.querySelector('.navbar');
 
@@ -611,6 +612,8 @@ const App = {
             loginOverlay.classList.add('hidden');
             loginOverlay.style.display = 'none';
         }
+
+        this.updateBackButton();
     },
 
     async showView(viewName, params = {}) {
@@ -795,8 +798,8 @@ const App = {
             mainContent.insertBefore(backButtonContainer, mainContent.firstChild);
         }
 
-        // Show back button for all views except dashboard
-        if (this.currentView !== 'dashboard' && this.viewHistory.length > 1) {
+        // Show back button for all views except dashboard and landing
+        if (this.currentView !== 'dashboard' && this.currentView !== 'landing' && this.viewHistory.length > 1) {
             backButtonContainer.innerHTML = `
                 <button class="btn btn-outline-light btn-sm mb-3" onclick="App.goBack()" id="backButton">
                     <i class="bi bi-arrow-left"></i><span class="btn-text">Back</span>
