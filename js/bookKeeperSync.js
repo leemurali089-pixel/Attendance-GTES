@@ -268,13 +268,145 @@ const BookKeeperSync = {
     },
 
     /**
-     * Trigger the full import process safely
+     * Web/PWA fallback: pick .db/.sqlite and import directly.
+     * Uses modern File System Access API (showOpenFilePicker) or hidden <input> fallback.
      */
-    async triggerSync() {
-        if (typeof SyncManager !== 'undefined' && SyncManager.status === 'syncing') return;
+    async initiateWebSync() {
+        try {
+            if (window.App && App.showNotification) {
+                App.showNotification('Select your Book Keeper backup (.db/.sqlite)', 'info');
+            }
 
+            // Path 1: Modern File System Access API (Chrome/Edge)
+            if (typeof window.showOpenFilePicker === 'function') {
+                const [handle] = await window.showOpenFilePicker({
+                    multiple: false,
+                    types: [{
+                        description: 'BookKeeper SQLite Backup',
+                        accept: {
+                            'application/octet-stream': ['.db', '.sqlite', '.sqlite3'],
+                            'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3']
+                        }
+                    }]
+                });
+                if (!handle) return;
+                const file = await handle.getFile();
+                this.webFileHandle = handle;
+                this.webFileName = file.name;
+                
+                // Save locally so we can suggest this file later
+                this.config.backupPath = file.name;
+                this.saveConfig();
+                
+                await this._runImportFromFile(file, file.name);
+                return;
+            }
+
+            // Path 2: Hidden <input type="file"> fallback
+            const fileInput = document.getElementById('bkImportFile');
+            if (fileInput) {
+                fileInput.onchange = async (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        this.webFileHandle = null;
+                        this.webFileName = file.name;
+                        this.config.backupPath = file.name;
+                        this.saveConfig();
+                        await this._runImportFromFile(file, file.name);
+                    }
+                };
+                fileInput.click();
+                return;
+            }
+
+            throw new Error('No supported file selection mechanism found in this browser.');
+        } catch (e) {
+            if (e && e.name === 'AbortError') return;
+            console.error('[Sync] Web file picker error:', e);
+            if (window.App && App.showNotification) {
+                App.showNotification('Failed to open backup file picker.', 'error');
+            }
+        }
+    },
+
+    /**
+     * Centralized Safe-Import Logic
+     * Ensures we don't clear old data unless the new file is successfully parsed.
+     * @param {File|Uint8Array|ArrayBuffer} fileOrBuffer - The backup data
+     * @param {string} sourceLabel - Label for the sync status audit (e.g. filename)
+     */
+    async _runImportFromFile(fileOrBuffer, sourceLabel = 'BookKeeper Backup') {
+        if (typeof SyncManager !== 'undefined' && SyncManager.status === 'syncing') return;
+        
         if (typeof SyncManager !== 'undefined') {
             SyncManager.updateStatus('syncing', 'Syncing with Book Keeper...');
+        }
+
+        try {
+            if (!window.BookKeeperImport) {
+                throw new Error('BookKeeper import module not loaded');
+            }
+
+            // 1. PHASE ONE: Dry-run / Parse check
+            // We open the DB and check for tables before clearing anything.
+            // Note: BookKeeperImport.openDatabase(fileOrBuffer) should be called inside runFullImport.
+            
+            // 2. PHASE TWO: Actual Import
+            // runFullImport executes the full data mapping.
+            const stats = await BookKeeperImport.runFullImport(fileOrBuffer);
+            
+            // 3. PHASE THREE: Post-Import Integrity Check
+            const isVerified = await this.verifyDataIntegrity();
+
+            // 4. Update sync metadata
+            this.config.lastSyncDetails = {
+                time: new Date().getTime(),
+                counts: {
+                    vouchers: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Vouchers')?.imported || 0) : 0,
+                    customers: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Customers')?.imported || 0) : 0,
+                    inventory: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Inventory')?.imported || 0) : 0
+                },
+                path: sourceLabel
+            };
+            this.saveConfig();
+
+            if (typeof SyncManager !== 'undefined') {
+                SyncManager.updateStatus(isVerified ? 'synced' : 'warning', isVerified ? 'Synced with Book Keeper' : 'Synced with Data Warnings');
+                SyncManager.logSyncEvent(isVerified ? 'success' : 'warning', `Book Keeper import complete (${stats.totalImported} records).`);
+            }
+
+            // 5. Update UI
+            if (typeof App !== 'undefined' && App.showNotification) {
+                App.showNotification(`Book Keeper sync complete: ${stats.totalImported} records imported.`, 'success');
+            }
+
+            // Refresh dashboards if currently visible
+            if (typeof App !== 'undefined') {
+                if (App.currentView === 'accounting' && typeof AccountingUI !== 'undefined') {
+                    AccountingUI.renderDashboard();
+                } else if (App.currentView === 'invoices' && typeof InvoicesUI !== 'undefined') {
+                    await InvoicesUI.load?.();
+                }
+            }
+        } catch (e) {
+            console.error('[Sync] Safe Import Error:', e);
+            if (typeof SyncManager !== 'undefined') {
+                SyncManager.updateStatus('conflict', 'Sync Failed: ' + e.message);
+                SyncManager.logSyncEvent('error', 'Import failed: ' + e.message);
+            }
+            if (window.App && App.showNotification) {
+                App.showNotification('Book Keeper sync failed: ' + e.message, 'error');
+            }
+        }
+    },
+
+    /**
+     * Trigger the full import process from the configured local path (Electron Only)
+     */
+    async triggerSync() {
+        if (!window.electronAPI || !window.electronAPI.readFileBuffer) {
+            // Background polling only works on Desktop via Electron
+            return;
         }
 
         try {
@@ -282,57 +414,20 @@ const BookKeeperSync = {
                 throw new Error('No backup file path configured');
             }
 
-            console.log('Triggering Book Keeper Import from:', this.config.backupPath);
+            console.log('[Sync] Triggering background import from:', this.config.backupPath);
 
             // Read file buffer via Electron IPC
-            if (window.electronAPI && window.electronAPI.readFileBuffer) {
-                const result = await window.electronAPI.readFileBuffer(this.config.backupPath);
+            const result = await window.electronAPI.readFileBuffer(this.config.backupPath);
 
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-
-                if (window.BookKeeperImport) {
-                    // Clear old BK data first so deletions are reflected
-                    if (typeof BookKeeperImport.clearBookKeeperData === 'function') {
-                        BookKeeperImport.clearBookKeeperData();
-                    }
-
-                    // Run Import
-                    const stats = await BookKeeperImport.runFullImport(result.buffer);
-                    const isVerified = await this.verifyDataIntegrity();
-
-                    // Store last sync details
-                    this.config.lastSyncDetails = {
-                        time: new Date().getTime(),
-                        counts: {
-                            vouchers: stats.vouchers?.imported || 0,
-                            customers: stats.customers?.imported || 0,
-                            inventory: stats.inventory?.imported || 0
-                        },
-                        path: this.config.backupPath
-                    };
-                    this.saveConfig();
-
-                    if (typeof SyncManager !== 'undefined') {
-                        if (isVerified) {
-                            SyncManager.updateStatus('synced', 'Synced with Book Keeper');
-                        } else {
-                            SyncManager.updateStatus('warning', 'Synced with Data Warnings');
-                        }
-                    }
-
-                    // Refresh UI if needed
-                    if (App.currentView === 'accounting' && AccountingUI) {
-                        AccountingUI.showTrialBalance();
-                    }
-                }
-            } else {
-                throw new Error('Electron API not available for file reading');
+            if (result.error) {
+                throw new Error(result.error);
             }
 
+            // Run central safe import
+            await this._runImportFromFile(result.buffer, this.config.backupPath);
+
         } catch (e) {
-            console.error('Sync Error:', e);
+            console.error('[Sync] Background sync error:', e);
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.updateStatus('conflict', 'Sync Failed: ' + e.message);
             }

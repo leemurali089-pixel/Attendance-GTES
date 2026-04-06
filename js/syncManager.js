@@ -298,7 +298,7 @@ const SyncManager = {
                                 <div style="color: rgba(255,255,255,0.7); font-size: 0.75rem; margin-top: 2px;">${fileName}</div>
                                 <div style="color: rgba(255,255,255,0.4); font-size: 0.6rem; margin-top: 1px; word-break: break-all;">${backupPath || 'No absolute path saved'}</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.initiateNativeSync()">
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync()">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>
@@ -322,7 +322,7 @@ const SyncManager = {
                                 <h6 class="mb-0 small fw-bold"><i class="bi bi-database me-1 text-info"></i>Book Keeper Backup</h6>
                                 <div class="text-muted" style="font-size: 0.7rem;">No sync performed yet</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="BookKeeperSync.initiateNativeSync(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal'))?.hide();">
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal'))?.hide();">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>

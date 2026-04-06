@@ -12952,10 +12952,10 @@
   },
   {
     "id": "010",
-    "bookkeeperId": "BK-5394",
-    "date": "2024-07-12",
+    "bookkeeperId": "BK-5392",
+    "date": "2024-03-14",
     "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 200000,
+    "amount": 150000,
     "type": "receipt",
     "paymentMode": "RTGS",
     "mode": "RTGS",
@@ -12963,7 +12963,7 @@
     "voucherNo": "010",
     "linkedInvoiceId": "",
     "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.929Z",
+    "createdAt": "2026-03-13T13:53:32.931Z",
     "source": "bookkeeper"
   },
   {
@@ -14494,22 +14494,6 @@
     "source": "bookkeeper"
   },
   {
-    "id": "010",
-    "bookkeeperId": "BK-5392",
-    "date": "2024-03-14",
-    "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 150000,
-    "type": "receipt",
-    "paymentMode": "RTGS",
-    "mode": "RTGS",
-    "narration": "",
-    "voucherNo": "010",
-    "linkedInvoiceId": "",
-    "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.931Z",
-    "source": "bookkeeper"
-  },
-  {
     "id": "0673",
     "bookkeeperId": "BK-6710",
     "date": "2024-03-13",
@@ -15148,26 +15132,19 @@
   },
   {
     "id": "110",
-    "bookkeeperId": "BK-5410",
-    "date": "2024-02-15",
-    "customerName": "DEVI INDUSTRIAL GASES - C",
-    "amount": 1316,
+    "bookkeeperId": "BK-4517",
+    "date": "2023-08-30",
+    "customerName": "TAGORE HEALTH CARE PVT LTD",
+    "amount": 100000,
     "type": "receipt",
-    "paymentMode": "Cash Card",
-    "mode": "Cash Card",
+    "paymentMode": "Cash",
+    "mode": "Cash",
     "narration": "",
     "voucherNo": "110",
     "linkedInvoiceId": "",
     "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.932Z",
-    "source": "bookkeeper",
-    "linkedInvoices": [
-      {
-        "id": "00428",
-        "amount": 1316,
-        "invoiceNo": "00428"
-      }
-    ]
+    "createdAt": "2026-03-13T13:53:32.936Z",
+    "source": "bookkeeper"
   },
   {
     "id": "0140",
@@ -17866,22 +17843,6 @@
     "mode": "RTGS",
     "narration": "",
     "voucherNo": "0484",
-    "linkedInvoiceId": "",
-    "referenceId": "",
-    "createdAt": "2026-03-13T13:53:32.936Z",
-    "source": "bookkeeper"
-  },
-  {
-    "id": "110",
-    "bookkeeperId": "BK-4517",
-    "date": "2023-08-30",
-    "customerName": "TAGORE HEALTH CARE PVT LTD",
-    "amount": 100000,
-    "type": "receipt",
-    "paymentMode": "Cash",
-    "mode": "Cash",
-    "narration": "",
-    "voucherNo": "110",
     "linkedInvoiceId": "",
     "referenceId": "",
     "createdAt": "2026-03-13T13:53:32.936Z",
@@ -26226,6 +26187,5144 @@
     "linkedInvoiceId": "",
     "referenceId": "",
     "createdAt": "2026-03-13T13:53:32.946Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "GTES/26-27/REC01",
+    "bookkeeperId": "BK-9333",
+    "date": "2026-04-02",
+    "customerId": "CUST-1775472790088-87m2r",
+    "customerName": "RR FIRE AND SAFETY EQUIPMENTS",
+    "amount": 1652,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "GTES/26-27/REC01",
+    "linkedInvoiceId": "GTES/26-27/05",
+    "linkedInvoices": [
+      "GTES/26-27/05"
+    ],
+    "allocations": [
+      {
+        "id": "GTES/26-27/05",
+        "invoiceNo": "GTES/26-27/05",
+        "billNo": "GTES/26-27/05",
+        "no": "GTES/26-27/05",
+        "amount": 1652,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.612Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "JRN1",
+    "bookkeeperId": "BK-9105",
+    "date": "2026-03-31",
+    "customerName": "Basic Salary",
+    "amount": 50025,
+    "type": "payment",
+    "paymentMode": "Cash",
+    "mode": "Cash",
+    "narration": "Employee Name : James Backiaray G(GTES08)\r\nSalary : 50025.00\r\nSalary Period : Feb-2026",
+    "voucherNo": "JRN1",
+    "linkedInvoiceId": "",
+    "linkedInvoices": [],
+    "allocations": [],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.613Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "JRN2",
+    "bookkeeperId": "BK-9128",
+    "date": "2026-03-30",
+    "customerName": "Basic Salary",
+    "amount": 50025,
+    "type": "payment",
+    "paymentMode": "Cash",
+    "mode": "Cash",
+    "narration": "Employee Name : James Backiaraj G(GTES08)\r\nSalary : 50025\r\nSalary Period : Jan-2026",
+    "voucherNo": "JRN2",
+    "linkedInvoiceId": "",
+    "linkedInvoices": [],
+    "allocations": [],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.613Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1255",
+    "bookkeeperId": "BK-9029",
+    "date": "2026-03-14",
+    "customerName": "CRYOGAS SYSTEMS",
+    "amount": 34220,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "1255",
+    "linkedInvoiceId": "000634",
+    "linkedInvoices": [
+      "000634"
+    ],
+    "allocations": [
+      {
+        "id": "000634",
+        "invoiceNo": "000634",
+        "billNo": "000634",
+        "no": "000634",
+        "amount": 34220,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.614Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY225",
+    "bookkeeperId": "BK-9181",
+    "date": "2026-03-11",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 1104893,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-FDRL-IOBAN26070285910-ASHIRWAD E-GAS TECH ENG",
+    "voucherNo": "PAY225",
+    "linkedInvoiceId": "00416",
+    "linkedInvoices": [
+      "00416",
+      "00448",
+      "00449"
+    ],
+    "allocations": [
+      {
+        "id": "00416",
+        "billNo": "00416",
+        "no": "00416",
+        "amount": 69266,
+        "supplierBillNo": "455/CH/25-26,Dt:25.02.2026"
+      },
+      {
+        "id": "00448",
+        "billNo": "00448",
+        "no": "00448",
+        "amount": 550765,
+        "supplierBillNo": "468/CH/25-26"
+      },
+      {
+        "id": "00449",
+        "billNo": "00449",
+        "no": "00449",
+        "amount": 484862,
+        "supplierBillNo": "462/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.615Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY224",
+    "bookkeeperId": "BK-9180",
+    "date": "2026-03-10",
+    "customerName": "REFRIGERATION CENTRE",
+    "amount": 168364,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/606916517689/REFRIG/KKBK/XXXXXX1457/GasTe",
+    "voucherNo": "PAY224",
+    "linkedInvoiceId": "00348",
+    "linkedInvoices": [
+      "00348",
+      "00417",
+      "00458"
+    ],
+    "allocations": [
+      {
+        "id": "00348",
+        "billNo": "00348",
+        "no": "00348",
+        "amount": 24450,
+        "supplierBillNo": "RC/25-26/2443"
+      },
+      {
+        "id": "00417",
+        "billNo": "00417",
+        "no": "00417",
+        "amount": 48911,
+        "supplierBillNo": ""
+      },
+      {
+        "id": "00458",
+        "billNo": "00458",
+        "no": "00458",
+        "amount": 95003,
+        "supplierBillNo": "RC/25-26/3106"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.615Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1260",
+    "bookkeeperId": "BK-9041",
+    "date": "2026-03-10",
+    "customerName": "KING GAS",
+    "amount": 153871,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "1260",
+    "linkedInvoiceId": "000618",
+    "linkedInvoices": [
+      "000618",
+      "000619",
+      "000640"
+    ],
+    "allocations": [
+      {
+        "id": "000618",
+        "invoiceNo": "000618",
+        "billNo": "000618",
+        "no": "000618",
+        "amount": 15398,
+        "poRef": ""
+      },
+      {
+        "id": "000619",
+        "invoiceNo": "000619",
+        "billNo": "000619",
+        "no": "000619",
+        "amount": 83780,
+        "poRef": ""
+      },
+      {
+        "id": "000640",
+        "invoiceNo": "000640",
+        "billNo": "000640",
+        "no": "000640",
+        "amount": 54693,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.617Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1329",
+    "bookkeeperId": "BK-9259",
+    "date": "2026-03-09",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 3658,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN226068608886-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1329",
+    "linkedInvoiceId": "000584",
+    "linkedInvoices": [
+      "000584"
+    ],
+    "allocations": [
+      {
+        "id": "000584",
+        "invoiceNo": "000584",
+        "billNo": "000584",
+        "no": "000584",
+        "amount": 3658,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.617Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1328",
+    "bookkeeperId": "BK-9258",
+    "date": "2026-03-06",
+    "customerName": "Sri Karumari Amman Gas Agency",
+    "amount": 1180,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: SRI KARUMARI AMMAN GAS AGENCY",
+    "voucherNo": "1328",
+    "linkedInvoiceId": "000591",
+    "linkedInvoices": [
+      "000591"
+    ],
+    "allocations": [
+      {
+        "id": "000591",
+        "invoiceNo": "000591",
+        "billNo": "000591",
+        "no": "000591",
+        "amount": 1180,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.617Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY223",
+    "bookkeeperId": "BK-9179",
+    "date": "2026-03-06",
+    "customerName": "MUKESH STEEL ENTERPRISES",
+    "amount": 65526,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/606516313073/MUKESH/HDFC/XXXXXX6053/GAS T",
+    "voucherNo": "PAY223",
+    "linkedInvoiceId": "00436",
+    "linkedInvoices": [
+      "00436",
+      "00445"
+    ],
+    "allocations": [
+      {
+        "id": "00436",
+        "billNo": "00436",
+        "no": "00436",
+        "amount": 28687,
+        "supplierBillNo": "SRIRAM3370/25-26"
+      },
+      {
+        "id": "00445",
+        "billNo": "00445",
+        "no": "00445",
+        "amount": 36839,
+        "supplierBillNo": "SRIRAM3574/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.618Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1331",
+    "bookkeeperId": "BK-9287",
+    "date": "2026-03-02",
+    "customerName": "PURE GASES",
+    "amount": 177000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-TMBL-TMBLH26061097254-PURE GASES-REMARKS//R",
+    "voucherNo": "1331",
+    "linkedInvoiceId": "000614",
+    "linkedInvoices": [
+      "000614"
+    ],
+    "allocations": [
+      {
+        "id": "000614",
+        "invoiceNo": "000614",
+        "billNo": "000614",
+        "no": "000614",
+        "amount": 177000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.619Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1327",
+    "bookkeeperId": "BK-9257",
+    "date": "2026-03-02",
+    "customerName": "MADHU GAS AGENCIES",
+    "amount": 586460,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-MAHB-MAHBR52026030223149613-MADHU GAS -//.",
+    "voucherNo": "1327",
+    "linkedInvoiceId": "000610",
+    "linkedInvoices": [
+      "000610"
+    ],
+    "allocations": [
+      {
+        "id": "000610",
+        "invoiceNo": "000610",
+        "billNo": "000610",
+        "no": "000610",
+        "amount": 586460,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.620Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1326",
+    "bookkeeperId": "BK-9256",
+    "date": "2026-03-02",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 64239,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN426061435563-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1326",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000573",
+      "000580"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 158
+      },
+      {
+        "id": "000573",
+        "invoiceNo": "000573",
+        "billNo": "000573",
+        "no": "000573",
+        "amount": 42598,
+        "poRef": ""
+      },
+      {
+        "id": "000580",
+        "invoiceNo": "000580",
+        "billNo": "000580",
+        "no": "000580",
+        "amount": 21641,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.621Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1325",
+    "bookkeeperId": "BK-9255",
+    "date": "2026-02-28",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 12744,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00831680528-CHENNAI OX-0001",
+    "voucherNo": "1325",
+    "linkedInvoiceId": "000534",
+    "linkedInvoices": [
+      "000534",
+      "000535"
+    ],
+    "allocations": [
+      {
+        "id": "000534",
+        "invoiceNo": "000534",
+        "billNo": "000534",
+        "no": "000534",
+        "amount": 1593,
+        "poRef": ""
+      },
+      {
+        "id": "000535",
+        "invoiceNo": "000535",
+        "billNo": "000535",
+        "no": "000535",
+        "amount": 11151,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.621Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY222",
+    "bookkeeperId": "BK-9178",
+    "date": "2026-02-28",
+    "customerName": "ARL WEIGHING SYSTEM",
+    "amount": 35400,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/605911973351/ARL WE/TMBL/XXXXXX0437/GAS T",
+    "voucherNo": "PAY222",
+    "linkedInvoiceId": "00415",
+    "linkedInvoices": [
+      "00415"
+    ],
+    "allocations": [
+      {
+        "id": "00415",
+        "billNo": "00415",
+        "no": "00415",
+        "amount": 35400,
+        "supplierBillNo": "ARL/INV/046/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.622Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1324",
+    "bookkeeperId": "BK-9254",
+    "date": "2026-02-27",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 3671,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN126058320955-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1324",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000545"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 153
+      },
+      {
+        "id": "000545",
+        "invoiceNo": "000545",
+        "billNo": "000545",
+        "no": "000545",
+        "amount": 3671,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.623Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1323",
+    "bookkeeperId": "BK-9253",
+    "date": "2026-02-26",
+    "customerName": "PREMIER CARBONICPVT LTD,",
+    "amount": 2537,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CIUB-CIUBH26057016445-PREMIER CA-/ATTN/GAS",
+    "voucherNo": "1323",
+    "linkedInvoiceId": "000376",
+    "linkedInvoices": [
+      "000376"
+    ],
+    "allocations": [
+      {
+        "id": "000376",
+        "invoiceNo": "000376",
+        "billNo": "000376",
+        "no": "000376",
+        "amount": 2537,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.623Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY221",
+    "bookkeeperId": "BK-9177",
+    "date": "2026-02-25",
+    "customerName": "ROYAL GASES",
+    "amount": 45430,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/605621843182/ROYAL /UTIB/XXXXXX5616/GasTe",
+    "voucherNo": "PAY221",
+    "linkedInvoiceId": "00456",
+    "linkedInvoices": [
+      "00456"
+    ],
+    "allocations": [
+      {
+        "id": "00456",
+        "billNo": "00456",
+        "no": "00456",
+        "amount": 45430,
+        "supplierBillNo": "RG538-2025-2026"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.623Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1322",
+    "bookkeeperId": "BK-9252",
+    "date": "2026-02-24",
+    "customerName": "BEST AIR PRODUCTS",
+    "amount": 10000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: UPI/642168307935/CR/    MURUGAN  M/SBI/UPI",
+    "voucherNo": "1322",
+    "linkedInvoiceId": "000500",
+    "linkedInvoices": [
+      "000500"
+    ],
+    "allocations": [
+      {
+        "id": "000500",
+        "invoiceNo": "000500",
+        "billNo": "000500",
+        "no": "000500",
+        "amount": 10000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.624Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY220",
+    "bookkeeperId": "BK-9176",
+    "date": "2026-02-23",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 1361200,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-FDRL-IOBAM26054181000-ASHIRWAD E-",
+    "voucherNo": "PAY220",
+    "linkedInvoiceId": "00429",
+    "linkedInvoices": [
+      "00429"
+    ],
+    "allocations": [
+      {
+        "id": "00429",
+        "billNo": "00429",
+        "no": "00429",
+        "amount": 1361200,
+        "supplierBillNo": "421/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.624Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY219",
+    "bookkeeperId": "BK-9175",
+    "date": "2026-02-23",
+    "customerName": "ASIAN ENGINEERING CO",
+    "amount": 48906,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/605412716359/ASIAN /HDFC/XXXXXX4163/GAS T",
+    "voucherNo": "PAY219",
+    "linkedInvoiceId": "00349",
+    "linkedInvoices": [
+      "00349",
+      "00358",
+      "00439",
+      "00472"
+    ],
+    "allocations": [
+      {
+        "id": "00349",
+        "billNo": "00349",
+        "no": "00349",
+        "amount": 1770,
+        "supplierBillNo": "10638"
+      },
+      {
+        "id": "00358",
+        "billNo": "00358",
+        "no": "00358",
+        "amount": 609,
+        "supplierBillNo": "10691"
+      },
+      {
+        "id": "00439",
+        "billNo": "00439",
+        "no": "00439",
+        "amount": 46055,
+        "supplierBillNo": "11218"
+      },
+      {
+        "id": "00472",
+        "billNo": "00472",
+        "no": "00472",
+        "amount": 472,
+        "supplierBillNo": "10706"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.625Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY218",
+    "bookkeeperId": "BK-9174",
+    "date": "2026-02-23",
+    "customerName": "THE PROFESSIONAL COURIERS CHENNAI LLP",
+    "amount": 12455,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/605412716119/THE PR/ICIC/XXXXXX7450/GAS T",
+    "voucherNo": "PAY218",
+    "linkedInvoiceId": "00181",
+    "linkedInvoices": [
+      "00181",
+      "00241",
+      "00334",
+      "00408",
+      "00430"
+    ],
+    "allocations": [
+      {
+        "id": "00181",
+        "billNo": "00181",
+        "no": "00181",
+        "amount": 2347.17,
+        "supplierBillNo": "6202905"
+      },
+      {
+        "id": "00241",
+        "billNo": "00241",
+        "no": "00241",
+        "amount": 1019.18,
+        "supplierBillNo": "6203105"
+      },
+      {
+        "id": "00334",
+        "billNo": "00334",
+        "no": "00334",
+        "amount": 1491.66,
+        "supplierBillNo": "MAA30055157"
+      },
+      {
+        "id": "00408",
+        "billNo": "00408",
+        "no": "00408",
+        "amount": 7596.68,
+        "supplierBillNo": "MAA30060230"
+      },
+      {
+        "id": "00430",
+        "billNo": "00430",
+        "no": "00430",
+        "amount": 0.31,
+        "supplierBillNo": "MAA30073885"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.626Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1321",
+    "bookkeeperId": "BK-9251",
+    "date": "2026-02-21",
+    "customerName": "PUSHPAVALLI ENGG WORKS,",
+    "amount": 21890,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-ICIC-IN42605258943922-PUSHPAVALL-PAYMENT",
+    "voucherNo": "1321",
+    "linkedInvoiceId": "000568",
+    "linkedInvoices": [
+      "000568"
+    ],
+    "allocations": [
+      {
+        "id": "000568",
+        "invoiceNo": "000568",
+        "billNo": "000568",
+        "no": "000568",
+        "amount": 21890,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.627Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY217",
+    "bookkeeperId": "BK-9173",
+    "date": "2026-02-21",
+    "customerName": "INDOFAB METPRO ENGINEERS LLP",
+    "amount": 241310,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/605214641262/INDOFA/SBIN/XXXXXX2442/GasTe",
+    "voucherNo": "PAY217",
+    "linkedInvoiceId": "00442",
+    "linkedInvoices": [
+      "00442"
+    ],
+    "allocations": [
+      {
+        "id": "00442",
+        "billNo": "00442",
+        "no": "00442",
+        "amount": 241310,
+        "supplierBillNo": "IMEL/25-26/2416"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.627Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1320",
+    "bookkeeperId": "BK-9250",
+    "date": "2026-02-20",
+    "customerName": "PUSHPAVALLI ENGG WORKS,",
+    "amount": 20000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/605116974724/PUSHPAV/ICIC/XXXXXX0391/IMPS",
+    "voucherNo": "1320",
+    "linkedInvoiceId": "000568",
+    "linkedInvoices": [
+      "000568"
+    ],
+    "allocations": [
+      {
+        "id": "000568",
+        "invoiceNo": "000568",
+        "billNo": "000568",
+        "no": "000568",
+        "amount": 20000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.628Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1319",
+    "bookkeeperId": "BK-9249",
+    "date": "2026-02-20",
+    "customerName": "BEST AIR PRODUCTS",
+    "amount": 10000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: UPI/605185682253/CR/    MURUGAN  M/SBI/UPI",
+    "voucherNo": "1319",
+    "linkedInvoiceId": "000500",
+    "linkedInvoices": [
+      "000500"
+    ],
+    "allocations": [
+      {
+        "id": "000500",
+        "invoiceNo": "000500",
+        "billNo": "000500",
+        "no": "000500",
+        "amount": 10000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.628Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1318",
+    "bookkeeperId": "BK-9248",
+    "date": "2026-02-19",
+    "customerName": "SUNSLIT METALS",
+    "amount": 5310,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By SUNSLIT METALS-NET@386429",
+    "voucherNo": "1318",
+    "linkedInvoiceId": "000589",
+    "linkedInvoices": [
+      "000589"
+    ],
+    "allocations": [
+      {
+        "id": "000589",
+        "invoiceNo": "000589",
+        "billNo": "000589",
+        "no": "000589",
+        "amount": 5310,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.628Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY216",
+    "bookkeeperId": "BK-9172",
+    "date": "2026-02-18",
+    "customerName": "Sunlight Air Products LLP",
+    "amount": 15010,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604917507318/SUNLIG/HDFC/XXXXXX9075/GasTe",
+    "voucherNo": "PAY216",
+    "linkedInvoiceId": "00423",
+    "linkedInvoices": [
+      "00423",
+      "00437"
+    ],
+    "allocations": [
+      {
+        "id": "00423",
+        "billNo": "00423",
+        "no": "00423",
+        "amount": 0.4,
+        "supplierBillNo": "SLLP/25- 26/2540"
+      },
+      {
+        "id": "00437",
+        "billNo": "00437",
+        "no": "00437",
+        "amount": 15009.6,
+        "supplierBillNo": "SLLP/25-26/SLLP-2604"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.629Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1335",
+    "bookkeeperId": "BK-9286",
+    "date": "2026-02-16",
+    "customerName": "CRYOLOR ASIA PACIFIC PVT LTD,",
+    "amount": 158755,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CRLY-CRLYH26047981792-CRYOLOR AS-000528",
+    "voucherNo": "1335",
+    "linkedInvoiceId": "000528",
+    "linkedInvoices": [
+      "000528"
+    ],
+    "allocations": [
+      {
+        "id": "000528",
+        "invoiceNo": "000528",
+        "billNo": "000528",
+        "no": "000528",
+        "amount": 158755,
+        "poRef": "810435, Dated :- 31-03-2025 PO Revision Date :-  08-01-2026"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.630Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1317",
+    "bookkeeperId": "BK-9247",
+    "date": "2026-02-16",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 21285,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN226047182447-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1317",
+    "linkedInvoiceId": "000545",
+    "linkedInvoices": [
+      "000545",
+      "000557",
+      "000570"
+    ],
+    "allocations": [
+      {
+        "id": "000545",
+        "invoiceNo": "000545",
+        "billNo": "000545",
+        "no": "000545",
+        "amount": 399,
+        "poRef": ""
+      },
+      {
+        "id": "000557",
+        "invoiceNo": "000557",
+        "billNo": "000557",
+        "no": "000557",
+        "amount": 3422,
+        "poRef": ""
+      },
+      {
+        "id": "000570",
+        "invoiceNo": "000570",
+        "billNo": "000570",
+        "no": "000570",
+        "amount": 17464,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.631Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY215",
+    "bookkeeperId": "BK-9183",
+    "date": "2026-02-16",
+    "customerName": "MEGOLECK GAS EQUIPMENTS AND PIPING",
+    "amount": 235233,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604722419084/MEGOLE/KKBK/XXXXXX8709/GasTe",
+    "voucherNo": "PAY215",
+    "linkedInvoiceId": "",
+    "linkedInvoices": [],
+    "allocations": [],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.631Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY214",
+    "bookkeeperId": "BK-9170",
+    "date": "2026-02-13",
+    "customerName": "C S K AGENCY PRIVATE LTD",
+    "amount": 44755,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604415254069/CSK AG/MAHB/XXXXXX5453/GAS T",
+    "voucherNo": "PAY214",
+    "linkedInvoiceId": "00399",
+    "linkedInvoices": [
+      "00399",
+      "00433"
+    ],
+    "allocations": [
+      {
+        "id": "00399",
+        "billNo": "00399",
+        "no": "00399",
+        "amount": 44121,
+        "supplierBillNo": "A2025-26/2581"
+      },
+      {
+        "id": "00433",
+        "billNo": "00433",
+        "no": "00433",
+        "amount": 634,
+        "supplierBillNo": "A2025-26/2772"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.631Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1316",
+    "bookkeeperId": "BK-9246",
+    "date": "2026-02-12",
+    "customerName": "BEST AIR PRODUCTS",
+    "amount": 5000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: UPI/604352039054/CR/    MURUGAN  M/SBI/Leval gau",
+    "voucherNo": "1316",
+    "linkedInvoiceId": "000402",
+    "linkedInvoices": [
+      "000402",
+      "000500"
+    ],
+    "allocations": [
+      {
+        "id": "000402",
+        "invoiceNo": "000402",
+        "billNo": "000402",
+        "no": "000402",
+        "amount": 3328,
+        "poRef": ""
+      },
+      {
+        "id": "000500",
+        "invoiceNo": "000500",
+        "billNo": "000500",
+        "no": "000500",
+        "amount": 1672,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.632Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY213",
+    "bookkeeperId": "BK-9169",
+    "date": "2026-02-10",
+    "customerName": "Sunlight Air Products LLP",
+    "amount": 24903,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604112078177/SUNLIG/HDFC/XXXXXX9075/GasTe",
+    "voucherNo": "PAY213",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "00423"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 590.4
+      },
+      {
+        "id": "00423",
+        "billNo": "00423",
+        "no": "00423",
+        "amount": 24312.6,
+        "supplierBillNo": "SLLP/25- 26/2540"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.633Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY212",
+    "bookkeeperId": "BK-9168",
+    "date": "2026-02-10",
+    "customerName": "SUPREME CONTROLING VALVE PRIVATE LIMITED - S",
+    "amount": 23895,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604112078069/SUPREM/IDIB/XXXXXX4943/GasTe",
+    "voucherNo": "PAY212",
+    "linkedInvoiceId": "00385",
+    "linkedInvoices": [
+      "00385",
+      "00411"
+    ],
+    "allocations": [
+      {
+        "id": "00385",
+        "billNo": "00385",
+        "no": "00385",
+        "amount": 15930,
+        "supplierBillNo": "380/25-26"
+      },
+      {
+        "id": "00411",
+        "billNo": "00411",
+        "no": "00411",
+        "amount": 7965,
+        "supplierBillNo": "414/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.633Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1315",
+    "bookkeeperId": "BK-9245",
+    "date": "2026-02-09",
+    "customerName": "HI TECH AIR PRODUCTS",
+    "amount": 132829,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN426040637461-HI TECH AI-/ATTN//INB",
+    "voucherNo": "1315",
+    "linkedInvoiceId": "000501",
+    "linkedInvoices": [
+      "000501"
+    ],
+    "allocations": [
+      {
+        "id": "000501",
+        "invoiceNo": "000501",
+        "billNo": "000501",
+        "no": "000501",
+        "amount": 132829,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.634Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY211",
+    "bookkeeperId": "BK-9167",
+    "date": "2026-02-09",
+    "customerName": "Sunlight Air Products LLP",
+    "amount": 50747,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/604013025654/SUNLIG/HDFC/XXXXXX9075/GasTe",
+    "voucherNo": "PAY211",
+    "linkedInvoiceId": "00422",
+    "linkedInvoices": [
+      "00422"
+    ],
+    "allocations": [
+      {
+        "id": "00422",
+        "billNo": "00422",
+        "no": "00422",
+        "amount": 50747,
+        "supplierBillNo": "SLLP/25-26/2541,Dt; 10.02.2026."
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.634Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1330",
+    "bookkeeperId": "BK-9285",
+    "date": "2026-02-07",
+    "customerName": "PURE GASES",
+    "amount": 56935,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-TMBL-TMBLH26038452752-PURE GASES-OTHERS",
+    "voucherNo": "1330",
+    "linkedInvoiceId": "000306",
+    "linkedInvoices": [
+      "000306",
+      "000309",
+      "000536"
+    ],
+    "allocations": [
+      {
+        "id": "000306",
+        "invoiceNo": "000306",
+        "billNo": "000306",
+        "no": "000306",
+        "amount": 17255,
+        "poRef": ""
+      },
+      {
+        "id": "000309",
+        "invoiceNo": "000309",
+        "billNo": "000309",
+        "no": "000309",
+        "amount": 32745,
+        "poRef": ""
+      },
+      {
+        "id": "000536",
+        "invoiceNo": "000536",
+        "billNo": "000536",
+        "no": "000536",
+        "amount": 6935,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.635Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY210",
+    "bookkeeperId": "BK-9166",
+    "date": "2026-02-07",
+    "customerId": "CUST-1773410012290-al089",
+    "customerName": "UNIPHOS ENVIROTRONIC P LTD",
+    "amount": 76936,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/603818945412/UNIPHO/UTIB/XXXXXX4208/GAS T",
+    "voucherNo": "PAY210",
+    "linkedInvoiceId": "00431",
+    "linkedInvoices": [
+      "00431"
+    ],
+    "allocations": [
+      {
+        "id": "00431",
+        "billNo": "00431",
+        "no": "00431",
+        "amount": 76936,
+        "supplierBillNo": "922500568"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.636Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY209",
+    "bookkeeperId": "BK-9165",
+    "date": "2026-02-07",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 1400000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-FDRL-IOBAM26038494654-ASHIRWAD E-",
+    "voucherNo": "PAY209",
+    "linkedInvoiceId": "00429",
+    "linkedInvoices": [
+      "00429"
+    ],
+    "allocations": [
+      {
+        "id": "00429",
+        "billNo": "00429",
+        "no": "00429",
+        "amount": 1400000,
+        "supplierBillNo": "421/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.636Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1314",
+    "bookkeeperId": "BK-9244",
+    "date": "2026-02-06",
+    "customerName": "GH INDUCTION INDIA PVT.LTD.",
+    "amount": 8791,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN126037209093-GH INDUCTI-/ATTN//INB",
+    "voucherNo": "1314",
+    "linkedInvoiceId": "000541",
+    "linkedInvoices": [
+      "000541"
+    ],
+    "allocations": [
+      {
+        "id": "000541",
+        "invoiceNo": "000541",
+        "billNo": "000541",
+        "no": "000541",
+        "amount": 8791,
+        "poRef": "252616619 Dated :- 25-12-2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.637Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1313",
+    "bookkeeperId": "BK-9243",
+    "date": "2026-02-06",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 7312,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN526037544200-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1313",
+    "linkedInvoiceId": "000538",
+    "linkedInvoices": [
+      "000538",
+      "000545"
+    ],
+    "allocations": [
+      {
+        "id": "000538",
+        "invoiceNo": "000538",
+        "billNo": "000538",
+        "no": "000538",
+        "amount": 6898,
+        "poRef": ""
+      },
+      {
+        "id": "000545",
+        "invoiceNo": "000545",
+        "billNo": "000545",
+        "no": "000545",
+        "amount": 414,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.638Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1312",
+    "bookkeeperId": "BK-9242",
+    "date": "2026-02-06",
+    "customerName": "BEST AIR PRODUCTS",
+    "amount": 2000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: UPI/809232421204/CR/    MURUGAN  M/SBI/Payment f",
+    "voucherNo": "1312",
+    "linkedInvoiceId": "000208",
+    "linkedInvoices": [
+      "000208",
+      "000402"
+    ],
+    "allocations": [
+      {
+        "id": "000208",
+        "invoiceNo": "000208",
+        "billNo": "000208",
+        "no": "000208",
+        "amount": 136,
+        "poRef": ""
+      },
+      {
+        "id": "000402",
+        "invoiceNo": "000402",
+        "billNo": "000402",
+        "no": "000402",
+        "amount": 1864,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.639Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1337",
+    "bookkeeperId": "BK-9284",
+    "date": "2026-02-05",
+    "customerName": "Green Enviro Gas Pvt. Ltd.,",
+    "amount": 51743,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00781810780-GREEN ENVI-0001",
+    "voucherNo": "1337",
+    "linkedInvoiceId": "000574",
+    "linkedInvoices": [
+      "000574",
+      "000575"
+    ],
+    "allocations": [
+      {
+        "id": "000574",
+        "invoiceNo": "000574",
+        "billNo": "000574",
+        "no": "000574",
+        "amount": 42598,
+        "poRef": ""
+      },
+      {
+        "id": "000575",
+        "invoiceNo": "000575",
+        "billNo": "000575",
+        "no": "000575",
+        "amount": 9145,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.640Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1311",
+    "bookkeeperId": "BK-9241",
+    "date": "2026-02-05",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 17316,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN426036609396-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1311",
+    "linkedInvoiceId": "000525",
+    "linkedInvoices": [
+      "000525",
+      "000538"
+    ],
+    "allocations": [
+      {
+        "id": "000525",
+        "invoiceNo": "000525",
+        "billNo": "000525",
+        "no": "000525",
+        "amount": 7375,
+        "poRef": ""
+      },
+      {
+        "id": "000538",
+        "invoiceNo": "000538",
+        "billNo": "000538",
+        "no": "000538",
+        "amount": 9941,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.640Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1310",
+    "bookkeeperId": "BK-9240",
+    "date": "2026-02-04",
+    "customerName": "SRI SABARI TRADERS",
+    "amount": 328630,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: BY CASH GURURAJAN",
+    "voucherNo": "1310",
+    "linkedInvoiceId": "000567",
+    "linkedInvoices": [
+      "000567"
+    ],
+    "allocations": [
+      {
+        "id": "000567",
+        "invoiceNo": "000567",
+        "billNo": "000567",
+        "no": "000567",
+        "amount": 328630,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.641Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1309",
+    "bookkeeperId": "BK-9239",
+    "date": "2026-02-02",
+    "customerName": "HI TECH AIR PRODUCTS",
+    "amount": 200000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN426033465588-HI TECH AI-/ATTN//INB",
+    "voucherNo": "1309",
+    "linkedInvoiceId": "000501",
+    "linkedInvoices": [
+      "000501"
+    ],
+    "allocations": [
+      {
+        "id": "000501",
+        "invoiceNo": "000501",
+        "billNo": "000501",
+        "no": "000501",
+        "amount": 200000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.641Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY208",
+    "bookkeeperId": "BK-9164",
+    "date": "2026-02-02",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 276120,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/603315630410/ASHIRW/FDRL/XXXXXX0026/GAS T",
+    "voucherNo": "PAY208",
+    "linkedInvoiceId": "00412",
+    "linkedInvoices": [
+      "00412"
+    ],
+    "allocations": [
+      {
+        "id": "00412",
+        "billNo": "00412",
+        "no": "00412",
+        "amount": 276120,
+        "supplierBillNo": "411/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.642Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1308",
+    "bookkeeperId": "BK-9238",
+    "date": "2026-02-01",
+    "customerName": "AIR WATER INDIA PRIVATE LIMITED-",
+    "amount": 31736,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HSBC-HSBCN03215604719-AIR WATER -/ACC/NEFT/",
+    "voucherNo": "1308",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000433",
+      "000477"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 7312
+      },
+      {
+        "id": "000433",
+        "invoiceNo": "000433",
+        "billNo": "000433",
+        "no": "000433",
+        "amount": 3416,
+        "poRef": "25270065/OS, Dt: 05.11.2025."
+      },
+      {
+        "id": "000477",
+        "invoiceNo": "000477",
+        "billNo": "000477",
+        "no": "000477",
+        "amount": 28320,
+        "poRef": "25240174 Dated :- 29/10/2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.643Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1259",
+    "bookkeeperId": "BK-9040",
+    "date": "2026-02-01",
+    "customerName": "KING GAS",
+    "amount": 15300,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By KING GAS-NET@441414",
+    "voucherNo": "1259",
+    "linkedInvoiceId": "000413",
+    "linkedInvoices": [
+      "000413",
+      "000438"
+    ],
+    "allocations": [
+      {
+        "id": "000413",
+        "invoiceNo": "000413",
+        "billNo": "000413",
+        "no": "000413",
+        "amount": 9086,
+        "poRef": ""
+      },
+      {
+        "id": "000438",
+        "invoiceNo": "000438",
+        "billNo": "000438",
+        "no": "000438",
+        "amount": 6214,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.644Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1307",
+    "bookkeeperId": "BK-9237",
+    "date": "2026-01-31",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 8856,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00769466602-CHENNAI OX-0001",
+    "voucherNo": "1307",
+    "linkedInvoiceId": "000442",
+    "linkedInvoices": [
+      "000442",
+      "000508"
+    ],
+    "allocations": [
+      {
+        "id": "000442",
+        "invoiceNo": "000442",
+        "billNo": "000442",
+        "no": "000442",
+        "amount": 4431,
+        "poRef": ""
+      },
+      {
+        "id": "000508",
+        "invoiceNo": "000508",
+        "billNo": "000508",
+        "no": "000508",
+        "amount": 4425,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.644Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY207",
+    "bookkeeperId": "BK-9163",
+    "date": "2026-01-31",
+    "customerName": "STAR METAL ENGINEERING CORPORATION",
+    "amount": 323440,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/603112493780/STAR M/HDFC/XXXXXX6668/GAS T",
+    "voucherNo": "PAY207",
+    "linkedInvoiceId": "00265",
+    "linkedInvoices": [
+      "00265",
+      "00275",
+      "00302",
+      "00324"
+    ],
+    "allocations": [
+      {
+        "id": "00265",
+        "billNo": "00265",
+        "no": "00265",
+        "amount": 123000,
+        "supplierBillNo": "H-3044"
+      },
+      {
+        "id": "00275",
+        "billNo": "00275",
+        "no": "00275",
+        "amount": 66470,
+        "supplierBillNo": "H-3044"
+      },
+      {
+        "id": "00302",
+        "billNo": "00302",
+        "no": "00302",
+        "amount": 112230,
+        "supplierBillNo": "H-3211"
+      },
+      {
+        "id": "00324",
+        "billNo": "00324",
+        "no": "00324",
+        "amount": 21740,
+        "supplierBillNo": "H-3306"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.646Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY206",
+    "bookkeeperId": "BK-9162",
+    "date": "2026-01-29",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 302080,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602910357990/ASHIRW/FDRL/XXXXXX0026/GasTe",
+    "voucherNo": "PAY206",
+    "linkedInvoiceId": "00389",
+    "linkedInvoices": [
+      "00389",
+      "00451"
+    ],
+    "allocations": [
+      {
+        "id": "00389",
+        "billNo": "00389",
+        "no": "00389",
+        "amount": 136880,
+        "supplierBillNo": "385/CH/25-26"
+      },
+      {
+        "id": "00451",
+        "billNo": "00451",
+        "no": "00451",
+        "amount": 165200,
+        "supplierBillNo": "366/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.646Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1306",
+    "bookkeeperId": "BK-9236",
+    "date": "2026-01-28",
+    "customerName": "SEVEN HILLS ENTERPRISES",
+    "amount": 45784,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/602812109919/SEVENHI/BARB/XXXXXX0153/SEVEN",
+    "voucherNo": "1306",
+    "linkedInvoiceId": "000487",
+    "linkedInvoices": [
+      "000487"
+    ],
+    "allocations": [
+      {
+        "id": "000487",
+        "invoiceNo": "000487",
+        "billNo": "000487",
+        "no": "000487",
+        "amount": 45784,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.647Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1305",
+    "bookkeeperId": "BK-9235",
+    "date": "2026-01-27",
+    "customerName": "HI TECH AIR PRODUCTS",
+    "amount": 47578,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN226027500794-HI TECH AI-/ATTN//INB",
+    "voucherNo": "1305",
+    "linkedInvoiceId": "000518",
+    "linkedInvoices": [
+      "000518"
+    ],
+    "allocations": [
+      {
+        "id": "000518",
+        "invoiceNo": "000518",
+        "billNo": "000518",
+        "no": "000518",
+        "amount": 47578,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.647Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY205",
+    "bookkeeperId": "BK-9161",
+    "date": "2026-01-27",
+    "customerName": "INDOFAB METPRO ENGINEERS LLP",
+    "amount": 300900,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602711242493/INDOFA/SBIN/XXXXXX2442/GAS T",
+    "voucherNo": "PAY205",
+    "linkedInvoiceId": "00404",
+    "linkedInvoices": [
+      "00404"
+    ],
+    "allocations": [
+      {
+        "id": "00404",
+        "billNo": "00404",
+        "no": "00404",
+        "amount": 300900,
+        "supplierBillNo": "IMEL/25-26/2190"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.648Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY204",
+    "bookkeeperId": "BK-9160",
+    "date": "2026-01-27",
+    "customerName": "Dhruv Engineers",
+    "amount": 105610,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602711242308/DHRUV /ICIC/XXXXXX1714/GAS T",
+    "voucherNo": "PAY204",
+    "linkedInvoiceId": "00401",
+    "linkedInvoices": [
+      "00401"
+    ],
+    "allocations": [
+      {
+        "id": "00401",
+        "billNo": "00401",
+        "no": "00401",
+        "amount": 105610,
+        "supplierBillNo": "INV/25-26/501"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.648Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY203",
+    "bookkeeperId": "BK-9159",
+    "date": "2026-01-23",
+    "customerName": "MEGOLECK GAS EQUIPMENTS AND PIPING",
+    "amount": 150745,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602317068756/MEGOLE/KKBK/XXXXXX8709/GasTe",
+    "voucherNo": "PAY203",
+    "linkedInvoiceId": "00392",
+    "linkedInvoices": [
+      "00392",
+      "00403"
+    ],
+    "allocations": [
+      {
+        "id": "00392",
+        "billNo": "00392",
+        "no": "00392",
+        "amount": 125218,
+        "supplierBillNo": "2025-26/223"
+      },
+      {
+        "id": "00403",
+        "billNo": "00403",
+        "no": "00403",
+        "amount": 25527,
+        "supplierBillNo": "2025-26/227"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.649Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY202",
+    "bookkeeperId": "BK-9158",
+    "date": "2026-01-23",
+    "customerId": "CUST-1773410012290-al089",
+    "customerName": "UNIPHOS ENVIROTRONIC P LTD",
+    "amount": 67024,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602316065230/UNIPHO/UTIB/XXXXXX4208/GasTe",
+    "voucherNo": "PAY202",
+    "linkedInvoiceId": "00398",
+    "linkedInvoices": [
+      "00398"
+    ],
+    "allocations": [
+      {
+        "id": "00398",
+        "billNo": "00398",
+        "no": "00398",
+        "amount": 67024,
+        "supplierBillNo": "922500545"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.649Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1304",
+    "bookkeeperId": "BK-9260",
+    "date": "2026-01-21",
+    "customerName": "SHAKTHI ENGINEERING SERVICE - C",
+    "amount": 30803,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "1304",
+    "linkedInvoiceId": "000295",
+    "linkedInvoices": [
+      "000295",
+      "000328",
+      "000343",
+      "000345",
+      "000418"
+    ],
+    "allocations": [
+      {
+        "id": "000295",
+        "invoiceNo": "000295",
+        "billNo": "000295",
+        "no": "000295",
+        "amount": 19539.3,
+        "poRef": ""
+      },
+      {
+        "id": "000328",
+        "invoiceNo": "000328",
+        "billNo": "000328",
+        "no": "000328",
+        "amount": 903,
+        "poRef": ""
+      },
+      {
+        "id": "000343",
+        "invoiceNo": "000343",
+        "billNo": "000343",
+        "no": "000343",
+        "amount": 3953,
+        "poRef": ""
+      },
+      {
+        "id": "000345",
+        "invoiceNo": "000345",
+        "billNo": "000345",
+        "no": "000345",
+        "amount": 5605,
+        "poRef": ""
+      },
+      {
+        "id": "000418",
+        "invoiceNo": "000418",
+        "billNo": "000418",
+        "no": "000418",
+        "amount": 802.7,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.651Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1303",
+    "bookkeeperId": "BK-9234",
+    "date": "2026-01-20",
+    "customerName": "TN OXYGEN PRIVATE LIMITED - C",
+    "amount": 3310,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-KKBK-CMS0202671421029-TN OXYGEN -PUR OF CYL",
+    "voucherNo": "1303",
+    "linkedInvoiceId": "000456",
+    "linkedInvoices": [
+      "000456",
+      "000478"
+    ],
+    "allocations": [
+      {
+        "id": "000456",
+        "invoiceNo": "000456",
+        "billNo": "000456",
+        "no": "000456",
+        "amount": 1628,
+        "poRef": ""
+      },
+      {
+        "id": "000478",
+        "invoiceNo": "000478",
+        "billNo": "000478",
+        "no": "000478",
+        "amount": 1682,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.652Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY201",
+    "bookkeeperId": "BK-9157",
+    "date": "2026-01-20",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 136880,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/602011862313/ASHIRW/FDRL/XXXXXX0026/GAS T",
+    "voucherNo": "PAY201",
+    "linkedInvoiceId": "00451",
+    "linkedInvoices": [
+      "00451"
+    ],
+    "allocations": [
+      {
+        "id": "00451",
+        "billNo": "00451",
+        "no": "00451",
+        "amount": 136880,
+        "supplierBillNo": "366/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.652Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1302",
+    "bookkeeperId": "BK-9233",
+    "date": "2026-01-19",
+    "customerName": "K LITE INDUSTRIES PRIVATE LIMITED",
+    "amount": 103836,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HSBC-HSBCN01911215928-K-LITE IND-/ACC/NEFT",
+    "voucherNo": "1302",
+    "linkedInvoiceId": "000471",
+    "linkedInvoices": [
+      "000471"
+    ],
+    "allocations": [
+      {
+        "id": "000471",
+        "invoiceNo": "000471",
+        "billNo": "000471",
+        "no": "000471",
+        "amount": 103836,
+        "poRef": "2200002526, Dt:05.12.2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.653Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1301",
+    "bookkeeperId": "BK-9232",
+    "date": "2026-01-19",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 18975,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00747544068-CHENNAI OX-0001",
+    "voucherNo": "1301",
+    "linkedInvoiceId": "000368",
+    "linkedInvoices": [
+      "000368",
+      "000373",
+      "000382"
+    ],
+    "allocations": [
+      {
+        "id": "000368",
+        "invoiceNo": "000368",
+        "billNo": "000368",
+        "no": "000368",
+        "amount": 7346,
+        "poRef": ""
+      },
+      {
+        "id": "000373",
+        "invoiceNo": "000373",
+        "billNo": "000373",
+        "no": "000373",
+        "amount": 8738,
+        "poRef": ""
+      },
+      {
+        "id": "000382",
+        "invoiceNo": "000382",
+        "billNo": "000382",
+        "no": "000382",
+        "amount": 2891,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.654Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1300",
+    "bookkeeperId": "BK-9231",
+    "date": "2026-01-19",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 49442,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN526019255307-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1300",
+    "linkedInvoiceId": "000474",
+    "linkedInvoices": [
+      "000474"
+    ],
+    "allocations": [
+      {
+        "id": "000474",
+        "invoiceNo": "000474",
+        "billNo": "000474",
+        "no": "000474",
+        "amount": 49442,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.655Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY200",
+    "bookkeeperId": "BK-9156",
+    "date": "2026-01-19",
+    "customerName": "REFRIGERATION CENTRE",
+    "amount": 39412,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601917825989/REFRIG/KKBK/XXXXXX1457/GAS T",
+    "voucherNo": "PAY200",
+    "linkedInvoiceId": "00267",
+    "linkedInvoices": [
+      "00267",
+      "00276",
+      "00348"
+    ],
+    "allocations": [
+      {
+        "id": "00267",
+        "billNo": "00267",
+        "no": "00267",
+        "amount": 23282,
+        "supplierBillNo": "RC/25-26/2136"
+      },
+      {
+        "id": "00276",
+        "billNo": "00276",
+        "no": "00276",
+        "amount": 1168,
+        "supplierBillNo": "RC/25-26/2182"
+      },
+      {
+        "id": "00348",
+        "billNo": "00348",
+        "no": "00348",
+        "amount": 14962,
+        "supplierBillNo": "RC/25-26/2443"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.655Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY199",
+    "bookkeeperId": "BK-9155",
+    "date": "2026-01-19",
+    "customerName": "AVON HYDRAULICS & ENG. PRIVATE LTD",
+    "amount": 64605,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601916821002/AVON H/ICIC/XXXXXX0275/GAS T",
+    "voucherNo": "PAY199",
+    "linkedInvoiceId": "00396",
+    "linkedInvoices": [
+      "00396",
+      "00397"
+    ],
+    "allocations": [
+      {
+        "id": "00396",
+        "billNo": "00396",
+        "no": "00396",
+        "amount": 33040,
+        "supplierBillNo": "CH/5826/25-26"
+      },
+      {
+        "id": "00397",
+        "billNo": "00397",
+        "no": "00397",
+        "amount": 31565,
+        "supplierBillNo": "CH/5901/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.656Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY198",
+    "bookkeeperId": "BK-9154",
+    "date": "2026-01-19",
+    "customerName": "MUKESH STEEL ENTERPRISES",
+    "amount": 38209,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601916820911/MUKESH/HDFC/XXXXXX6053/GAS T",
+    "voucherNo": "PAY198",
+    "linkedInvoiceId": "00363",
+    "linkedInvoices": [
+      "00363",
+      "00376"
+    ],
+    "allocations": [
+      {
+        "id": "00363",
+        "billNo": "00363",
+        "no": "00363",
+        "amount": 32164,
+        "supplierBillNo": "SRIRAM2819/25-26"
+      },
+      {
+        "id": "00376",
+        "billNo": "00376",
+        "no": "00376",
+        "amount": 6045,
+        "supplierBillNo": "SRIRAM2876/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.656Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY197",
+    "bookkeeperId": "BK-9153",
+    "date": "2026-01-19",
+    "customerName": "HINDUSTAN FORGING",
+    "amount": 73007,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601912807517/HINDUS/ICIC/XXXXXX6090/GAS T",
+    "voucherNo": "PAY197",
+    "linkedInvoiceId": "00410",
+    "linkedInvoices": [
+      "00410"
+    ],
+    "allocations": [
+      {
+        "id": "00410",
+        "billNo": "00410",
+        "no": "00410",
+        "amount": 73007,
+        "supplierBillNo": "1734/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.657Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY196",
+    "bookkeeperId": "BK-9152",
+    "date": "2026-01-19",
+    "customerName": "AZURE INNOVATIVE VALVES",
+    "amount": 30503,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601912807395/AZURE /UTIB/XXXXXX9902/GAS T",
+    "voucherNo": "PAY196",
+    "linkedInvoiceId": "00388",
+    "linkedInvoices": [
+      "00388"
+    ],
+    "allocations": [
+      {
+        "id": "00388",
+        "billNo": "00388",
+        "no": "00388",
+        "amount": 30503,
+        "supplierBillNo": "AZ/25-26/973"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.657Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY195",
+    "bookkeeperId": "BK-9151",
+    "date": "2026-01-10",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 334400,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/601023240303/ASHIRW/FDRL/XXXXXX0026/GasTe",
+    "voucherNo": "PAY195",
+    "linkedInvoiceId": "00364",
+    "linkedInvoices": [
+      "00364",
+      "00365"
+    ],
+    "allocations": [
+      {
+        "id": "00364",
+        "billNo": "00364",
+        "no": "00364",
+        "amount": 60640,
+        "supplierBillNo": "340/CH/25-26"
+      },
+      {
+        "id": "00365",
+        "billNo": "00365",
+        "no": "00365",
+        "amount": 273760,
+        "supplierBillNo": "343/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.658Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY194",
+    "bookkeeperId": "BK-9150",
+    "date": "2026-01-09",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 200000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/600919130900/ASHIRW/FDRL/XXXXXX0026/GAS T",
+    "voucherNo": "PAY194",
+    "linkedInvoiceId": "00364",
+    "linkedInvoices": [
+      "00364"
+    ],
+    "allocations": [
+      {
+        "id": "00364",
+        "billNo": "00364",
+        "no": "00364",
+        "amount": 200000,
+        "supplierBillNo": "340/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.658Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1299",
+    "bookkeeperId": "BK-9230",
+    "date": "2026-01-07",
+    "customerName": "VEGA SPECIALITY GASES PRIVATE LIMITED,",
+    "amount": 300000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-SBIN-SBINR12026010712171182-VEGA SPECI-Payme",
+    "voucherNo": "1299",
+    "linkedInvoiceId": "00087",
+    "linkedInvoices": [
+      "00087"
+    ],
+    "allocations": [
+      {
+        "id": "00087",
+        "invoiceNo": "00087",
+        "billNo": "00087",
+        "no": "00087",
+        "amount": 300000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.659Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1298",
+    "bookkeeperId": "BK-9229",
+    "date": "2026-01-07",
+    "customerName": "Indo Gas",
+    "amount": 10384,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-UTIB-AXOMB00702069579-INDO GAS-OTHERS-BIL",
+    "voucherNo": "1298",
+    "linkedInvoiceId": "000495",
+    "linkedInvoices": [
+      "000495",
+      "000507"
+    ],
+    "allocations": [
+      {
+        "id": "000495",
+        "invoiceNo": "000495",
+        "billNo": "000495",
+        "no": "000495",
+        "amount": 9912,
+        "poRef": ""
+      },
+      {
+        "id": "000507",
+        "invoiceNo": "000507",
+        "billNo": "000507",
+        "no": "000507",
+        "amount": 472,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.659Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY192",
+    "bookkeeperId": "BK-9189",
+    "date": "2026-01-07",
+    "customerName": "GCE India P Ltd",
+    "amount": 149482,
+    "type": "payment",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "PAY192",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "00116",
+      "00134",
+      "00149"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 12272
+      },
+      {
+        "id": "00116",
+        "billNo": "00116",
+        "no": "00116",
+        "amount": 96373,
+        "supplierBillNo": "480251559"
+      },
+      {
+        "id": "00134",
+        "billNo": "00134",
+        "no": "00134",
+        "amount": 28565,
+        "supplierBillNo": "480251593"
+      },
+      {
+        "id": "00149",
+        "billNo": "00149",
+        "no": "00149",
+        "amount": 12272,
+        "supplierBillNo": "480251643"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.660Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY193",
+    "bookkeeperId": "BK-9149",
+    "date": "2026-01-07",
+    "customerName": "STAR METAL ENGINEERING CORPORATION",
+    "amount": 300000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/600713931608/STAR M/HDFC/XXXXXX6668/GAS T",
+    "voucherNo": "PAY193",
+    "linkedInvoiceId": "00240",
+    "linkedInvoices": [
+      "00240",
+      "00275"
+    ],
+    "allocations": [
+      {
+        "id": "00240",
+        "billNo": "00240",
+        "no": "00240",
+        "amount": 243470,
+        "supplierBillNo": "H-2896"
+      },
+      {
+        "id": "00275",
+        "billNo": "00275",
+        "no": "00275",
+        "amount": 56530,
+        "supplierBillNo": "H-3044"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.661Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1297",
+    "bookkeeperId": "BK-9228",
+    "date": "2026-01-06",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 75461,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN226006310559-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1297",
+    "linkedInvoiceId": "000482",
+    "linkedInvoices": [
+      "000482"
+    ],
+    "allocations": [
+      {
+        "id": "000482",
+        "invoiceNo": "000482",
+        "billNo": "000482",
+        "no": "000482",
+        "amount": 75461,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.661Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1296",
+    "bookkeeperId": "BK-9227",
+    "date": "2026-01-05",
+    "customerName": "Sri Karumari Amman Gas Agency",
+    "amount": 50976,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By SRI KARUMARI AMMAN GAS-NET@346518",
+    "voucherNo": "1296",
+    "linkedInvoiceId": "000484",
+    "linkedInvoices": [
+      "000484"
+    ],
+    "allocations": [
+      {
+        "id": "000484",
+        "invoiceNo": "000484",
+        "billNo": "000484",
+        "no": "000484",
+        "amount": 50976,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.662Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1295",
+    "bookkeeperId": "BK-9226",
+    "date": "2026-01-03",
+    "customerName": "HI TECH AIR PRODUCTS",
+    "amount": 200000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN426003385226-HI TECH AI-/ATTN//INB",
+    "voucherNo": "1295",
+    "linkedInvoiceId": "000501",
+    "linkedInvoices": [
+      "000501"
+    ],
+    "allocations": [
+      {
+        "id": "000501",
+        "invoiceNo": "000501",
+        "billNo": "000501",
+        "no": "000501",
+        "amount": 200000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.662Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY191",
+    "bookkeeperId": "BK-9148",
+    "date": "2026-01-02",
+    "customerName": "C S K AGENCY PRIVATE LTD",
+    "amount": 36798,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/600218486500/CSK AG/MAHB/XXXXXX5453/GAS T",
+    "voucherNo": "PAY191",
+    "linkedInvoiceId": "00342",
+    "linkedInvoices": [
+      "00342",
+      "00377"
+    ],
+    "allocations": [
+      {
+        "id": "00342",
+        "billNo": "00342",
+        "no": "00342",
+        "amount": 2751,
+        "supplierBillNo": "A2025-26/2303"
+      },
+      {
+        "id": "00377",
+        "billNo": "00377",
+        "no": "00377",
+        "amount": 34047,
+        "supplierBillNo": "A2025-26/2423"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.663Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1294",
+    "bookkeeperId": "BK-9225",
+    "date": "2025-12-31",
+    "customerName": "PREMIER CARBONICPVT LTD,",
+    "amount": 397627,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CIUB-CIUBH25365037207-PREMIER CA-/ATTN/PAYM",
+    "voucherNo": "1294",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000488"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 780
+      },
+      {
+        "id": "000488",
+        "invoiceNo": "000488",
+        "billNo": "000488",
+        "no": "000488",
+        "amount": 397627,
+        "poRef": "GPPO-090-2526 Dated:- 01-11-2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.664Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY190",
+    "bookkeeperId": "BK-9147",
+    "date": "2025-12-31",
+    "customerName": "AZURE INNOVATIVE VALVES",
+    "amount": 37878,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/536512272765/AZURE /UTIB/XXXXXX9902/GAS T",
+    "voucherNo": "PAY190",
+    "linkedInvoiceId": "00373",
+    "linkedInvoices": [
+      "00373"
+    ],
+    "allocations": [
+      {
+        "id": "00373",
+        "billNo": "00373",
+        "no": "00373",
+        "amount": 37878,
+        "supplierBillNo": "AZ/25-26/918"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.665Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1293",
+    "bookkeeperId": "BK-9224",
+    "date": "2025-12-29",
+    "customerName": "RAJA GASES PRIVATE LTD",
+    "amount": 40209,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/536317808845/RAJA GA/IDIB/XXXXXX3828/GAS T",
+    "voucherNo": "1293",
+    "linkedInvoiceId": "000429",
+    "linkedInvoices": [
+      "000429",
+      "000470"
+    ],
+    "allocations": [
+      {
+        "id": "000429",
+        "invoiceNo": "000429",
+        "billNo": "000429",
+        "no": "000429",
+        "amount": 6608,
+        "poRef": ""
+      },
+      {
+        "id": "000470",
+        "invoiceNo": "000470",
+        "billNo": "000470",
+        "no": "000470",
+        "amount": 33601,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.666Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY189",
+    "bookkeeperId": "BK-9146",
+    "date": "2025-12-29",
+    "customerName": "VELAN ENGINEERING SEALS",
+    "amount": 28777,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/536320165722/VELAN /CNRB/XXXXXX0425/GasTe",
+    "voucherNo": "PAY189",
+    "linkedInvoiceId": "00380",
+    "linkedInvoices": [
+      "00380"
+    ],
+    "allocations": [
+      {
+        "id": "00380",
+        "billNo": "00380",
+        "no": "00380",
+        "amount": 28777,
+        "supplierBillNo": "1138"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.667Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY188",
+    "bookkeeperId": "BK-9145",
+    "date": "2025-12-29",
+    "customerName": "ASIAN ENGINEERING CO",
+    "amount": 62776,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/536320165636/ASIAN /HDFC/XXXXXX4163/GasTe",
+    "voucherNo": "PAY188",
+    "linkedInvoiceId": "00349",
+    "linkedInvoices": [
+      "00349"
+    ],
+    "allocations": [
+      {
+        "id": "00349",
+        "billNo": "00349",
+        "no": "00349",
+        "amount": 62776,
+        "supplierBillNo": "10638"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.667Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1292",
+    "bookkeeperId": "BK-9223",
+    "date": "2025-12-27",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 13458,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00696809143-CHENNAI OX-0001",
+    "voucherNo": "1292",
+    "linkedInvoiceId": "000340",
+    "linkedInvoices": [
+      "000340",
+      "000344"
+    ],
+    "allocations": [
+      {
+        "id": "000340",
+        "invoiceNo": "000340",
+        "billNo": "000340",
+        "no": "000340",
+        "amount": 10325,
+        "poRef": ""
+      },
+      {
+        "id": "000344",
+        "invoiceNo": "000344",
+        "billNo": "000344",
+        "no": "000344",
+        "amount": 3133,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.668Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY187",
+    "bookkeeperId": "BK-9144",
+    "date": "2025-12-27",
+    "customerName": "ASHIRWAD EQUIPMENTS PRIVATE LIMITED",
+    "amount": 150000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/536109006446/ASHIRW/FDRL/XXXXXX0026/GAS T",
+    "voucherNo": "PAY187",
+    "linkedInvoiceId": "00364",
+    "linkedInvoices": [
+      "00364"
+    ],
+    "allocations": [
+      {
+        "id": "00364",
+        "billNo": "00364",
+        "no": "00364",
+        "amount": 150000,
+        "supplierBillNo": "340/CH/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.668Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1291",
+    "bookkeeperId": "BK-9222",
+    "date": "2025-12-26",
+    "customerName": "AIR WATER INDIA PRIVATE LIMITED-",
+    "amount": 399695.6,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HSBC-HSBCN36004300534-AIR WATER -/ACC/NEFT/",
+    "voucherNo": "1291",
+    "linkedInvoiceId": "000433",
+    "linkedInvoices": [
+      "000433"
+    ],
+    "allocations": [
+      {
+        "id": "000433",
+        "invoiceNo": "000433",
+        "billNo": "000433",
+        "no": "000433",
+        "amount": 399695.6,
+        "poRef": "25270065/OS, Dt: 05.11.2025."
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.668Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY186",
+    "bookkeeperId": "BK-9143",
+    "date": "2025-12-26",
+    "customerName": "VISHWAKARMA MECHANICAL WORKS",
+    "amount": 21948,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/536015963123/VISHWA/IBKL/XXXXXX8404/GAS T",
+    "voucherNo": "PAY186",
+    "linkedInvoiceId": "00368",
+    "linkedInvoices": [
+      "00368"
+    ],
+    "allocations": [
+      {
+        "id": "00368",
+        "billNo": "00368",
+        "no": "00368",
+        "amount": 21948,
+        "supplierBillNo": "25-26/670"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.669Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY185",
+    "bookkeeperId": "BK-9142",
+    "date": "2025-12-25",
+    "customerId": "CUST-1775472790088-xx83z",
+    "customerName": "LAKSHMI BALA SREE VAC",
+    "amount": 50000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/535909889635/LAKSHM/PUNB/XXXXXX0652/GasTe",
+    "voucherNo": "PAY185",
+    "linkedInvoiceId": "00471",
+    "linkedInvoices": [
+      "00471"
+    ],
+    "allocations": [
+      {
+        "id": "00471",
+        "billNo": "00471",
+        "no": "00471",
+        "amount": 50000,
+        "supplierBillNo": "LBS/62/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.669Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1290",
+    "bookkeeperId": "BK-9221",
+    "date": "2025-12-23",
+    "customerName": "SEVEN HILLS ENTERPRISES",
+    "amount": 30880,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-BARB-BARBS25357686978-SEVEN HILL",
+    "voucherNo": "1290",
+    "linkedInvoiceId": "000451",
+    "linkedInvoices": [
+      "000451",
+      "000468"
+    ],
+    "allocations": [
+      {
+        "id": "000451",
+        "invoiceNo": "000451",
+        "billNo": "000451",
+        "no": "000451",
+        "amount": 20000,
+        "poRef": ""
+      },
+      {
+        "id": "000468",
+        "invoiceNo": "000468",
+        "billNo": "000468",
+        "no": "000468",
+        "amount": 10880,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.670Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY184",
+    "bookkeeperId": "BK-9141",
+    "date": "2025-12-23",
+    "customerName": "AVON ENGINEERS",
+    "amount": 100607,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/535714782063/AVON E/KKBK/XXXXXX4194/GasTe",
+    "voucherNo": "PAY184",
+    "linkedInvoiceId": "00351",
+    "linkedInvoices": [
+      "00351"
+    ],
+    "allocations": [
+      {
+        "id": "00351",
+        "billNo": "00351",
+        "no": "00351",
+        "amount": 100607,
+        "supplierBillNo": "AE/25-26/10607"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.670Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1288",
+    "bookkeeperId": "BK-9261",
+    "date": "2025-12-22",
+    "customerName": "THIRUMALAI ATMOSPHERIC PRODUTS",
+    "amount": 100000,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "1288",
+    "linkedInvoiceId": "10",
+    "linkedInvoices": [
+      "10",
+      "57"
+    ],
+    "allocations": [
+      {
+        "id": "10",
+        "invoiceNo": "10",
+        "billNo": "10",
+        "no": "10",
+        "amount": 1369,
+        "poRef": ""
+      },
+      {
+        "id": "57",
+        "invoiceNo": "57",
+        "billNo": "57",
+        "no": "57",
+        "amount": 98631,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.671Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1289",
+    "bookkeeperId": "BK-9220",
+    "date": "2025-12-22",
+    "customerName": "TN OXYGEN PRIVATE LIMITED - C",
+    "amount": 1133,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-KKBK-CMS3562563992801-TN OXYGEN -PUR OF CYL",
+    "voucherNo": "1289",
+    "linkedInvoiceId": "000399",
+    "linkedInvoices": [
+      "000399",
+      "000427"
+    ],
+    "allocations": [
+      {
+        "id": "000399",
+        "invoiceNo": "000399",
+        "billNo": "000399",
+        "no": "000399",
+        "amount": 661,
+        "poRef": ""
+      },
+      {
+        "id": "000427",
+        "invoiceNo": "000427",
+        "billNo": "000427",
+        "no": "000427",
+        "amount": 472,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.672Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1258",
+    "bookkeeperId": "BK-9039",
+    "date": "2025-12-20",
+    "customerName": "KING GAS",
+    "amount": 10000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By KING GAS-NET@476173",
+    "voucherNo": "1258",
+    "linkedInvoiceId": "000374",
+    "linkedInvoices": [
+      "000374"
+    ],
+    "allocations": [
+      {
+        "id": "000374",
+        "invoiceNo": "000374",
+        "billNo": "000374",
+        "no": "000374",
+        "amount": 10000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.672Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1287",
+    "bookkeeperId": "BK-9219",
+    "date": "2025-12-19",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 82833,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN225353554092-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1287",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000436",
+      "000443",
+      "000457"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 573
+      },
+      {
+        "id": "000436",
+        "invoiceNo": "000436",
+        "billNo": "000436",
+        "no": "000436",
+        "amount": 115,
+        "poRef": ""
+      },
+      {
+        "id": "000443",
+        "invoiceNo": "000443",
+        "billNo": "000443",
+        "no": "000443",
+        "amount": 8968,
+        "poRef": ""
+      },
+      {
+        "id": "000457",
+        "invoiceNo": "000457",
+        "billNo": "000457",
+        "no": "000457",
+        "amount": 73750,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.673Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1286",
+    "bookkeeperId": "BK-9218",
+    "date": "2025-12-19",
+    "customerName": "SRI SEVENHILLS ENTERPRISES",
+    "amount": 41950,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By SRI SEVEN HILLS ENTERP-NET@458011",
+    "voucherNo": "1286",
+    "linkedInvoiceId": "000458",
+    "linkedInvoices": [
+      "000458"
+    ],
+    "allocations": [
+      {
+        "id": "000458",
+        "invoiceNo": "000458",
+        "billNo": "000458",
+        "no": "000458",
+        "amount": 41950,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.674Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY183",
+    "bookkeeperId": "BK-9140",
+    "date": "2025-12-19",
+    "customerName": "SUPREME CONTROLING VALVE PRIVATE LIMITED - S",
+    "amount": 47790,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/535310528139/SUPREM/IDIB/XXXXXX4943/GAS T",
+    "voucherNo": "PAY183",
+    "linkedInvoiceId": "00328",
+    "linkedInvoices": [
+      "00328"
+    ],
+    "allocations": [
+      {
+        "id": "00328",
+        "billNo": "00328",
+        "no": "00328",
+        "amount": 47790,
+        "supplierBillNo": "352/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.674Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY182",
+    "bookkeeperId": "BK-9139",
+    "date": "2025-12-19",
+    "customerName": "ASIAN ENGINEERING CO",
+    "amount": 10719,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/535310527986/ASIAN /HDFC/XXXXXX4163/GAS T",
+    "voucherNo": "PAY182",
+    "linkedInvoiceId": "00316",
+    "linkedInvoices": [
+      "00316"
+    ],
+    "allocations": [
+      {
+        "id": "00316",
+        "billNo": "00316",
+        "no": "00316",
+        "amount": 10719,
+        "supplierBillNo": "10498"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.674Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1285",
+    "bookkeeperId": "BK-9217",
+    "date": "2025-12-18",
+    "customerName": "RELIABLE GASES",
+    "amount": 12016,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CIUB-CIUBH25352033492-RELIABLE G-/ATTN/",
+    "voucherNo": "1285",
+    "linkedInvoiceId": "000446",
+    "linkedInvoices": [
+      "000446"
+    ],
+    "allocations": [
+      {
+        "id": "000446",
+        "invoiceNo": "000446",
+        "billNo": "000446",
+        "no": "000446",
+        "amount": 12016,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.675Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1284",
+    "bookkeeperId": "BK-9216",
+    "date": "2025-12-18",
+    "customerName": "JEYAMALLI INDUSTRIES (P) Ltd,",
+    "amount": 300000.4,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-SBIN-SBINR52025121809788658-JEYAMALLI",
+    "voucherNo": "1284",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "000453",
+      "000464"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 2.2
+      },
+      {
+        "id": "000453",
+        "invoiceNo": "000453",
+        "billNo": "000453",
+        "no": "000453",
+        "amount": 44776.2,
+        "poRef": "JMI/PO - 136, Dt: 28.11.2025"
+      },
+      {
+        "id": "000464",
+        "invoiceNo": "000464",
+        "billNo": "000464",
+        "no": "000464",
+        "amount": 255222,
+        "poRef": "JMI/PO - 136, Dt:28.11.2025."
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.676Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1283",
+    "bookkeeperId": "BK-9215",
+    "date": "2025-12-18",
+    "customerName": "Sri Karumari Amman Gas Agency",
+    "amount": 50976,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: SRI KARUMARI AMMAN GAS AGENCY",
+    "voucherNo": "1283",
+    "linkedInvoiceId": "000455",
+    "linkedInvoices": [
+      "000455"
+    ],
+    "allocations": [
+      {
+        "id": "000455",
+        "invoiceNo": "000455",
+        "billNo": "000455",
+        "no": "000455",
+        "amount": 50976,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.676Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY180",
+    "bookkeeperId": "BK-9188",
+    "date": "2025-12-18",
+    "customerName": "STAR METAL ENGINEERING CORPORATION",
+    "amount": 250000,
+    "type": "payment",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "PAY180",
+    "linkedInvoiceId": "00324",
+    "linkedInvoices": [
+      "00324",
+      "00354"
+    ],
+    "allocations": [
+      {
+        "id": "00324",
+        "billNo": "00324",
+        "no": "00324",
+        "amount": 51530,
+        "supplierBillNo": "H-3306"
+      },
+      {
+        "id": "00354",
+        "billNo": "00354",
+        "no": "00354",
+        "amount": 198470,
+        "supplierBillNo": "H-3601"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.677Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY181",
+    "bookkeeperId": "BK-9138",
+    "date": "2025-12-18",
+    "customerName": "BHARAT STEEL UDYOG",
+    "amount": 146962,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/535211460664/BHARAT/KKBK/XXXXXX0567/GAS T",
+    "voucherNo": "PAY181",
+    "linkedInvoiceId": "0065",
+    "linkedInvoices": [
+      "0065",
+      "0075",
+      "00191"
+    ],
+    "allocations": [
+      {
+        "id": "0065",
+        "billNo": "0065",
+        "no": "0065",
+        "amount": 124328,
+        "supplierBillNo": ""
+      },
+      {
+        "id": "0075",
+        "billNo": "0075",
+        "no": "0075",
+        "amount": 21131,
+        "supplierBillNo": ""
+      },
+      {
+        "id": "00191",
+        "billNo": "00191",
+        "no": "00191",
+        "amount": 1503,
+        "supplierBillNo": "BSU/25-26/1015"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.677Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1282",
+    "bookkeeperId": "BK-9214",
+    "date": "2025-12-12",
+    "customerName": "Sri Muthuvel Oxygen Company",
+    "amount": 7416,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/534617738741/SRI MUT/CNRB/XXXXXX0190/IMPS",
+    "voucherNo": "1282",
+    "linkedInvoiceId": "000396",
+    "linkedInvoices": [
+      "000396",
+      "000623"
+    ],
+    "allocations": [
+      {
+        "id": "000396",
+        "invoiceNo": "000396",
+        "billNo": "000396",
+        "no": "000396",
+        "amount": 1416,
+        "poRef": ""
+      },
+      {
+        "id": "000623",
+        "invoiceNo": "000623",
+        "billNo": "000623",
+        "no": "000623",
+        "amount": 6000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.678Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1281",
+    "bookkeeperId": "BK-9213",
+    "date": "2025-12-12",
+    "customerName": "HI TECH AIR PRODUCTS",
+    "amount": 125033,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN525346767508-HI TECH AI-/ATTN//INB",
+    "voucherNo": "1281",
+    "linkedInvoiceId": "000397",
+    "linkedInvoices": [
+      "000397"
+    ],
+    "allocations": [
+      {
+        "id": "000397",
+        "invoiceNo": "000397",
+        "billNo": "000397",
+        "no": "000397",
+        "amount": 125033,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.679Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1280",
+    "bookkeeperId": "BK-9212",
+    "date": "2025-12-12",
+    "customerName": "PREMIER CARBONICPVT LTD,",
+    "amount": 216160,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CIUB-CIUBH25346022178-PREMIER CA-/ATTN/PAYM",
+    "voucherNo": "1280",
+    "linkedInvoiceId": "000488",
+    "linkedInvoices": [
+      "000488"
+    ],
+    "allocations": [
+      {
+        "id": "000488",
+        "invoiceNo": "000488",
+        "billNo": "000488",
+        "no": "000488",
+        "amount": 216160,
+        "poRef": "GPPO-090-2526 Dated:- 01-11-2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.679Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY179",
+    "bookkeeperId": "BK-9137",
+    "date": "2025-12-11",
+    "customerName": "REFRIGERATION CENTRE",
+    "amount": 45207,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/534522934743/REFRIG/KKBK/XXXXXX1457/GasTe",
+    "voucherNo": "PAY179",
+    "linkedInvoiceId": "00267",
+    "linkedInvoices": [
+      "00267"
+    ],
+    "allocations": [
+      {
+        "id": "00267",
+        "billNo": "00267",
+        "no": "00267",
+        "amount": 45207,
+        "supplierBillNo": "RC/25-26/2136"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.679Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY178",
+    "bookkeeperId": "BK-9136",
+    "date": "2025-12-11",
+    "customerName": "TN OXYGEN PRIVATE LIMITED - S",
+    "amount": 10174,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/534515894691/TN OXY/KKBK/XXXXXX8254/GAS T",
+    "voucherNo": "PAY178",
+    "linkedInvoiceId": "00214",
+    "linkedInvoices": [
+      "00214",
+      "00229",
+      "00314",
+      "00318",
+      "00319",
+      "00320",
+      "00321",
+      "00322"
+    ],
+    "allocations": [
+      {
+        "id": "00214",
+        "billNo": "00214",
+        "no": "00214",
+        "amount": 2548.8,
+        "supplierBillNo": "AYN26-7363"
+      },
+      {
+        "id": "00229",
+        "billNo": "00229",
+        "no": "00229",
+        "amount": 1652,
+        "supplierBillNo": "AYN26-7362"
+      },
+      {
+        "id": "00314",
+        "billNo": "00314",
+        "no": "00314",
+        "amount": 637.2,
+        "supplierBillNo": "AYN26-8866"
+      },
+      {
+        "id": "00318",
+        "billNo": "00318",
+        "no": "00318",
+        "amount": 1840.8,
+        "supplierBillNo": "AYN26-6803"
+      },
+      {
+        "id": "00319",
+        "billNo": "00319",
+        "no": "00319",
+        "amount": 1840.8,
+        "supplierBillNo": "AYN26-8269"
+      },
+      {
+        "id": "00320",
+        "billNo": "00320",
+        "no": "00320",
+        "amount": 379.96,
+        "supplierBillNo": "AYN26-7768"
+      },
+      {
+        "id": "00321",
+        "billNo": "00321",
+        "no": "00321",
+        "amount": 1274.4,
+        "supplierBillNo": "AYN26-8352"
+      },
+      {
+        "id": "00322",
+        "billNo": "00322",
+        "no": "00322",
+        "amount": 0.04,
+        "supplierBillNo": "AYN26-9000"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.681Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY177",
+    "bookkeeperId": "BK-9135",
+    "date": "2025-12-11",
+    "customerName": "MUKESH STEEL ENTERPRISES",
+    "amount": 22920,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/534515894072/MUKESH/HDFC/XXXXXX6053/GAS T",
+    "voucherNo": "PAY177",
+    "linkedInvoiceId": "00307",
+    "linkedInvoices": [
+      "00307"
+    ],
+    "allocations": [
+      {
+        "id": "00307",
+        "billNo": "00307",
+        "no": "00307",
+        "amount": 22920,
+        "supplierBillNo": "SRIRAM2595/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.681Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY176",
+    "bookkeeperId": "BK-9134",
+    "date": "2025-12-11",
+    "customerName": "MEGOLECK GAS EQUIPMENTS AND PIPING",
+    "amount": 88775,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/534515893898/MEGOLE/KKBK/XXXXXX8709/GAS T",
+    "voucherNo": "PAY176",
+    "linkedInvoiceId": "00345",
+    "linkedInvoices": [
+      "00345",
+      "00392"
+    ],
+    "allocations": [
+      {
+        "id": "00345",
+        "billNo": "00345",
+        "no": "00345",
+        "amount": 63248,
+        "supplierBillNo": "2025-26/206"
+      },
+      {
+        "id": "00392",
+        "billNo": "00392",
+        "no": "00392",
+        "amount": 25527,
+        "supplierBillNo": "2025-26/223"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.682Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1257",
+    "bookkeeperId": "BK-9038",
+    "date": "2025-12-11",
+    "customerName": "KING GAS",
+    "amount": 10000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By KING GAS-NET@320116",
+    "voucherNo": "1257",
+    "linkedInvoiceId": "000374",
+    "linkedInvoices": [
+      "000374"
+    ],
+    "allocations": [
+      {
+        "id": "000374",
+        "invoiceNo": "000374",
+        "billNo": "000374",
+        "no": "000374",
+        "amount": 10000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.682Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1279",
+    "bookkeeperId": "BK-9211",
+    "date": "2025-12-10",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 13455,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN225344984605-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1279",
+    "linkedInvoiceId": "000408",
+    "linkedInvoices": [
+      "000408",
+      "000419",
+      "000436"
+    ],
+    "allocations": [
+      {
+        "id": "000408",
+        "invoiceNo": "000408",
+        "billNo": "000408",
+        "no": "000408",
+        "amount": 2242,
+        "poRef": ""
+      },
+      {
+        "id": "000419",
+        "invoiceNo": "000419",
+        "billNo": "000419",
+        "no": "000419",
+        "amount": 2360,
+        "poRef": ""
+      },
+      {
+        "id": "000436",
+        "invoiceNo": "000436",
+        "billNo": "000436",
+        "no": "000436",
+        "amount": 8853,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.683Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1336",
+    "bookkeeperId": "BK-9283",
+    "date": "2025-12-08",
+    "customerName": "Green Enviro Gas Pvt. Ltd.,",
+    "amount": 9405,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00660714562-GREEN ENVI-0001",
+    "voucherNo": "1336",
+    "linkedInvoiceId": "000317",
+    "linkedInvoices": [
+      "000317",
+      "000395"
+    ],
+    "allocations": [
+      {
+        "id": "000317",
+        "invoiceNo": "000317",
+        "billNo": "000317",
+        "no": "000317",
+        "amount": 2124,
+        "poRef": ""
+      },
+      {
+        "id": "000395",
+        "invoiceNo": "000395",
+        "billNo": "000395",
+        "no": "000395",
+        "amount": 7281,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.684Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1278",
+    "bookkeeperId": "BK-9210",
+    "date": "2025-12-06",
+    "customerName": "K LITE INDUSTRIES PRIVATE LIMITED",
+    "amount": 33669,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HSBC-HSBCN34099550586-K-LITE IND-/ACC/NEFT",
+    "voucherNo": "1278",
+    "linkedInvoiceId": "000471",
+    "linkedInvoices": [
+      "000471",
+      "000472"
+    ],
+    "allocations": [
+      {
+        "id": "000471",
+        "invoiceNo": "000471",
+        "billNo": "000471",
+        "no": "000471",
+        "amount": 28595,
+        "poRef": "2200002526, Dt:05.12.2025"
+      },
+      {
+        "id": "000472",
+        "invoiceNo": "000472",
+        "billNo": "000472",
+        "no": "000472",
+        "amount": 5074,
+        "poRef": "2200002651, Dt:20.12.2025."
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.684Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1277",
+    "bookkeeperId": "BK-9209",
+    "date": "2025-12-06",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 10644,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00657102699-CHENNAI OX-0001",
+    "voucherNo": "1277",
+    "linkedInvoiceId": "000312",
+    "linkedInvoices": [
+      "000312"
+    ],
+    "allocations": [
+      {
+        "id": "000312",
+        "invoiceNo": "000312",
+        "billNo": "000312",
+        "no": "000312",
+        "amount": 10644,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.685Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY175",
+    "bookkeeperId": "BK-9133",
+    "date": "2025-12-06",
+    "customerName": "S.M.METALS",
+    "amount": 78774,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/534017458336/S M ME/YESB/XXXXXX0052/GAS T",
+    "voucherNo": "PAY175",
+    "linkedInvoiceId": "00312",
+    "linkedInvoices": [
+      "00312"
+    ],
+    "allocations": [
+      {
+        "id": "00312",
+        "billNo": "00312",
+        "no": "00312",
+        "amount": 78774,
+        "supplierBillNo": "14556"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.685Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1334",
+    "bookkeeperId": "BK-9282",
+    "date": "2025-12-05",
+    "customerName": "CRYOLOR ASIA PACIFIC PVT LTD,",
+    "amount": 138600,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CRLY-CRLYH25339694570-CRYOLOR AS-ADVANCE PA",
+    "voucherNo": "1334",
+    "linkedInvoiceId": "0174",
+    "linkedInvoices": [
+      "0174",
+      "000528"
+    ],
+    "allocations": [
+      {
+        "id": "0174",
+        "invoiceNo": "0174",
+        "billNo": "0174",
+        "no": "0174",
+        "amount": 28320,
+        "poRef": "243424, DT:20.06.2024."
+      },
+      {
+        "id": "000528",
+        "invoiceNo": "000528",
+        "billNo": "000528",
+        "no": "000528",
+        "amount": 110280,
+        "poRef": "810435, Dated :- 31-03-2025 PO Revision Date :-  08-01-2026"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.686Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1333",
+    "bookkeeperId": "BK-9281",
+    "date": "2025-12-05",
+    "customerName": "Arumugamvelu Air Products",
+    "amount": 1416,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/533924611287/ARUMUGA/KARB/XXXXXX1801/Gas T",
+    "voucherNo": "1333",
+    "linkedInvoiceId": "000448",
+    "linkedInvoices": [
+      "000448"
+    ],
+    "allocations": [
+      {
+        "id": "000448",
+        "invoiceNo": "000448",
+        "billNo": "000448",
+        "no": "000448",
+        "amount": 1416,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.686Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1276",
+    "bookkeeperId": "BK-9208",
+    "date": "2025-12-05",
+    "customerName": "MKS INDUSTRIES",
+    "amount": 10874,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-BARB-BARBX25339273720-MKS INDUST",
+    "voucherNo": "1276",
+    "linkedInvoiceId": "000447",
+    "linkedInvoices": [
+      "000447"
+    ],
+    "allocations": [
+      {
+        "id": "000447",
+        "invoiceNo": "000447",
+        "billNo": "000447",
+        "no": "000447",
+        "amount": 10874,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.687Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1332",
+    "bookkeeperId": "BK-9280",
+    "date": "2025-12-04",
+    "customerName": "LISP TECHNOLOGIES PRIVATE LIMITED",
+    "amount": 6844,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/533815547260/LISP TE/ICIC/XXXXXX0682/GASTe",
+    "voucherNo": "1332",
+    "linkedInvoiceId": "000445",
+    "linkedInvoices": [
+      "000445"
+    ],
+    "allocations": [
+      {
+        "id": "000445",
+        "invoiceNo": "000445",
+        "billNo": "000445",
+        "no": "000445",
+        "amount": 6844,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.687Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1275",
+    "bookkeeperId": "BK-9207",
+    "date": "2025-12-04",
+    "customerName": "JEYAMALLI INDUSTRIES (P) Ltd,",
+    "amount": 200000.4,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-SBIN-SBINR52025120408133765-JEYAMALLI",
+    "voucherNo": "1275",
+    "linkedInvoiceId": "000453",
+    "linkedInvoices": [
+      "000453"
+    ],
+    "allocations": [
+      {
+        "id": "000453",
+        "invoiceNo": "000453",
+        "billNo": "000453",
+        "no": "000453",
+        "amount": 200000.4,
+        "poRef": "JMI/PO - 136, Dt: 28.11.2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.688Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY174",
+    "bookkeeperId": "BK-9187",
+    "date": "2025-12-04",
+    "customerName": "STAR METAL ENGINEERING CORPORATION",
+    "amount": 200000,
+    "type": "payment",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "PAY174",
+    "linkedInvoiceId": "0027",
+    "linkedInvoices": [
+      "0027",
+      "00159",
+      "00173",
+      "00240",
+      "00324"
+    ],
+    "allocations": [
+      {
+        "id": "0027",
+        "billNo": "0027",
+        "no": "0027",
+        "amount": 69100,
+        "supplierBillNo": ""
+      },
+      {
+        "id": "00159",
+        "billNo": "00159",
+        "no": "00159",
+        "amount": 19220,
+        "supplierBillNo": "H-2398"
+      },
+      {
+        "id": "00173",
+        "billNo": "00173",
+        "no": "00173",
+        "amount": 23100,
+        "supplierBillNo": "H-2442"
+      },
+      {
+        "id": "00240",
+        "billNo": "00240",
+        "no": "00240",
+        "amount": 59730,
+        "supplierBillNo": "H-2896"
+      },
+      {
+        "id": "00324",
+        "billNo": "00324",
+        "no": "00324",
+        "amount": 28850,
+        "supplierBillNo": "H-3306"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.689Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY172",
+    "bookkeeperId": "BK-9092",
+    "date": "2025-12-04",
+    "customerName": "C S K AGENCY PRIVATE LTD",
+    "amount": 46320,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/533819248074/CSK AG/MAHB/XXXXXX5453/GAS T",
+    "voucherNo": "PAY172",
+    "linkedInvoiceId": "00264",
+    "linkedInvoices": [
+      "00264",
+      "00286"
+    ],
+    "allocations": [
+      {
+        "id": "00264",
+        "billNo": "00264",
+        "no": "00264",
+        "amount": 8839,
+        "supplierBillNo": "A2025-26/2037"
+      },
+      {
+        "id": "00286",
+        "billNo": "00286",
+        "no": "00286",
+        "amount": 37481,
+        "supplierBillNo": "A025-26/2135"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.689Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1256",
+    "bookkeeperId": "BK-9037",
+    "date": "2025-12-03",
+    "customerName": "KING GAS",
+    "amount": 10000,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: By KING GAS-NET@149844",
+    "voucherNo": "1256",
+    "linkedInvoiceId": "000374",
+    "linkedInvoices": [
+      "000374"
+    ],
+    "allocations": [
+      {
+        "id": "000374",
+        "invoiceNo": "000374",
+        "billNo": "000374",
+        "no": "000374",
+        "amount": 10000,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.690Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1274",
+    "bookkeeperId": "BK-9206",
+    "date": "2025-12-02",
+    "customerName": "ADITYA DRIER TECH PVT LTD",
+    "amount": 26728,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-UBIN-002430652825-ADITYA DRI-/URGENT///",
+    "voucherNo": "1274",
+    "linkedInvoiceId": "000431",
+    "linkedInvoices": [
+      "000431"
+    ],
+    "allocations": [
+      {
+        "id": "000431",
+        "invoiceNo": "000431",
+        "billNo": "000431",
+        "no": "000431",
+        "amount": 26728,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.690Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1273",
+    "bookkeeperId": "BK-9205",
+    "date": "2025-12-01",
+    "customerName": "SEVEN HILLS ENTERPRISES",
+    "amount": 26728,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CNRB-CNRBH00092690990-SEVEN HILL",
+    "voucherNo": "1273",
+    "linkedInvoiceId": "000451",
+    "linkedInvoices": [
+      "000451"
+    ],
+    "allocations": [
+      {
+        "id": "000451",
+        "invoiceNo": "000451",
+        "billNo": "000451",
+        "no": "000451",
+        "amount": 26728,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.691Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1272",
+    "bookkeeperId": "BK-9204",
+    "date": "2025-12-01",
+    "customerName": "BHOX AIR GAS PRIVATE LIMITED - C",
+    "amount": 75225,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-SBIN-SBIN425335824789-BHOX AIRGA-/ATTN//INB",
+    "voucherNo": "1272",
+    "linkedInvoiceId": "000390",
+    "linkedInvoices": [
+      "000390"
+    ],
+    "allocations": [
+      {
+        "id": "000390",
+        "invoiceNo": "000390",
+        "billNo": "000390",
+        "no": "000390",
+        "amount": 75225,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.691Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY173",
+    "bookkeeperId": "BK-9132",
+    "date": "2025-12-01",
+    "customerName": "TUBES AND VALVES MANUFACTURING COMPANY",
+    "amount": 19904,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/533512802685/TUBE A/ICIC/XXXXXX1941/GasTe",
+    "voucherNo": "PAY173",
+    "linkedInvoiceId": "-1",
+    "linkedInvoices": [
+      "-1",
+      "00287",
+      "00295"
+    ],
+    "allocations": [
+      {
+        "id": "-1",
+        "billNo": "-1",
+        "no": "-1",
+        "amount": 93
+      },
+      {
+        "id": "00287",
+        "billNo": "00287",
+        "no": "00287",
+        "amount": 5149,
+        "supplierBillNo": "3128/25-26"
+      },
+      {
+        "id": "00295",
+        "billNo": "00295",
+        "no": "00295",
+        "amount": 14662,
+        "supplierBillNo": "3152/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.692Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1271",
+    "bookkeeperId": "BK-9203",
+    "date": "2025-11-29",
+    "customerName": "PUSHPAVALLI ENGG WORKS,",
+    "amount": 48380,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-MAHB-MAHBH00932563971-PUSHPAVALL-",
+    "voucherNo": "1271",
+    "linkedInvoiceId": "000414",
+    "linkedInvoices": [
+      "000414",
+      "000432"
+    ],
+    "allocations": [
+      {
+        "id": "000414",
+        "invoiceNo": "000414",
+        "billNo": "000414",
+        "no": "000414",
+        "amount": 9676,
+        "poRef": ""
+      },
+      {
+        "id": "000432",
+        "invoiceNo": "000432",
+        "billNo": "000432",
+        "no": "000432",
+        "amount": 38704,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.692Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1270",
+    "bookkeeperId": "BK-9202",
+    "date": "2025-11-29",
+    "customerName": "K LITE INDUSTRIES PRIVATE LIMITED",
+    "amount": 9440,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HSBC-HSBCN33397376904-K-LITE IND-/ACC/NEFT",
+    "voucherNo": "1270",
+    "linkedInvoiceId": "000412",
+    "linkedInvoices": [
+      "000412"
+    ],
+    "allocations": [
+      {
+        "id": "000412",
+        "invoiceNo": "000412",
+        "billNo": "000412",
+        "no": "000412",
+        "amount": 9440,
+        "poRef": "2200002352, Dated :- 15-11-2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.693Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1269",
+    "bookkeeperId": "BK-9201",
+    "date": "2025-11-29",
+    "customerName": "SHAKTHI ENGINEERING SERVICE - C",
+    "amount": 35677.7,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00639360806-SHAKTHI EN-0001",
+    "voucherNo": "1269",
+    "linkedInvoiceId": "000295",
+    "linkedInvoices": [
+      "000295"
+    ],
+    "allocations": [
+      {
+        "id": "000295",
+        "invoiceNo": "000295",
+        "billNo": "000295",
+        "no": "000295",
+        "amount": 35677.7,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.693Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1268",
+    "bookkeeperId": "BK-9200",
+    "date": "2025-11-28",
+    "customerName": "JEYAMALLI INDUSTRIES (P) Ltd,",
+    "amount": 200000.4,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: RTGS-SBIN-SBINR52025112807447744-JEYAMALLI",
+    "voucherNo": "1268",
+    "linkedInvoiceId": "000453",
+    "linkedInvoices": [
+      "000453"
+    ],
+    "allocations": [
+      {
+        "id": "000453",
+        "invoiceNo": "000453",
+        "billNo": "000453",
+        "no": "000453",
+        "amount": 200000.4,
+        "poRef": "JMI/PO - 136, Dt: 28.11.2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.694Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1267",
+    "bookkeeperId": "BK-9199",
+    "date": "2025-11-28",
+    "customerName": "SUPREME GASES",
+    "amount": 45430,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: IMPS/533214128607/SUPREME/HDFC/XXXXXX9460/GAS T",
+    "voucherNo": "1267",
+    "linkedInvoiceId": "000422",
+    "linkedInvoices": [
+      "000422"
+    ],
+    "allocations": [
+      {
+        "id": "000422",
+        "invoiceNo": "000422",
+        "billNo": "000422",
+        "no": "000422",
+        "amount": 45430,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.694Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY171",
+    "bookkeeperId": "BK-9091",
+    "date": "2025-11-28",
+    "customerName": "TUBES AND VALVES MANUFACTURING COMPANY",
+    "amount": 50000,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/533212428283/TUBE A/ICIC/XXXXXX1941/GAS T",
+    "voucherNo": "PAY171",
+    "linkedInvoiceId": "00287",
+    "linkedInvoices": [
+      "00287"
+    ],
+    "allocations": [
+      {
+        "id": "00287",
+        "billNo": "00287",
+        "no": "00287",
+        "amount": 50000,
+        "supplierBillNo": "3128/25-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.695Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1266",
+    "bookkeeperId": "BK-9198",
+    "date": "2025-11-27",
+    "customerName": "CHENNAI OXYGEN",
+    "amount": 23075,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-HDFC-HDFCH00635267188-CHENNAI OX-0001",
+    "voucherNo": "1266",
+    "linkedInvoiceId": "000267",
+    "linkedInvoices": [
+      "000267",
+      "000286",
+      "000287"
+    ],
+    "allocations": [
+      {
+        "id": "000267",
+        "invoiceNo": "000267",
+        "billNo": "000267",
+        "no": "000267",
+        "amount": 20650,
+        "poRef": ""
+      },
+      {
+        "id": "000286",
+        "invoiceNo": "000286",
+        "billNo": "000286",
+        "no": "000286",
+        "amount": 1363,
+        "poRef": ""
+      },
+      {
+        "id": "000287",
+        "invoiceNo": "000287",
+        "billNo": "000287",
+        "no": "000287",
+        "amount": 1062,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.696Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY170",
+    "bookkeeperId": "BK-9090",
+    "date": "2025-11-26",
+    "customerName": "MEGOLECK GAS EQUIPMENTS AND PIPING",
+    "amount": 77694,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/533017225143/MEGOLE/KKBK/XXXXXX8709/GAS T",
+    "voucherNo": "PAY170",
+    "linkedInvoiceId": "00285",
+    "linkedInvoices": [
+      "00285"
+    ],
+    "allocations": [
+      {
+        "id": "00285",
+        "billNo": "00285",
+        "no": "00285",
+        "amount": 77694,
+        "supplierBillNo": "2025-26/191"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.696Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1265",
+    "bookkeeperId": "BK-9197",
+    "date": "2025-11-25",
+    "customerName": "SRI BHARATH GASES",
+    "amount": 49029,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: SRI BHARATH GASES",
+    "voucherNo": "1265",
+    "linkedInvoiceId": "000398",
+    "linkedInvoices": [
+      "000398"
+    ],
+    "allocations": [
+      {
+        "id": "000398",
+        "invoiceNo": "000398",
+        "billNo": "000398",
+        "no": "000398",
+        "amount": 49029,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.697Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1264",
+    "bookkeeperId": "BK-9196",
+    "date": "2025-11-25",
+    "customerName": "INDIAN OXYGEN GAS",
+    "amount": 18172,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-IDIB-IDIBH32918331493-M/S INDIAN-//URGENT",
+    "voucherNo": "1264",
+    "linkedInvoiceId": "000401",
+    "linkedInvoices": [
+      "000401",
+      "000423"
+    ],
+    "allocations": [
+      {
+        "id": "000401",
+        "invoiceNo": "000401",
+        "billNo": "000401",
+        "no": "000401",
+        "amount": 3540,
+        "poRef": ""
+      },
+      {
+        "id": "000423",
+        "invoiceNo": "000423",
+        "billNo": "000423",
+        "no": "000423",
+        "amount": 14632,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.697Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY169",
+    "bookkeeperId": "BK-9084",
+    "date": "2025-11-25",
+    "customerName": "REFRIGERATION CENTRE",
+    "amount": 100000,
+    "type": "payment",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "PAY169",
+    "linkedInvoiceId": "00216",
+    "linkedInvoices": [
+      "00216",
+      "00220",
+      "00233",
+      "00249",
+      "00267"
+    ],
+    "allocations": [
+      {
+        "id": "00216",
+        "billNo": "00216",
+        "no": "00216",
+        "amount": 14485,
+        "supplierBillNo": "RC/25-26/1871"
+      },
+      {
+        "id": "00220",
+        "billNo": "00220",
+        "no": "00220",
+        "amount": 4449,
+        "supplierBillNo": "RC/25-26/1888"
+      },
+      {
+        "id": "00233",
+        "billNo": "00233",
+        "no": "00233",
+        "amount": 25488,
+        "supplierBillNo": "RC/25-26/1944"
+      },
+      {
+        "id": "00249",
+        "billNo": "00249",
+        "no": "00249",
+        "amount": 18137,
+        "supplierBillNo": ""
+      },
+      {
+        "id": "00267",
+        "billNo": "00267",
+        "no": "00267",
+        "amount": 37441,
+        "supplierBillNo": "RC/25-26/2136"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.698Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1263",
+    "bookkeeperId": "BK-9195",
+    "date": "2025-11-24",
+    "customerName": "K.R.P.AGENCIES",
+    "amount": 22096,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CBIN-CBINH25328268275-KRP AGENCI-//ATTN/GAS",
+    "voucherNo": "1263",
+    "linkedInvoiceId": "000417",
+    "linkedInvoices": [
+      "000417"
+    ],
+    "allocations": [
+      {
+        "id": "000417",
+        "invoiceNo": "000417",
+        "billNo": "000417",
+        "no": "000417",
+        "amount": 22096,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.699Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1261",
+    "bookkeeperId": "BK-9192",
+    "date": "2025-11-24",
+    "customerName": "ADITYA DRIER TECH PVT LTD",
+    "amount": 232565,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "1261",
+    "linkedInvoiceId": "000405",
+    "linkedInvoices": [
+      "000405",
+      "000411"
+    ],
+    "allocations": [
+      {
+        "id": "000405",
+        "invoiceNo": "000405",
+        "billNo": "000405",
+        "no": "000405",
+        "amount": 33986,
+        "poRef": ""
+      },
+      {
+        "id": "000411",
+        "invoiceNo": "000411",
+        "billNo": "000411",
+        "no": "000411",
+        "amount": 198579,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.700Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY168",
+    "bookkeeperId": "BK-9089",
+    "date": "2025-11-22",
+    "customerName": "Dhruv Engineers",
+    "amount": 21830,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/532610734793/DHRUV /ICIC/XXXXXX1714/GasTe",
+    "voucherNo": "PAY168",
+    "linkedInvoiceId": "00283",
+    "linkedInvoices": [
+      "00283"
+    ],
+    "allocations": [
+      {
+        "id": "00283",
+        "billNo": "00283",
+        "no": "00283",
+        "amount": 21830,
+        "supplierBillNo": "INV/25-26/378"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.700Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY167",
+    "bookkeeperId": "BK-9088",
+    "date": "2025-11-18",
+    "customerName": "ROYAL GASES",
+    "amount": 63720,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/532219299930/ROYAL /UTIB/XXXXXX5616/GAS T",
+    "voucherNo": "PAY167",
+    "linkedInvoiceId": "00281",
+    "linkedInvoices": [
+      "00281"
+    ],
+    "allocations": [
+      {
+        "id": "00281",
+        "billNo": "00281",
+        "no": "00281",
+        "amount": 63720,
+        "supplierBillNo": "RG360-2025-26"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.700Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY166",
+    "bookkeeperId": "BK-9087",
+    "date": "2025-11-17",
+    "customerName": "JAI GANESH INDUSTRIES",
+    "amount": 14113,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/532119201690/JAI GA/SBIN/XXXXXX6643/GasTe",
+    "voucherNo": "PAY166",
+    "linkedInvoiceId": "00144",
+    "linkedInvoices": [
+      "00144"
+    ],
+    "allocations": [
+      {
+        "id": "00144",
+        "billNo": "00144",
+        "no": "00144",
+        "amount": 14113,
+        "supplierBillNo": "089/025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.701Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "PAY165",
+    "bookkeeperId": "BK-9086",
+    "date": "2025-11-15",
+    "customerName": "VISHWAKARMA MECHANICAL WORKS",
+    "amount": 62068,
+    "type": "payment",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NBC/IMPS/531916035408/VISHWA/IBKL/XXXXXX8404/GasTe",
+    "voucherNo": "PAY165",
+    "linkedInvoiceId": "00279",
+    "linkedInvoices": [
+      "00279"
+    ],
+    "allocations": [
+      {
+        "id": "00279",
+        "billNo": "00279",
+        "no": "00279",
+        "amount": 62068,
+        "supplierBillNo": "25-26/563"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.701Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "1262",
+    "bookkeeperId": "BK-9194",
+    "date": "2025-11-07",
+    "customerName": "PREMIER CARBONICPVT LTD,",
+    "amount": 83234,
+    "type": "receipt",
+    "paymentMode": "Bank Transfer",
+    "mode": "Bank Transfer",
+    "narration": "Bank Import: NEFT-CIUB-CIUBH25311043020-PREMIER CA-/ATTN/PRO",
+    "voucherNo": "1262",
+    "linkedInvoiceId": "000488",
+    "linkedInvoices": [
+      "000488"
+    ],
+    "allocations": [
+      {
+        "id": "000488",
+        "invoiceNo": "000488",
+        "billNo": "000488",
+        "no": "000488",
+        "amount": 83234,
+        "poRef": "GPPO-090-2526 Dated:- 01-11-2025"
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.702Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "010",
+    "bookkeeperId": "BK-5394",
+    "date": "2024-07-12",
+    "customerName": "DEVI INDUSTRIAL GASES - C",
+    "amount": 200000,
+    "type": "receipt",
+    "paymentMode": "RTGS",
+    "mode": "RTGS",
+    "narration": "",
+    "voucherNo": "010",
+    "linkedInvoiceId": "00496",
+    "linkedInvoices": [
+      "00496",
+      "0196",
+      "0229"
+    ],
+    "allocations": [
+      {
+        "id": "00496",
+        "invoiceNo": "00496",
+        "billNo": "00496",
+        "no": "00496",
+        "amount": 8240,
+        "poRef": ""
+      },
+      {
+        "id": "0196",
+        "invoiceNo": "0196",
+        "billNo": "0196",
+        "no": "0196",
+        "amount": 63740,
+        "poRef": ""
+      },
+      {
+        "id": "0229",
+        "invoiceNo": "0229",
+        "billNo": "0229",
+        "no": "0229",
+        "amount": 128020,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.704Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "001",
+    "bookkeeperId": "BK-5393",
+    "date": "2024-04-02",
+    "customerName": "DEVI INDUSTRIAL GASES - C",
+    "amount": 39602,
+    "type": "receipt",
+    "paymentMode": "Cash",
+    "mode": "Cash",
+    "narration": "",
+    "voucherNo": "001",
+    "linkedInvoiceId": "00496",
+    "linkedInvoices": [
+      "00496",
+      "00525"
+    ],
+    "allocations": [
+      {
+        "id": "00496",
+        "invoiceNo": "00496",
+        "billNo": "00496",
+        "no": "00496",
+        "amount": 33200,
+        "poRef": ""
+      },
+      {
+        "id": "00525",
+        "invoiceNo": "00525",
+        "billNo": "00525",
+        "no": "00525",
+        "amount": 6402,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.705Z",
+    "source": "bookkeeper"
+  },
+  {
+    "id": "110",
+    "bookkeeperId": "BK-5410",
+    "date": "2024-02-15",
+    "customerName": "DEVI INDUSTRIAL GASES - C",
+    "amount": 1316,
+    "type": "receipt",
+    "paymentMode": "Cash Card",
+    "mode": "Cash Card",
+    "narration": "",
+    "voucherNo": "110",
+    "linkedInvoiceId": "00428",
+    "linkedInvoices": [
+      "00428"
+    ],
+    "allocations": [
+      {
+        "id": "00428",
+        "invoiceNo": "00428",
+        "billNo": "00428",
+        "no": "00428",
+        "amount": 1316,
+        "poRef": ""
+      }
+    ],
+    "referenceId": "",
+    "createdAt": "2026-04-06T10:53:22.705Z",
     "source": "bookkeeper"
   }
 ]

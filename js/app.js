@@ -1126,6 +1126,31 @@ const App = {
         modalBody.innerHTML = content;
         modal.show();
     },
+    
+    /**
+     * Unified trigger for Book Keeper synchronization.
+     * Detects environment and uses the appropriate sync method.
+     */
+    async startBookKeeperSync() {
+        if (typeof BookKeeperSync === 'undefined') {
+            this.showNotification('Book Keeper sync module not loaded.', 'error');
+            return;
+        }
+
+        // 1. Desktop Sync (Native Electron Picker)
+        if (window.electronAPI && typeof BookKeeperSync.initiateNativeSync === 'function') {
+            await BookKeeperSync.initiateNativeSync();
+            return;
+        }
+
+        // 2. Web Sync Fallback (File Picker API or Input)
+        if (typeof BookKeeperSync.initiateWebSync === 'function') {
+            await BookKeeperSync.initiateWebSync();
+            return;
+        }
+
+        this.showNotification('Sync mechanism not supported on this device.', 'error');
+    },
 
     showNotification(message, type = 'info') {
         // Create notification element

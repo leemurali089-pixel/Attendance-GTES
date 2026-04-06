@@ -242,44 +242,55 @@ const DataManager = {
             'gtes_expenses'
         ];
 
-        console.log("[DataManager]: Prefetching all data modules in parallel...");
-
-        const allKeys = [...coreKeys, ...dataKeys];
-        const results = await Promise.all(allKeys.map(async (key) => {
-            try {
-                return await this.loadData(key);
-            } catch (err) {
-                console.error(`[DataManager] Prefetch failed for '${key}' (other keys still load):`, err);
-                return null;
+        // Synchronous First Phase: Essential for UI, Branding, and Auth
+        console.log("[DataManager]: Loading core system modules...");
+        const coreResults = await Promise.all(coreKeys.map(async (key) => {
+            try { 
+                return await this.loadData(key); 
+            } catch (err) { 
+                console.error(`[DataManager] Core load failed for '${key}':`, err);
+                return null; 
             }
         }));
-        
+
         // Quick verification/initialization for just the absolute essentials
-        const passwordIdx = allKeys.indexOf(this.KEYS.ADMIN_PASSWORD);
-        if (!results[passwordIdx]) {
+        const passwordIdx = coreKeys.indexOf(this.KEYS.ADMIN_PASSWORD);
+        if (!coreResults[passwordIdx]) {
             await this.saveData(this.KEYS.ADMIN_PASSWORD, this.DEFAULT_SETTINGS.defaultAdminPassword);
         }
 
-        const settingsIdx = allKeys.indexOf(this.KEYS.SETTINGS);
-        if (!results[settingsIdx]) {
+        const settingsIdx = coreKeys.indexOf(this.KEYS.SETTINGS);
+        if (!coreResults[settingsIdx]) {
             await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
         }
 
-        // Run migrations and background tasks
-        // We do these without blocking the main return if possible, 
-        // but some migrations are needed for logic consistency.
+        // Run migrations that might affect the UI logic
         await this.migrateEmployeesToV2();
         await this.migrateToSalaryRevisions();
         
-        // Background tasks (DEFERRED to unblock UI)
-        setTimeout(() => {
+        // Asynchronous Second Phase: Heavy data loads (don't block UI boot)
+        // This is deferred so the Login/Dashboard can appear immediately.
+        setTimeout(async () => {
+            console.log("[DataManager]: Prefetching transaction modules in background...");
+            
+            // Process in a throttled loop to avoid UI jank during large JSON parses
+            for (const key of dataKeys) {
+                try {
+                    await this.loadData(key);
+                } catch (err) {
+                    console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
+                }
+            }
+            console.log("[DataManager]: Background data prefetch complete.");
+
+            // Initialize background automation and SyncManager
             this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
             this.scheduleSundayHolidayCheck();
             
             if (window.SyncManager) {
                 window.SyncManager.init();
             }
-        }, 3000); // 3-second delay for background tasks
+        }, 100); // 100ms delay to let the UI breathe first
         })();
     },
 
