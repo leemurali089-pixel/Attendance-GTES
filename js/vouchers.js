@@ -750,9 +750,10 @@ const VoucherManager = {
     /**
      * Updated: Get the remaining balance for a specific document
      */
-    getDocumentBalance(docId, totalAmount, allocationsMap = null, altId = null, doc = null) {
+    getDocumentBalance(docId, totalAmount, allocationsMap = null, altId = null, doc = null, options = {}) {
         let allocated = 0;
         const map = allocationsMap || this.getVoucherAllocationsMap();
+        const allowLooseFallback = options.allowLooseFallback !== false;
         
         // 1. Try primary ID match (Case-Insensitive)
         const cleanDocId = (docId || '').toString().toLowerCase().trim();
@@ -780,7 +781,7 @@ const VoucherManager = {
         }
         
         // 4. Fallback: match last path segment or long numeric id only (avoids false "paid" from short suffix collisions)
-        if (allocated === 0 && doc) {
+        if (allowLooseFallback && allocated === 0 && doc) {
             const lastSeg = (s) => {
                 const t = (s || '').toString().trim().toLowerCase();
                 if (!t) return '';

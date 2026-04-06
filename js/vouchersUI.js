@@ -1736,7 +1736,14 @@ const VouchersUI = {
                 const total = totalAmountNum.toFixed(2);
                 
                 const allocMap = VoucherManager.getVoucherAllocationsMap(otherPendingTx, isPayment ? 'payment' : 'receipt');
-                const pendingNum = VoucherManager.getDocumentBalance(doc.id, totalAmountNum, allocMap, docNo, doc);
+                const pendingNum = VoucherManager.getDocumentBalance(
+                    doc.id,
+                    totalAmountNum,
+                    allocMap,
+                    docNo,
+                    doc,
+                    { allowLooseFallback: false }
+                );
                 const pending = pendingNum.toFixed(2);
                 
                 // RESTORE: Check if this doc was already assigned in this session

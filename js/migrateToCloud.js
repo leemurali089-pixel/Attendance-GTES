@@ -25,7 +25,6 @@ if (!window.DeepCloudMigrator) {
         'gtes_advances',
         'gtes_holidays',
         'gtes_services',
-        'vouchers',
         'gtes_recycle_bin'
     ],
 
@@ -37,18 +36,22 @@ if (!window.DeepCloudMigrator) {
 
         let successCount = 0;
         let failCount = 0;
+        let failedKeys = [];
 
         for (const key of this.DB_FILES) {
             const success = await this.importFile(key);
             if (success) successCount++;
-            else failCount++;
+            else {
+                failCount++;
+                failedKeys.push(key);
+            }
         }
 
         if (failCount === 0) {
             App.showNotification(`✅ Cloud Import Complete: ${successCount} modules downloaded.`, "success");
             setTimeout(() => window.location.reload(), 1500); // Reload to reflect changes
         } else {
-            App.showNotification(`⚠️ Import partial: ${successCount} ok, ${failCount} failed.`, "warning");
+            App.showNotification(`⚠️ Import partial: ${successCount} ok, ${failCount} failed (${failedKeys.join(', ')}).`, "warning");
         }
     },
 
@@ -87,17 +90,22 @@ if (!window.DeepCloudMigrator) {
 
         let successCount = 0;
         let failCount = 0;
+        let failedKeys = [];
 
         for (const key of this.DB_FILES) {
             const success = await this.exportFile(key);
             if (success) successCount++;
-            else failCount++;
+            else {
+                failCount++;
+                failedKeys.push(key);
+            }
         }
 
         if (failCount === 0) {
             App.showNotification(`✅ Cloud Export Complete: ${successCount} modules uploaded.`, "success");
         } else {
-            App.showNotification(`⚠️ Export partial: ${successCount} ok, ${failCount} failed.`, "warning");
+            console.error(`[Migrator]: Partial Export Failed. Failed Keys:`, failedKeys);
+            App.showNotification(`⚠️ Export partial: ${successCount} ok, ${failCount} failed (${failedKeys.join(', ')}).`, "warning");
         }
     },
 

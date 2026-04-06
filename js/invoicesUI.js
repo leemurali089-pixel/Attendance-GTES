@@ -1805,7 +1805,14 @@ const InvoicesUI = {
         const purchases = purchasesRaw.map(p => {
             const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
             const balance = (typeof VoucherManager !== 'undefined') ? 
-                VoucherManager.getDocumentBalance(p.id, docTotal, voucherMap, p.billNo || p.vch_no || p.invoiceNo, p) : 
+                VoucherManager.getDocumentBalance(
+                    p.id,
+                    docTotal,
+                    voucherMap,
+                    p.billNo || p.vch_no || p.invoiceNo,
+                    p,
+                    { allowLooseFallback: false }
+                ) : 
                 docTotal;
             return {
                 ...p,
@@ -2243,7 +2250,14 @@ const InvoicesUI = {
         const purchases = purchasesRaw.map(p => {
             const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
             const balance = (typeof VoucherManager !== 'undefined') ?
-                VoucherManager.getDocumentBalance(p.id, docTotal, voucherMap, p.billNo || p.vch_no || p.invoiceNo, p) :
+                VoucherManager.getDocumentBalance(
+                    p.id,
+                    docTotal,
+                    voucherMap,
+                    p.billNo || p.vch_no || p.invoiceNo,
+                    p,
+                    { allowLooseFallback: false }
+                ) :
                 docTotal;
             return { ...p, balance, isPaid: balance <= 0.05, isPartial: balance > 0.05 && balance < (docTotal - 0.05) };
         });

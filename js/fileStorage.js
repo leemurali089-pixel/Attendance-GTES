@@ -14,24 +14,29 @@ const FileStorage = {
     },
 
     async saveData(key, data) {
-        // Handle Electron first
+        let localSuccess = false;
+        // Handle Electron first (Local Persistence)
         if (window.electronAPI) {
             try {
                 const result = await window.electronAPI.saveData(key, data);
                 if (result && result.success) {
                     console.log(`✅ Local File Sync [${key}]: Success`);
-                    return true;
+                    localSuccess = true;
+                } else {
+                    console.error(`🚨 Local File Sync Failed for ${key}:`, result?.error);
                 }
-                console.error(`🚨 Local File Sync Failed for ${key}:`, result?.error);
             } catch (err) {
                 console.error(`🚨 Electron IPC Error during save for ${key}:`, err);
             }
         }
 
+        // Handle Cloud Persistence
         if (!this.isCloudReady) {
-            console.warn("Cloud DB not ready. Saving to localStorage.");
-            localStorage.setItem(key, JSON.stringify(data));
-            return false;
+            if (!window.electronAPI) {
+                console.warn("Cloud DB not ready. Saving to localStorage.");
+                localStorage.setItem(key, JSON.stringify(data));
+            }
+            return localSuccess; // Return local status if cloud isn't ready
         }
 
         try {
@@ -40,8 +45,10 @@ const FileStorage = {
             return true;
         } catch (error) {
             console.error(`🚨 Cloud Sync Failed for ${key}:`, error);
-            localStorage.setItem(key, JSON.stringify(data));
-            return false;
+            if (!window.electronAPI) {
+                localStorage.setItem(key, JSON.stringify(data));
+            }
+            return localSuccess; // Still return true if local succeeded but cloud failed (partial success)
         }
     },
 

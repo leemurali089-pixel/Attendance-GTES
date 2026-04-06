@@ -284,7 +284,14 @@ const InvoiceManager = {
 
         const result = invoices.map(inv => {
             const invTotal = parseFloat(inv.total ?? inv.amount ?? 0) || 0;
-            const balance = VoucherManager.getDocumentBalance(inv.id, invTotal, allocationsMap, inv.invoiceNo, inv);
+            const balance = VoucherManager.getDocumentBalance(
+                inv.id,
+                invTotal,
+                allocationsMap,
+                inv.invoiceNo,
+                inv,
+                { allowLooseFallback: false }
+            );
             return {
                 ...inv,
                 balance: balance,
