@@ -6,6 +6,9 @@ const SyncManager = {
     lastSyncTime: new Date(),
     hasUnsavedChanges: false,
     syncLog: [], // Store audit logs
+    /** When true, conflict prompts are suppressed (e.g. during BookKeeper import). */
+    suppressConflictPrompts: false,
+    _conflictPromptCooldownUntil: 0,
 
     // UI Elements
     statusIndicators: [], // Array to hold both main and landing indicators
@@ -443,11 +446,27 @@ const SyncManager = {
             if (!result.success) return true;
 
             if (this.status === 'changes') {
+                // During trusted imports (BookKeeper) or while syncing, never prompt.
+                if (this.suppressConflictPrompts || this.status === 'syncing') {
+                    this.logSyncEvent('info', `Auto-save proceeded despite remote change (${key})`);
+                    return true;
+                }
+
+                // Avoid prompting in a loop when multiple saves happen back-to-back.
+                const now = Date.now();
+                if (now < this._conflictPromptCooldownUntil) {
+                    this.logSyncEvent('warning', `Conflict prompt suppressed (cooldown) for ${key}`);
+                    return false;
+                }
+
                 const proceed = confirm('Remote changes detected! Saving now will overwrite them. Continue?');
                 if (proceed) {
                     this.logSyncEvent('warning', 'User overwrote remote changes');
+                    // If user approves once, don't ask again for a short window.
+                    this._conflictPromptCooldownUntil = Date.now() + 15000;
                 } else {
                     this.logSyncEvent('info', 'User cancelled save due to conflict');
+                    this._conflictPromptCooldownUntil = Date.now() + 15000;
                 }
                 return proceed;
             }

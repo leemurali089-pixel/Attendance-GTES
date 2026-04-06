@@ -482,6 +482,38 @@ const BookKeeperImport = {
             .toLowerCase();
     },
 
+    _normalizeKeyName(name) {
+        return (name || '')
+            .toString()
+            .trim()
+            .replace(/[“”"]/g, '')              // remove quotes (BK uses 1" etc)
+            .replace(/[×xX]/g, '*')
+            .replace(/[ \t]+/g, ' ')
+            .toLowerCase();
+    },
+
+    _upsertServiceItemFromBookKeeper(serviceCollection, existingInventory, serviceItem) {
+        if (!serviceItem || !serviceItem.name) return;
+        const key = serviceItem.name.toLowerCase();
+
+        // Upsert into services collection (visible)
+        const sIdx = serviceCollection.findIndex(s => s && s.name && s.name.toLowerCase() === key);
+        if (sIdx >= 0) {
+            serviceCollection[sIdx] = { ...serviceCollection[sIdx], ...serviceItem, id: serviceCollection[sIdx].id };
+        } else {
+            serviceCollection.push(serviceItem);
+        }
+
+        // Upsert hidden inventory mirror (for pickers etc)
+        const invIdx = existingInventory.findIndex(i => i && i.name && i.name.toLowerCase() === key);
+        const invMirror = { ...serviceItem, isHidden: true, type: 'service', currentStock: 0, unitsLeft: 0, openingStock: 0, minStock: 0 };
+        if (invIdx >= 0) {
+            existingInventory[invIdx] = { ...existingInventory[invIdx], ...invMirror, id: existingInventory[invIdx].id };
+        } else {
+            existingInventory.push(invMirror);
+        }
+    },
+
     async learnHSNFromTransactions(itemName) {
         if (!itemName) return '';
         const tables = ['sale_item', 'service_sales', 'bill_item', 'purchase_item', 'inventory_transaction'];
@@ -583,26 +615,41 @@ const BookKeeperImport = {
         `);
 
         const existingCustomers = DataManager.getData('customers') || [];
-        const existingNames = new Set(existingCustomers.map(c => c.name.toLowerCase()));
+        const existingNameToIndex = new Map(
+            existingCustomers
+                .filter(c => c && c.name)
+                .map((c, idx) => [c.name.toLowerCase(), idx])
+        );
 
         let imported = 0;
         let skipped = 0;
 
         accounts.forEach(acc => {
-            if (existingNames.has(acc.aname?.toLowerCase())) {
-                skipped++;
-                return;
-            }
-
             // Robust Name Check
             const customerName = acc.aname || acc.account_name || acc.name || acc.customer_name || '';
             if (!customerName) {
                 skipped++;
                 return;
             }
+            const key = customerName.toLowerCase();
+            const existingIndex = existingNameToIndex.has(key) ? existingNameToIndex.get(key) : -1;
+            const accountType = (acc.a_type && acc.a_type.includes('Creditor')) ? 'Supplier' : 'Customer';
+            const openingRawValue = acc.op_bal ?? acc.opening_balance ?? acc.opening_bal ?? acc.op_balance ?? 0;
+            const openingRawText = String(openingRawValue || '').toLowerCase();
+            let openingSigned = this.getVal(acc, ['op_bal', 'opening_balance', 'opening_bal', 'op_balance']);
+            if (/(^|\W)(cr|credit)(\W|$)/.test(openingRawText)) openingSigned = -Math.abs(openingSigned);
+            if (/(^|\W)(dr|debit)(\W|$)/.test(openingRawText)) openingSigned = Math.abs(openingSigned);
+            const drcr = this.getStr(acc, ['op_bal_type', 'opening_type', 'dr_cr', 'drcr', 'balance_type', 'bal_type']).toLowerCase();
+            if (/(^|\W)(cr|credit)(\W|$)/.test(drcr)) openingSigned = -Math.abs(openingSigned);
+            if (/(^|\W)(dr|debit)(\W|$)/.test(drcr)) openingSigned = Math.abs(openingSigned);
 
+            const balanceType = accountType === 'Supplier'
+                ? (openingSigned < 0 ? 'Receivable' : 'Payable')
+                : (openingSigned < 0 ? 'Payable' : 'Receivable');
+
+            const existingCustomer = existingIndex >= 0 ? existingCustomers[existingIndex] : null;
             const customer = {
-                id: `CUST-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                id: existingCustomer?.id || `CUST-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                 name: customerName,
                 displayName: acc.display_name || customerName,
                 phone: acc.phone || acc.mobile || '',
@@ -614,20 +661,27 @@ const BookKeeperImport = {
                 state: acc.state || '',
                 pincode: acc.pincode || acc.zip || '',
                 country: acc.country || 'India',
-                accountType: (acc.a_type && acc.a_type.includes('Creditor')) ? 'Supplier' : 'Customer',
+                accountType: accountType,
                 isOtherAccount: false,
-                openingBalance: parseFloat(acc.op_bal) || 0,
-                closingBalance: parseFloat(acc.cl_bal) || 0,
+                openingBalance: openingSigned,
+                closingBalance: this.getVal(acc, ['cl_bal', 'closing_balance', 'closing_bal', 'cl_balance']),
+                balance: Math.abs(openingSigned),
+                balanceType: balanceType,
                 creditPeriod: parseInt(acc.credit_period) || 30,
                 creditLimit: parseFloat(acc.credit_limit) || 0,
                 status: acc.status === 0 ? 'inactive' : 'active',
-                createdAt: acc.date_created || new Date().toISOString(),
+                createdAt: existingCustomer?.createdAt || acc.date_created || new Date().toISOString(),
                 source: 'bookkeeper'
             };
 
-            existingCustomers.push(customer);
-            existingNames.add(customer.name.toLowerCase());
-            imported++;
+            if (existingCustomer) {
+                existingCustomers[existingIndex] = { ...existingCustomer, ...customer };
+                skipped++;
+            } else {
+                existingCustomers.push(customer);
+                existingNameToIndex.set(key, existingCustomers.length - 1);
+                imported++;
+            }
         });
 
         DataManager.saveData('customers', existingCustomers);
@@ -860,6 +914,12 @@ const BookKeeperImport = {
 
         const existingInventory = DataManager.getData('inventory') || [];
         const existingTxns = DataManager.getData('inventoryTransactions') || [];
+        // Capture a stock snapshot so we can apply it as authoritative later.
+        // (Some BK schemas don't expose all movement tables, but the stock list is always correct.)
+        this._bkStockSnapshot = { byId: {}, byName: {} };
+
+        // Service collection (some BK versions keep services inside item table)
+        const serviceCollection = DataManager.getData('gtes_services') || [];
         let imported = 0;
         let updated = 0;
         let skipped = 0;
@@ -876,12 +936,13 @@ const BookKeeperImport = {
 
             // FILTER: Skip Service items if they appear in inventory list
             const lowerName = itemName.toLowerCase();
-            if (lowerName.includes('service') || lowerName.includes('charge') || lowerName.includes('installation') || lowerName.includes('labour')) {
-                // Double check stock to be safe (though services usually have 0 stock)
-                // We'll filter them out here effectively
-                skipped++;
-                continue;
-            }
+            const unitRawProbe = (this.getStr(item, ['Unit Of Measure*', 'unit_of_measure', 'u_measure', 'unit', 'u_name', 'unit_name', 'units_name', 'uom', 'measure_unit']) || '').toLowerCase();
+            const itemTypeProbe = (item.item_type ? String(item.item_type).toLowerCase() : '');
+            // STRICT: Only treat as service when BK explicitly marks it (reduces false positives).
+            const looksLikeService =
+                unitRawProbe === 'service' ||
+                itemTypeProbe === 'service' ||
+                itemTypeProbe.includes('service');
 
             const subcat = subcatMap[item.item_subcategory_id] || {};
 
@@ -953,25 +1014,68 @@ const BookKeeperImport = {
                 moq: getVal(item, ['min_qty', 'reorder_level', 'min_order_qty', 'minimum_qty', 'Minimum Order Quantity']),
                 gstRate: item.scheme_name || item['Tax Scheme Name'] || 'GST@18%',
                 hsnCode: hsn,
-                type: (item.item_type || (unitRaw === '' || unitRaw === 'service' ? 'service' : 'product')).toLowerCase(),
+                // Default to product when unit is blank; only service when explicitly flagged by BK.
+                type: (item.item_type ? String(item.item_type) : (unitRaw === 'service' ? 'service' : 'product')).toLowerCase(),
                 status: (item.status === 0 || item['Active Status'] === 'NA') ? 'inactive' : 'active',
                 source: 'bookkeeper'
             };
 
+            // Keep a link to BK item id and snapshot stock for later authoritative apply.
+            if (itemId != null && itemId !== '') materialData.bookkeeperItemId = String(itemId);
+            if (stockFoundInMap) {
+                if (itemId != null && itemId !== '') this._bkStockSnapshot.byId[String(itemId)] = currentStock;
+                this._bkStockSnapshot.byName[this._normalizeKeyName(itemName)] = currentStock;
+            }
+
+            // If this is actually a service stored in the items table, upsert it into services and skip inventory stock logic.
+            if (looksLikeService) {
+                const safeNameId = 'SRV-' + itemName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10).toUpperCase();
+                const serviceItem = {
+                    id: safeNameId,
+                    name: itemName,
+                    description: materialData.description || '',
+                    unit: (unitRaw === 'service' || !unitRaw) ? 'nos' : unitRaw,
+                    category: 'Services',
+                    subcategory: '',
+                    rate: materialData.rate || 0,
+                    purchaseRate: materialData.purchaseRate || 0,
+                    gstRate: materialData.gstRate || 'GST@18%',
+                    hsnCode: materialData.hsnCode || '',
+                    type: 'service',
+                    status: materialData.status || 'active',
+                    createdAt: new Date().toISOString(),
+                    source: 'bookkeeper_item_table',
+                    isHidden: true
+                };
+                this._upsertServiceItemFromBookKeeper(serviceCollection, existingInventory, serviceItem);
+                skipped++;
+                continue;
+            }
+
             const existingIdx = existingInventory.findIndex(i => this.normalizeName(i.name) === normalized);
             if (existingIdx >= 0) {
                 const existing = existingInventory[existingIdx];
-                // MERGE STRATEGY: Prioritize non-zero stock, HSNs, and normalized units
-                // We ONLY overwrite stock if the new value is non-zero OR if the existing was already 0.
-                // This prevents partial imports from wiping out existing stock counts.
-                if (materialData.currentStock !== 0 || (existing.currentStock || 0) === 0) {
-                    existing.currentStock = materialData.currentStock;
-                    existing.unitsLeft = materialData.currentStock;
-                }
-                if (materialData.hsnCode && (!existing.hsnCode || existing.hsnCode === 'NA')) existing.hsnCode = materialData.hsnCode;
-                if (materialData.unit && (existing.unit === 'service' || existing.unit === 'Numbers')) existing.unit = materialData.unit;
-                if (materialData.rate > existing.rate) existing.rate = materialData.rate;
-                if (materialData.type === 'service') existing.type = 'service';
+                // MERGE STRATEGY:
+                // - Always update HSN/rates/unit/tax metadata from BookKeeper when present.
+                // - Stock is finalized later from inventoryTransactions (post sales/purchase import),
+                //   but we still store best-effort stock table values here.
+                existing.description = materialData.description || existing.description || '';
+                existing.category = materialData.category || existing.category || 'General';
+                existing.subcategory = materialData.subcategory || existing.subcategory || '';
+                if (materialData.unit) existing.unit = materialData.unit;
+                if (materialData.gstRate) existing.gstRate = materialData.gstRate;
+                if (materialData.hsnCode) existing.hsnCode = materialData.hsnCode;
+                if (materialData.purchaseRate) existing.purchaseRate = materialData.purchaseRate;
+                if (materialData.rate) existing.rate = materialData.rate;
+                if (materialData.mrp) existing.mrp = materialData.mrp;
+                if (materialData.moq) existing.moq = materialData.moq;
+                existing.openingStock = (materialData.openingStock !== undefined) ? materialData.openingStock : (existing.openingStock || 0);
+                existing.currentStock = (materialData.currentStock !== undefined) ? materialData.currentStock : (existing.currentStock || 0);
+                existing.unitsLeft = existing.currentStock;
+                existing.stockValue = (materialData.stockValue !== undefined) ? materialData.stockValue : (existing.stockValue || 0);
+                if (materialData.type) existing.type = materialData.type;
+                existing.source = existing.source || 'bookkeeper';
+                if (materialData.bookkeeperItemId) existing.bookkeeperItemId = materialData.bookkeeperItemId;
                 existing.updatedAt = new Date().toISOString();
                 updated++;
             } else {
@@ -998,6 +1102,7 @@ const BookKeeperImport = {
 
         await DataManager.saveData('inventory', existingInventory);
         await DataManager.saveData('inventoryTransactions', existingTxns);
+        await DataManager.saveData('gtes_services', serviceCollection);
 
         console.log(`[Import] ✅ Inventory: ${imported} items imported, ${skipped} skipped (Total in DB: ${items.length})`);
         if (imported > 0) {
@@ -1007,13 +1112,102 @@ const BookKeeperImport = {
         return { imported, skipped, total: items.length };
     },
 
+    async applyBookKeeperStockSnapshotToInventory() {
+        const snap = this._bkStockSnapshot;
+        if (!snap || (!snap.byId && !snap.byName)) return { updated: 0 };
+
+        const inv = DataManager.getData('inventory') || [];
+        if (!Array.isArray(inv) || inv.length === 0) return { updated: 0 };
+
+        let updated = 0;
+        const round3 = (n) => {
+            const x = parseFloat(n);
+            if (isNaN(x)) return 0;
+            return Math.round(x * 1000) / 1000;
+        };
+
+        for (const m of inv) {
+            if (!m || !m.name) continue;
+            let val;
+            const bkId = m.bookkeeperItemId != null ? String(m.bookkeeperItemId) : '';
+            if (bkId && snap.byId && snap.byId[bkId] !== undefined) {
+                val = snap.byId[bkId];
+            } else {
+                const k = this._normalizeKeyName(m.name);
+                if (snap.byName && snap.byName[k] !== undefined) val = snap.byName[k];
+            }
+            if (val === undefined) continue;
+
+            // Authoritative stock from BK list (can be negative).
+            const v = round3(val);
+            m.currentStock = v;
+            m.unitsLeft = v;
+            m.updatedAt = new Date().toISOString();
+            updated++;
+        }
+
+        if (updated > 0) await DataManager.saveData('inventory', inv);
+        return { updated };
+    },
+
+    /**
+     * Recalculate inventory stock from inventoryTransactions.
+     * Keeps negative stock exactly as computed.
+     */
+    async recalculateInventoryStockFromTransactions() {
+        const inv = DataManager.getData('inventory') || [];
+        const txns = DataManager.getData('inventoryTransactions') || [];
+        if (!Array.isArray(inv) || inv.length === 0) return { updated: 0 };
+
+        const byMaterial = new Map();
+        for (const t of txns) {
+            if (!t || !t.materialId) continue;
+            const id = String(t.materialId);
+            if (!byMaterial.has(id)) byMaterial.set(id, []);
+            byMaterial.get(id).push(t);
+        }
+
+        let updated = 0;
+        for (const m of inv) {
+            if (!m || !m.id) continue;
+            const arr = byMaterial.get(String(m.id)) || [];
+            if (arr.length === 0) continue;
+
+            // If we already have an explicit BK opening transaction, don't add openingStock separately.
+            const hasOpeningTxn = arr.some(t =>
+                (t.remarks || '').toString().toLowerCase().includes('opening balance') ||
+                (t.id || '').toString().includes('TXN-BK-OP')
+            );
+
+            let stock = 0;
+            if (!hasOpeningTxn) stock += parseFloat(m.openingStock) || 0;
+
+            for (const t of arr) {
+                const qty = parseFloat(t.quantity) || 0;
+                const tt = (t.type || '').toString().toLowerCase();
+                if (tt === 'in') stock += qty;
+                else if (tt === 'out') stock -= qty;
+            }
+
+            // Update even if stock is 0; negative values are valid and must persist.
+            m.currentStock = stock;
+            m.unitsLeft = stock;
+            m.updatedAt = new Date().toISOString();
+            updated++;
+        }
+
+        if (updated > 0) {
+            await DataManager.saveData('inventory', inv);
+        }
+        return { updated };
+    },
+
     /**
      * Import Services from BookKeeper
      */
     async importServices(tableName = 'service') {
         const services = this.query(`SELECT * FROM ${tableName}`);
         const existingInventory = DataManager.getData('inventory') || [];
-        const existingNames = new Set(existingInventory.map(s => s.name.toLowerCase()));
         let imported = 0;
         let skipped = 0;
 
@@ -1075,13 +1269,9 @@ const BookKeeperImport = {
                 isHidden: true // USER REQ: Hide From Inventory List
             };
 
-            // Add to Inventory (Hidden)
-            if (!existingNames.has(serviceName.toLowerCase())) {
-                serviceItem.id = safeNameId; // Use consistent ID for inventory lookup
-                existingInventory.push(serviceItem);
-                existingNames.add(serviceItem.name.toLowerCase());
-                imported++;
-            }
+            // Upsert into Inventory (Hidden) + services collection
+            this._upsertServiceItemFromBookKeeper(serviceCollection, existingInventory, serviceItem);
+            imported++;
 
             // Add to Services Collection (Visible)
             // Use overwrite strategy for services collection
@@ -2831,7 +3021,7 @@ const BookKeeperImport = {
             // Fallback
             if (!serviceTable && tables.includes('service')) serviceTable = 'service';
 
-            if (options.inventory !== false && serviceTable && serviceTable !== inventoryTable) {
+            if (options.services !== false && serviceTable && serviceTable !== inventoryTable) {
                 try { this.importStats.services = await this.importServices(serviceTable); } catch (e) { }
             }
 
@@ -2891,6 +3081,25 @@ const BookKeeperImport = {
                 if (tables.includes('po_so_vouchers')) {
                     try { await this.importOrders(); } catch (e) { }
                 }
+            }
+
+            // Finalize inventory stock after sales/purchases generated inventoryTransactions.
+            try {
+                const stockResult = await this.recalculateInventoryStockFromTransactions();
+                this.importStats.inventoryStock = stockResult;
+                console.log('[Import] Inventory stock recompute:', stockResult);
+            } catch (e) {
+                console.warn('[Import] Inventory stock recompute failed:', e);
+            }
+
+            // If BK provides a stock snapshot table, apply it as the final authoritative value.
+            // (This fixes cases where movement tables are missing/incomplete in a given BK backup.)
+            try {
+                const snapResult = await this.applyBookKeeperStockSnapshotToInventory();
+                this.importStats.inventoryStockSnapshot = snapResult;
+                console.log('[Import] Inventory stock snapshot applied:', snapResult);
+            } catch (e) {
+                console.warn('[Import] Inventory stock snapshot apply failed:', e);
             }
 
             // 8. Delivery Challans

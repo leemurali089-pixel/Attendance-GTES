@@ -340,6 +340,8 @@ const BookKeeperSync = {
         
         if (typeof SyncManager !== 'undefined') {
             SyncManager.updateStatus('syncing', 'Syncing with Book Keeper...');
+            // BookKeeper import is a trusted source; do not spam conflict prompts.
+            SyncManager.suppressConflictPrompts = true;
         }
 
         try {
@@ -396,6 +398,10 @@ const BookKeeperSync = {
             }
             if (window.App && App.showNotification) {
                 App.showNotification('Book Keeper sync failed: ' + e.message, 'error');
+            }
+        } finally {
+            if (typeof SyncManager !== 'undefined') {
+                SyncManager.suppressConflictPrompts = false;
             }
         }
     },

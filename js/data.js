@@ -54,7 +54,7 @@ const DataManager = {
     },
 
     /** On load, union-merge with localStorage so cloud snapshots cannot drop newer rows (incl. gtes_users for web login). */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_users']),
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_users']),
 
     _normalizeGtesUsersPayload(raw) {
         if (raw == null) return raw;
@@ -440,7 +440,22 @@ const DataManager = {
             const canProceed = await window.SyncManager.checkConflict(key);
             if (!canProceed) return false;
         }
-        return await FileStorage.saveData(key, data);
+        let payload = data;
+        if (this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
+            try {
+                const cloudExisting = await FileStorage.loadData(key);
+                if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
+                    payload = this._mergeRecordArraysById(cloudExisting, data);
+                    this._cache[key] = payload;
+                    try {
+                        localStorage.setItem(key, JSON.stringify(payload));
+                    } catch (_) { }
+                }
+            } catch (e) {
+                console.warn(`[DataManager] Pre-save merge skipped for '${key}':`, e);
+            }
+        }
+        return await FileStorage.saveData(key, payload);
     },
 
     async loadData(key) {

@@ -550,6 +550,13 @@ const BusinessAnalytics = {
         return accountGroup === 'vendor' ? (credit - debit) : (debit - credit);
     },
 
+    _toAmount(v) {
+        if (v == null || v === '') return 0;
+        if (typeof v === 'number') return isNaN(v) ? 0 : v;
+        const n = parseFloat(String(v).replace(/,/g, ''));
+        return isNaN(n) ? 0 : n;
+    },
+
     _ledgerKey(v) {
         return (v == null ? '' : String(v)).trim().toLowerCase();
     },
@@ -601,9 +608,41 @@ const BusinessAnalytics = {
         return 0;
     },
 
+    _getAccountOpeningSigned(account, accountGroup) {
+        if (!account) return 0;
+        const openingRaw = (account.openingBalance !== undefined && account.openingBalance !== null)
+            ? account.openingBalance
+            : account.balance;
+        let parsedOpening = this._toAmount(openingRaw);
+        if (typeof openingRaw === 'string') {
+            const low = openingRaw.toLowerCase();
+            if (/(^|\W)(cr|credit)(\W|$)/.test(low)) parsedOpening = -Math.abs(parsedOpening);
+            if (/(^|\W)(dr|debit)(\W|$)/.test(low)) parsedOpening = Math.abs(parsedOpening);
+        }
+        if (parsedOpening !== 0) return parsedOpening;
+
+        const amt = Math.abs(this._toAmount(account.balance));
+        if (amt <= 0) return 0;
+        const t = String(account.balanceType || '').toLowerCase();
+        const has = (arr) => arr.some(x => t.includes(x));
+        const isReceivable = has(['receivable', 'debit', 'dr']);
+        const isPayable = has(['payable', 'credit', 'cr', 'advance']);
+
+        if (accountGroup === 'customer') {
+            if (isReceivable) return amt;   // Debit opening
+            if (isPayable) return -amt;     // Credit opening
+            // Default for customers: receivable
+            return amt;
+        }
+        // Vendor ledger
+        if (isPayable) return amt;          // Credit opening (payable)
+        if (isReceivable) return -amt;      // Debit opening (advance to supplier)
+        // Default for vendors: payable
+        return amt;
+    },
+
     _collectCustomerRawEntries(account) {
         const invoices = DataManager.getData('invoices') || [];
-        const challans = DataManager.getData('challans') || [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
         const customerInvoices = invoices.filter(inv => inv.customerId === account.id || inv.customerName === account.name);
@@ -631,30 +670,15 @@ const BusinessAnalytics = {
                 });
             });
 
-        challans
-            .filter(ch => ch.customerId === account.id || ch.customerName === account.name)
-            .forEach(ch => {
-                entries.push({
-                    date: ch.date,
-                    type: ch.type === 'delivery' ? 'Delivery Challan' : 'Service Challan',
-                    vchType: ch.type === 'delivery' ? 'Delivery' : 'Service',
-                    reference: ch.id,
-                    refNo: ch.referenceNumber || ch.lrNo || '',
-                    particulars: account.name,
-                    description: `${ch.type === 'delivery' ? 'DC' : 'SC'} #${ch.id}`,
-                    debit: parseFloat(ch.total) || 0,
-                    credit: 0,
-                    status: ch.status
-                });
-            });
-
         vouchers.forEach(v => {
-                if (v.type === 'contra') return;
+                const vType = String(v.type || '').toLowerCase();
+                if (vType === 'contra') return;
+                if (vType !== 'receipt' && vType !== 'payment') return;
                 const amt = this._resolveVoucherAmountForAccount(v, account, customerInvoiceKeys);
                 if (amt <= 0) return;
                 const mode = (v.paymentMode || v.mode || 'Cash').toString();
-                if (v.type === 'payment' && v.isPurchase) return;
-                if (v.type === 'payment' && !v.isPurchase) {
+                if (vType === 'payment' && v.isPurchase) return;
+                if (vType === 'payment' && !v.isPurchase) {
                     entries.push({
                         date: v.date,
                         type: 'Payment',
@@ -671,7 +695,7 @@ const BusinessAnalytics = {
                 }
                 entries.push({
                     date: v.date,
-                    type: (v.type === 'receipt' || !v.type) ? 'Receipt' : 'Receipt',
+                    type: 'Receipt',
                     vchType: 'Receipt',
                     reference: v.id,
                     refNo: v.referenceId || v.billNo || '',
@@ -769,7 +793,7 @@ const BusinessAnalytics = {
 
         const sign = (d, c) => this._ledgerRunningDelta(accountGroup, d, c);
 
-        let openingBalance = 0;
+        let openingBalance = this._getAccountOpeningSigned(account, accountGroup);
         const inPeriod = [];
 
         raw.forEach(e => {

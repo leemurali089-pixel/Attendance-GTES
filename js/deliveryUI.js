@@ -1671,9 +1671,26 @@ const DeliveryUI = {
             services = materials.filter(m => m.unit === 'service' || m.type === 'service' || m.category === 'Services');
         }
 
+        const q = (this.serviceSearchQuery || '').toString().trim().toLowerCase();
+        const filtered = !q ? services : services.filter(s => {
+            const name = (s?.name || '').toString().toLowerCase();
+            const hsn = (s?.hsnCode || '').toString().toLowerCase();
+            return name.includes(q) || hsn.includes(q);
+        });
+
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <h4><i class="bi bi-tools text-warning me-2"></i>Service Details</h4>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <h4 class="mb-0"><i class="bi bi-tools text-warning me-2"></i>Service Details</h4>
+                    <div class="input-group input-group-sm" style="max-width: 320px;">
+                        <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
+                        <input id="serviceSearchInput" type="text" class="form-control bg-dark border-secondary text-white"
+                               placeholder="Search services / HSN…" value="${(this.serviceSearchQuery || '').replace(/</g, '&lt;')}">
+                        <button class="btn btn-outline-secondary border-secondary" type="button" onclick="DeliveryUI.serviceSearchQuery=''; DeliveryUI.loadServices();">
+                            Clear
+                        </button>
+                    </div>
+                </div>
                 <button class="btn btn-primary" onclick="DeliveryUI.showServiceModal()">
                     <i class="bi bi-plus-circle me-1"></i> Add New Service
                 </button>
@@ -1691,8 +1708,8 @@ const DeliveryUI = {
                         </tr>
                     </thead>
                     <tbody>
-                        ${services.length === 0 ? '<tr><td colspan="5" class="text-center text-muted py-4">No service items found</td></tr>' :
-                services.map(s => `
+                        ${filtered.length === 0 ? '<tr><td colspan="5" class="text-center text-muted py-4">No service items found</td></tr>' :
+                filtered.map(s => `
                             <tr>
                                 <td><span class="fw-bold text-warning">${s.name}</span></td>
                                 <td><small class="badge bg-dark border border-secondary">${s.hsnCode || '-'}</small></td>
@@ -1712,6 +1729,17 @@ const DeliveryUI = {
                 </table>
             </div>
         `;
+
+        const input = document.getElementById('serviceSearchInput');
+        if (input) {
+            input.oninput = (e) => {
+                this.serviceSearchQuery = e.target.value || '';
+                // re-render live
+                this.loadServices();
+            };
+            // keep cursor at end after rerender
+            try { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } catch (_) { }
+        }
     },
 
     showServiceModal(serviceId = null) {
