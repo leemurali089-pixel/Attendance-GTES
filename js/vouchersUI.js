@@ -1655,7 +1655,7 @@ const VouchersUI = {
 
         // NEW: Filter out the CURRENT transaction so we don't subtract its own amount if already mapped
         const indexField = document.getElementById('bankTxIndex');
-        const currentIndex = indexField ? parseInt(indexField.value) : -1;
+        const currentIndex = (indexField && indexField.value !== '') ? parseInt(indexField.value, 10) : -1;
         const otherPendingTx = (VouchersUI.currentBankTransactions || []).filter((_, i) => i !== currentIndex);
 
         if (!name) {
@@ -1717,7 +1717,10 @@ const VouchersUI = {
         pendingDocs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
         // NEW: Identifying already mapped data to restore UI state
-        const tx = (currentIndex !== -1) ? VouchersUI.currentBankTransactions[currentIndex] : null;
+        let tx = null;
+        if (currentIndex >= 0 && VouchersUI.currentBankTransactions) {
+            tx = VouchersUI.currentBankTransactions[currentIndex];
+        }
         const mv = tx ? tx.mappedVoucher : null;
 
         if (pendingDocs.length > 0) {
