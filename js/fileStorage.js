@@ -14,15 +14,27 @@ const FileStorage = {
     },
 
     async saveData(key, data) {
+        // Handle Electron first
+        if (window.electronAPI) {
+            try {
+                const result = await window.electronAPI.saveData(key, data);
+                if (result && result.success) {
+                    console.log(`✅ Local File Sync [${key}]: Success`);
+                    return true;
+                }
+                console.error(`🚨 Local File Sync Failed for ${key}:`, result?.error);
+            } catch (err) {
+                console.error(`🚨 Electron IPC Error during save for ${key}:`, err);
+            }
+        }
+
         if (!this.isCloudReady) {
-            console.warn("Cloud DB not ready. Saving locally.");
+            console.warn("Cloud DB not ready. Saving to localStorage.");
             localStorage.setItem(key, JSON.stringify(data));
             return false;
         }
 
         try {
-            // Realtime Database allows replacing the entire node at once
-            // This is perfect for bulk syncs and has NO document write limits!
             await window.db.ref(key).set(data);
             console.log(`✅ Cloud Sync [${key}]: Success`);
             return true;
@@ -34,6 +46,19 @@ const FileStorage = {
     },
 
     async loadData(key) {
+        // Handle Electron first
+        if (window.electronAPI) {
+            try {
+                const result = await window.electronAPI.loadData(key);
+                if (result && result.success) {
+                    return result.data;
+                }
+                console.warn(`[FileStorage] Local File load failed/empty for '${key}':`, result?.error);
+            } catch (err) {
+                console.error(`[FileStorage] Electron IPC Error during load for ${key}:`, err);
+            }
+        }
+
         if (!this.isCloudReady) {
             try {
                 const raw = localStorage.getItem(key);

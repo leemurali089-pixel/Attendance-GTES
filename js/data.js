@@ -63,8 +63,11 @@ const DataManager = {
         return Object.entries(raw)
             .map(([k, v]) => {
                 if (!v || typeof v !== 'object') return null;
-                if (v.id == null || v.id === '') return { ...v, id: k };
-                return v;
+                const normalized = { ...v };
+                // If it's a map (Firebase ID as key), ensure id and username are populated
+                if (normalized.id == null || normalized.id === '') normalized.id = k;
+                if (normalized.username == null || normalized.username === '') normalized.username = k;
+                return normalized;
             })
             .filter(Boolean);
     },

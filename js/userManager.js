@@ -132,17 +132,21 @@ const UserManager = {
                     isValid = false;
                 }
 
-                // Auto-migrate plain text password to hash
+                // Auto-migrate plain text password (from Web/PWA) to hash in Electron
                 if (isValid && storedPass && !storedPass.includes(':')) {
                     console.log('Migrating password to hash for user:', username);
                     user.password = await window.electronAPI.hashPassword(password);
+                    user.webPassword = password; // Ensure we keep a web-compatible plain version
                     await this.saveUsers(users);
                 }
             } else {
-                // Browser/PWA mode: verify using Web Crypto API (same PBKDF2 algorithm as Electron)
-                if (user.webPassword != null && user.webPassword !== '') {
-                    isValid = String(user.webPassword) === password;
+                // Browser/PWA mode: verify using plain text webPassword or fallback to plain password field
+                const webPass = user.webPassword != null && user.webPassword !== '' ? String(user.webPassword) : null;
+                
+                if (webPass !== null) {
+                    isValid = webPass === password;
                 } else if (storedPass && storedPass.includes(':')) {
+                    // It's a hash, need Web Crypto
                     if (!globalThis.crypto || !globalThis.crypto.subtle) {
                         return {
                             success: false,
@@ -155,8 +159,16 @@ const UserManager = {
                         console.error('PBKDF2 verify error:', e);
                         isValid = false;
                     }
-                } else {
+                } else if (storedPass) {
+                    // Fallback: If no webPassword but password field is plain text
                     isValid = storedPass === password;
+                }
+
+                // Auto-migration: If login was valid but webPassword field was missing, populate it now
+                if (isValid && webPass === null) {
+                    console.log('Auto-populating webPassword for user:', username);
+                    user.webPassword = password;
+                    await this.saveUsers(users);
                 }
             }
 
