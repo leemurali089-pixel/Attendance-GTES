@@ -70,8 +70,10 @@ const FileStorage = {
                     } else {
                         localData = result.data;
                     }
+                } else if (result && !result.success) {
+                    console.warn(`[FileStorage] Local File load failed for '${key}':`, result?.error);
                 }
-                console.warn(`[FileStorage] Local File load failed/empty for '${key}':`, result?.error);
+                // Missing local file / first run: no warning — cloud fetch below is normal.
             } catch (err) {
                 console.error(`[FileStorage] Electron IPC Error during load for ${key}:`, err);
             }
@@ -88,7 +90,8 @@ const FileStorage = {
         }
 
         try {
-            console.log(`☁️ Fetching ${key} from Realtime Database...`);
+            // Routine; use debug so DevTools default level stays quiet (enable Verbose to see).
+            console.debug(`[FileStorage] Fetching '${key}' from Realtime Database…`);
             const snapshot = await window.db.ref(key).once('value');
             if (snapshot.exists()) {
                 const cloudVal = snapshot.val();

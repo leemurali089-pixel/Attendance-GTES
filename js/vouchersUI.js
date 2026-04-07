@@ -5,6 +5,7 @@
  */
 const VouchersUI = {
     currentMode: 'gst', // 'gst', 'non-gst', or 'purchase'
+    _voucherFilterDebounceTimer: null,
     
     async init() {
         console.log('Vouchers UI Initialized');
@@ -208,7 +209,9 @@ const VouchersUI = {
                                 ${v.customerName || v.customerId || 'N/A'}
                                 ${v.linkedInvoiceId ? `<br><small class="text-muted"><i class="bi bi-link-45deg"></i> Inv: ${v.linkedInvoiceId}</small>` : ''}
                             </td>
-                            <td class="text-end">₹${(parseFloat(v.amount) + parseFloat(v.tdsAmount || 0) + parseFloat(v.discountAmount || 0)).toFixed(2)}</td>
+                            <td class="text-end">₹${(typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay
+                                ? VoucherManager.resolveSettlementDisplay(v).totalSettlement
+                                : (parseFloat(v.amount) + parseFloat(v.tdsAmount || 0) + parseFloat(v.discountAmount || 0))).toFixed(2)}</td>
                             <td class="text-center text-secondary">${v.paymentMode || 'Cash'}</td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-warning" onclick="VouchersUI.showEditVoucherModal('${v.id}')" title="Edit Voucher">
@@ -254,6 +257,14 @@ const VouchersUI = {
                 }
             });
         });
+    },
+
+    filterVouchersDebounced() {
+        if (this._voucherFilterDebounceTimer) clearTimeout(this._voucherFilterDebounceTimer);
+        this._voucherFilterDebounceTimer = setTimeout(() => {
+            this._voucherFilterDebounceTimer = null;
+            this.filterVouchers();
+        }, 100);
     },
 
     showCreateModal(type = 'receipt') {
@@ -1964,10 +1975,16 @@ const VouchersUI = {
         const formData = new FormData(form);
         const name = formData.get('customerName');
 
-        // Lookup customer ID
+        // Prefer hidden ID from party picker (exact); avoid wrong ID when names differ only by spacing/case
         const customers = DataManager.getData('customers') || [];
-        const found = customers.find(c => c.name === name);
+        const hiddenId = (formData.get('customerId') || '').toString().trim();
+        const found = (hiddenId && customers.find(c => c.id === hiddenId))
+            || customers.find(c => (c.name || '').trim() === (name || '').trim());
         const customerId = found ? found.id : null;
+        const partyId = (found && found.partyId)
+            || ((typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
+                ? CustomerManager.resolvePartyId({ customerId, customerName: name })
+                : '');
 
         const linkedJson = formData.get('linkedInvoicesJSON');
         const linkedInvoices = linkedJson ? JSON.parse(linkedJson) : [];
@@ -1997,6 +2014,7 @@ const VouchersUI = {
             date: formData.get('date'),
             customerName: name,
             customerId: customerId,
+            partyId: partyId || '',
             amount: allocatedAmount,
             paymentMode: formData.get('paymentMode'),
             referenceId: formData.get('refNo'),
@@ -2268,7 +2286,60 @@ const VouchersUI = {
         this.updateTable();
     },
 
-    async getVoucherElement(voucherId) {
+    _buildLinkedDocIndexes(invoices, expenses) {
+        const invById = new Map();
+        const invByNo = new Map();
+        const invByBkId = new Map();
+        const expById = new Map();
+        const expByBill = new Map();
+        const expByBkId = new Map();
+        const invSet = new Set(invoices);
+        for (const i of invoices) {
+            if (i.id != null && String(i.id).trim() !== '') invById.set(String(i.id).trim(), i);
+            const no = (i.invoiceNo || '').toString().trim();
+            if (no) invByNo.set(no, i);
+            if (i.bookkeeperId) invByBkId.set(String(i.bookkeeperId).trim(), i);
+            const bkv = (i.bookkeeperVchNo || '').toString().trim();
+            if (bkv) invByBkId.set(bkv, i);
+        }
+        for (const e of expenses) {
+            if (e.id != null && String(e.id).trim() !== '') expById.set(String(e.id).trim(), e);
+            const bn = (e.billNo || '').toString().trim();
+            if (bn) expByBill.set(bn, e);
+            if (e.bookkeeperId) expByBkId.set(String(e.bookkeeperId).trim(), e);
+            const bkv = (e.bookkeeperVchNo || '').toString().trim();
+            if (bkv) expByBill.set(bkv, e);
+        }
+        return { invById, invByNo, invByBkId, expById, expByBill, expByBkId, invSet };
+    },
+
+    _resolveLinkedRowDoc(docIdStr, idx, invoices, expenses) {
+        const s = (docIdStr != null ? docIdStr : '').toString().trim();
+        if (!s) return { doc: null, isInvoiceDoc: true };
+        let doc = idx.invById.get(s) || idx.expById.get(s);
+        if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        doc = idx.invByNo.get(s) || idx.expByBill.get(s);
+        if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        doc = idx.invByBkId.get(s) || idx.expByBkId.get(s);
+        if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        if (/^\d+$/.test(s)) {
+            const n = parseInt(s, 10);
+            doc = idx.invByBkId.get(`BK-INV-${s}`) || idx.invByBkId.get(`BK-INV-${n}`)
+                || idx.expByBkId.get(`BK-PUR-${s}`) || idx.expByBkId.get(`BK-PUR-${n}`)
+                || idx.expByBkId.get(`BK-EXP-${n}`);
+            if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        }
+        const docLc = s.toLowerCase().trim();
+        doc = invoices.find(i => (i.invoiceNo || '').toString().toLowerCase().trim() === docLc)
+            || expenses.find(e => (e.billNo || '').toString().toLowerCase().trim() === docLc);
+        if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        doc = expenses.find(e => (e.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc)
+            || invoices.find(i => (i.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc);
+        if (doc) return { doc, isInvoiceDoc: idx.invSet.has(doc) };
+        return { doc: null, isInvoiceDoc: true };
+    },
+
+    async getVoucherElement(voucherId, options = {}) {
         const voucher = VoucherManager.getVoucher(voucherId);
         if (!voucher) return null;
 
@@ -2290,8 +2361,17 @@ const VouchersUI = {
         const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
         const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
         const upiId = settings.upiId || '';
-        const amt = parseFloat(voucher.amount) || 0;
-        const qrUrl = upiId ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${amt}&cu=INR`)}` : '';
+        const settlement = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay)
+            ? VoucherManager.resolveSettlementDisplay(voucher)
+            : {
+                bankAmount: parseFloat(voucher.amount) || 0,
+                tdsAmount: parseFloat(voucher.tdsAmount) || 0,
+                discountAmount: parseFloat(voucher.discountAmount) || 0,
+                totalSettlement: (parseFloat(voucher.amount) || 0) + (parseFloat(voucher.tdsAmount) || 0) + (parseFloat(voucher.discountAmount) || 0)
+            };
+        const amt = settlement.bankAmount;
+        const includeQr = !options.skipQr && upiId;
+        const qrUrl = includeQr ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${amt}&cu=INR`)}` : '';
 
         const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
@@ -2311,9 +2391,9 @@ const VouchersUI = {
         const typeLabel = typeLabels[voucher.type] || 'Voucher';
         const partyLabel = voucher.type === 'receipt' ? 'Received From (Party)' : 'Paid To (Party)';
         const modeStr = [voucher.paymentMode || voucher.mode, voucher.referenceId ? `Ref: ${voucher.referenceId}` : ''].filter(Boolean).join(' · ');
-        const tds = parseFloat(voucher.tdsAmount) || 0;
-        const disc = parseFloat(voucher.discountAmount) || 0;
-        const totalAdj = amt + tds + disc;
+        const tds = settlement.tdsAmount;
+        const disc = settlement.discountAmount;
+        const totalAdj = settlement.totalSettlement;
         const narr = (voucher.remarks || voucher.narration || '').trim();
 
         element.innerHTML = `
@@ -2386,21 +2466,22 @@ const VouchersUI = {
                         <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
                                 <tr><td style="padding: 6px 8px; text-align: right; color: #666;">Amount (Bank/Cash)</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
-                                ${tds > 0 ? `<tr><td style="padding: 6px 8px; text-align: right; color: #666;">TDS</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #b45309;">₹${tds.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
-                                ${disc > 0 ? `<tr><td style="padding: 6px 8px; text-align: right; color: #666;">Discount</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #059669;">₹${disc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
-                                ${(tds > 0 || disc > 0) ? `<tr style="border-top: 1px solid #e5e7eb; font-weight: 600;">
-                                    <td style="padding: 6px 8px; text-align: right; color: #666;">Total adjustable</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${totalAdj.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 110px;">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                                <tr><td style="padding: 6px 8px; text-align: right; color: #666;">TDS (Tax deducted)</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #b45309;">₹${tds.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                                <tr><td style="padding: 6px 8px; text-align: right; color: #666;">Discount</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; color: #059669;">₹${disc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+                                <tr style="border-top: 1px solid #e5e7eb; font-weight: 700;">
+                                    <td style="padding: 8px 8px; text-align: right; color: #333;">Total settlement <span style="font-size:9px;font-weight:600;color:#64748b;display:block;">(Bank + TDS + Discount)</span></td>
+                                    <td style="padding: 8px 10px 8px 8px; text-align: right; font-size: 15px;">₹${totalAdj.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
                                 <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
                                     <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
                                         <tr style="font-weight: bold; font-size: 16px;">
-                                            <td style="padding: 10px 8px; text-align: right;">Voucher amount</td>
-                                            <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                            <td style="padding: 10px 8px; text-align: right;">Voucher total (full)</td>
+                                            <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${totalAdj.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                                         </tr>
                                     </table>
+                                    <div style="font-size: 9px; color: #64748b; text-align: right; padding: 4px 8px 0 0;">Same as total settlement — includes tax deducted &amp; discount.</div>
                                 </td></tr>
                             </table>
                         </div>
@@ -2408,7 +2489,7 @@ const VouchersUI = {
                 </tr>
             </table>
 
-            ${this.renderLinkedDocuments(voucher)}
+            ${this.renderLinkedDocuments(voucher, settlement)}
 
             <table style="width: 100%; margin-top: 36px; border-collapse: collapse;"><tr><td style="text-align: right;">
                 <div style="display: inline-block; text-align: right; width: 280px; max-width: 100%;">
@@ -2426,9 +2507,9 @@ const VouchersUI = {
         return element;
     },
 
-    renderLinkedDocuments(voucher) {
+    renderLinkedDocuments(voucher, settlement) {
         let linked = voucher.linkedInvoices || [];
-        
+
         // Fallback: If no linkedInvoices, try allocations (common in some imported formats)
         if (linked.length === 0 && voucher.allocations && Array.isArray(voucher.allocations)) {
             linked = voucher.allocations;
@@ -2438,16 +2519,27 @@ const VouchersUI = {
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
         const isReceipt = (voucher.type || '').toLowerCase() === 'receipt';
+        const idx = this._buildLinkedDocIndexes(invoices, expenses);
+        const settle = settlement || (typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay
+            ? VoucherManager.resolveSettlementDisplay(voucher)
+            : {
+                tdsAmount: parseFloat(voucher.tdsAmount) || 0,
+                discountAmount: parseFloat(voucher.discountAmount) || 0
+            });
+        const tdsAmt = settle.tdsAmount;
+        const discAmt = settle.discountAmount;
         const esc = (s) => String(s ?? '')
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        const allocList = Array.isArray(voucher.allocations) ? voucher.allocations : [];
 
         const rows = linked.map(link => {
             const docId = typeof link === 'object' ? link.id : link;
             const docIdStr = (docId != null ? docId : '').toString();
 
-            let amount = voucher.amount;
-            if (voucher.allocations && Array.isArray(voucher.allocations)) {
-                const alloc = voucher.allocations.find(a => (a.id != null && a.id.toString() === docIdStr) ||
+            let amount = parseFloat(voucher.amount) || 0;
+            if (allocList.length) {
+                const alloc = allocList.find(a => (a.id != null && a.id.toString() === docIdStr) ||
                     (a.billNo != null && a.billNo.toString() === docIdStr) ||
                     (a.no != null && a.no.toString() === docIdStr) ||
                     (a.invoiceNo != null && a.invoiceNo.toString() === docIdStr) ||
@@ -2457,27 +2549,7 @@ const VouchersUI = {
                 amount = parseFloat(link.amount) || 0;
             }
 
-            let doc = invoices.find(i => i.id === docId) || expenses.find(e => e.id === docId);
-            const docLc = docIdStr.toLowerCase().trim();
-            if (!doc && docLc) {
-                doc = invoices.find(i => (i.invoiceNo || '').toString().toLowerCase().trim() === docLc) ||
-                    expenses.find(e => (e.billNo || '').toString().toLowerCase().trim() === docLc);
-            }
-            if (!doc && docLc) {
-                doc = expenses.find(e => (e.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc) ||
-                    invoices.find(i => (i.bookkeeperVchNo || '').toString().toLowerCase().trim() === docLc);
-            }
-            if (!doc && docLc) {
-                doc = expenses.find(e => (e.bookkeeperId || '').toLowerCase() === `bk-pur-${docLc}`) ||
-                    invoices.find(i => (i.bookkeeperId || '').toLowerCase() === `bk-inv-${docLc}`);
-            }
-            if (!doc && docId) {
-                const bkSearchId = `BK-INV-${docId}`;
-                doc = invoices.find(i => i.bookkeeperId === bkSearchId) ||
-                    expenses.find(e => e.bookkeeperId === `BK-PUR-${docId}` || e.bookkeeperId === `BK-EXP-${docId}`);
-            }
-
-            const isInvoiceDoc = doc && invoices.some(i => i === doc);
+            const { doc, isInvoiceDoc } = this._resolveLinkedRowDoc(docIdStr, idx, invoices, expenses);
             const date = doc ? doc.date : '-';
             let refNo;
             let thirdCol;
@@ -2487,11 +2559,12 @@ const VouchersUI = {
                     refNo = (doc.invoiceNo || doc.id || '').toString().trim();
                     thirdCol = (doc.poNumber || doc.referenceNo || doc.buyerPoNo || '').toString().trim() || '-';
                     if (isReceipt && doc.items && doc.items.length) {
-                        lineDetails = doc.items.slice(0, 6).map(it => {
+                        const maxItems = 4;
+                        lineDetails = doc.items.slice(0, maxItems).map(it => {
                             const bits = [it.name, (it.description || '').trim()].filter(Boolean);
                             return bits.join(' — ');
                         }).filter(Boolean).join('; ');
-                        if (lineDetails.length > 220) lineDetails = lineDetails.slice(0, 217) + '…';
+                        if (lineDetails.length > 200) lineDetails = lineDetails.slice(0, 197) + '…';
                     }
                 } else {
                     refNo = (doc.billNo || doc.id || '').toString().trim();
@@ -2513,6 +2586,42 @@ const VouchersUI = {
             `;
         }).join('');
 
+        let adjustmentRows = '';
+        if (tdsAmt > 0) {
+            if (isReceipt) {
+                adjustmentRows += `
+                <tr style="border: 1px solid #000; background: #fafafa;">
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px; font-weight: 700;" colspan="3">Tax Deducted Receivable (TDS)</td>
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px;">—</td>
+                    <td style="padding: 8px; border: 1px solid #000; text-align: right; font-size: 11px; color: #b45309;">(₹${tdsAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})</td>
+                </tr>`;
+            } else {
+                adjustmentRows += `
+                <tr style="border: 1px solid #000; background: #fafafa;">
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px; font-weight: 700;" colspan="2">Tax Deducted (TDS)</td>
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px;">—</td>
+                    <td style="padding: 8px; border: 1px solid #000; text-align: right; font-size: 11px; color: #b45309;">(₹${tdsAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})</td>
+                </tr>`;
+            }
+        }
+        if (discAmt > 0) {
+            if (isReceipt) {
+                adjustmentRows += `
+                <tr style="border: 1px solid #000; background: #fafafa;">
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px; font-weight: 700;" colspan="3">Discount allowed</td>
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px;">—</td>
+                    <td style="padding: 8px; border: 1px solid #000; text-align: right; font-size: 11px; color: #059669;">(₹${discAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})</td>
+                </tr>`;
+            } else {
+                adjustmentRows += `
+                <tr style="border: 1px solid #000; background: #fafafa;">
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px; font-weight: 700;" colspan="2">Discount</td>
+                    <td style="padding: 8px; border: 1px solid #000; font-size: 11px;">—</td>
+                    <td style="padding: 8px; border: 1px solid #000; text-align: right; font-size: 11px; color: #059669;">(₹${discAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})</td>
+                </tr>`;
+            }
+        }
+
         const colPo = isReceipt ? 'PO / Reference' : 'Supplier Invoice No';
         const colDetail = isReceipt ? '<th style="padding: 8px; text-align: left; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase;">Item details</th>' : '';
         const thLinked = 'padding: 8px; text-align: left; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase; color: #fff;';
@@ -2532,6 +2641,7 @@ const VouchersUI = {
                     </thead>
                     <tbody>
                         ${rows}
+                        ${adjustmentRows}
                     </tbody>
                 </table>
             </div>
@@ -2549,9 +2659,9 @@ const VouchersUI = {
         const opt = {
             margin: [10, 10, 10, 10],
             filename,
-            image: { type: 'jpeg', quality: 0.92 },
+            image: { type: 'jpeg', quality: 0.85 },
             html2canvas: {
-                scale: 2,
+                scale: (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_VOUCHER_HTML2PDF_SCALE) || 1.06,
                 useCORS: true,
                 allowTaint: true,
                 logging: false,
@@ -2564,7 +2674,7 @@ const VouchersUI = {
     },
 
     async previewVoucher(voucherId) {
-        const element = await this.getVoucherElement(voucherId);
+        const element = await this.getVoucherElement(voucherId, { skipQr: true });
         if (!element) return;
 
         const container = document.getElementById('pdfPreviewContainer');
@@ -2684,12 +2794,18 @@ const VouchersUI = {
         const name = formData.get('customerName');
         const customers = DataManager.getData('customers') || [];
         const found = customers.find(c => c.name === name);
+        const resolvedId = found ? found.id : formData.get('customerId');
+        const partyId = (found && found.partyId)
+            || ((typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
+                ? CustomerManager.resolvePartyId({ customerId: resolvedId, customerName: name })
+                : '');
 
         const updates = {
             type: formData.get('type'),
             date: formData.get('date'),
             customerName: name,
-            customerId: found ? found.id : formData.get('customerId'),
+            customerId: resolvedId,
+            partyId: partyId || '',
             customerAddress: formData.get('customerAddress') || '',
             amount: parseFloat(formData.get('amount')) || 0,
             paymentMode: formData.get('paymentMode'),

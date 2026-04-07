@@ -62,16 +62,13 @@ const EmployeeViewModule = {
 
         console.log('Rendering view for employee:', employee);
 
-        const fySummaryHtml = await this.renderFinancialYearSummary(employee);
-
-        let viewContentHtml = '';
-        if (this.viewType === 'monthly') {
-            viewContentHtml = await this.renderMonthlyView();
-        } else if (this.viewType === 'annual') {
-            viewContentHtml = await this.renderAnnualView();
-        } else if (this.viewType === 'payslips') {
-            viewContentHtml = await this.renderPayslipsView();
-        }
+        const [fySummaryHtml, viewContentHtml] = await Promise.all([
+            this.renderFinancialYearSummary(employee),
+            this.viewType === 'monthly' ? this.renderMonthlyView()
+                : this.viewType === 'annual' ? this.renderAnnualView()
+                    : this.viewType === 'payslips' ? this.renderPayslipsView()
+                        : Promise.resolve('')
+        ]);
 
         view.innerHTML = `
             <div class="row mb-4">
@@ -592,12 +589,17 @@ const EmployeeViewModule = {
             monthlyData[monthKey].otHours += hours;
         });
 
-        // Calculate total advances
+        // Total advances in range — single load (was N× await getTotalAdvance..., very slow)
         let totalAdvance = 0;
-        for (let year = startYear; year <= endYear; year++) {
-            for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
-                totalAdvance += await DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
-            }
+        {
+            const advances = await DataManager.getAdvances();
+            const advRows = advances.filter(adv => adv.employee === this.currentEmployee);
+            advRows.forEach(adv => {
+                const advDate = new Date(adv.date);
+                if (advDate >= startDate && advDate <= endDate) {
+                    totalAdvance += parseFloat(adv.amount || 0) || 0;
+                }
+            });
         }
 
         // Get employee data

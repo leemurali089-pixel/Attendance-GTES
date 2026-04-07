@@ -9,9 +9,12 @@ const SyncManager = {
     /** When true, conflict prompts are suppressed (e.g. during BookKeeper import). */
     suppressConflictPrompts: false,
     _conflictPromptCooldownUntil: 0,
+    syncProgressPercent: 0,
+    syncProgressMessage: '',
 
     // UI Elements
     statusIndicators: [], // Array to hold both main and landing indicators
+    _auditModalInstance: null,
 
     init() {
         // Initialize audit log from local storage if needed, or start fresh
@@ -79,7 +82,11 @@ const SyncManager = {
     },
 
     createAuditModal() {
-        if (document.getElementById('syncStatusModal')) return;
+        const existing = document.getElementById('syncStatusModal');
+        if (existing) {
+            this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(existing);
+            return;
+        }
 
         const modalDiv = document.createElement('div');
         modalDiv.className = 'modal fade';
@@ -107,6 +114,15 @@ const SyncManager = {
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>
+                        <div id="syncProgressContainer" class="mb-3 d-none">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small id="syncProgressLabel" style="color: var(--text-muted);">Preparing sync…</small>
+                                <small id="syncProgressPercent" class="fw-bold" style="color: var(--text-primary);">0%</small>
+                            </div>
+                            <div class="progress" style="height: 8px; background: rgba(255,255,255,0.1);">
+                                <div id="syncProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width: 0%"></div>
+                            </div>
+                        </div>
 
                         <!-- Book Keeper Sync Details -->
                         <div id="bookKeeperSyncInfo" class="mb-4"></div>
@@ -120,6 +136,12 @@ const SyncManager = {
             </div>
         `;
         document.body.appendChild(modalDiv);
+        this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(modalDiv);
+
+        // Defensive cleanup: avoid stuck grey overlay if backdrop gets orphaned.
+        modalDiv.addEventListener('hidden.bs.modal', () => {
+            this._cleanupModalArtifacts();
+        });
     },
 
     attachListeners() {
@@ -158,7 +180,7 @@ const SyncManager = {
         try {
             const result = await window.electronAPI.createBackup();
             if (result.success) {
-                console.log('Daily backup created at:', result.path);
+                console.debug('Daily backup created at:', result.path);
                 this.logSyncEvent('success', 'Daily backup created successfully');
             }
         } catch (error) {
@@ -210,7 +232,7 @@ const SyncManager = {
                 case 'syncing':
                     indicator.classList.add('text-primary');
                     icon.classList.add('bi-arrow-repeat', 'spin');
-                    text.textContent = 'Syncing...';
+                    text.textContent = this.syncProgressPercent > 0 ? `Syncing ${this.syncProgressPercent}%` : 'Syncing...';
                     break;
                 case 'conflict':
                     indicator.classList.add('text-danger');
@@ -258,8 +280,31 @@ const SyncManager = {
         if (!modalEl) return;
 
         this.updateAuditModalUI();
-        const modal = new bootstrap.Modal(modalEl);
-        modal.show();
+        this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+        this._auditModalInstance.show();
+    },
+
+    closeAuditModal() {
+        const modalEl = document.getElementById('syncStatusModal');
+        if (!modalEl) {
+            this._cleanupModalArtifacts();
+            return;
+        }
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.hide();
+        // Backup cleanup in case Bootstrap hidden event is skipped/interrupted.
+        setTimeout(() => this._cleanupModalArtifacts(), 120);
+    },
+
+    _cleanupModalArtifacts() {
+        const modalEl = document.getElementById('syncStatusModal');
+        const isOpen = !!(modalEl && modalEl.classList.contains('show'));
+        if (isOpen) return;
+
+        document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
+        document.body.style.removeProperty('overflow');
     },
 
     updateAuditModalUI() {
@@ -325,7 +370,7 @@ const SyncManager = {
                                 <h6 class="mb-0 small fw-bold"><i class="bi bi-database me-1 text-info"></i>Book Keeper Backup</h6>
                                 <div class="text-muted" style="font-size: 0.7rem;">No sync performed yet</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal'))?.hide();">
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync(); SyncManager.closeAuditModal();">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>
@@ -349,13 +394,35 @@ const SyncManager = {
         } else if (this.status === 'syncing') {
             iconDiv.classList.add('text-primary');
             iconDiv.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
-            titleDiv.textContent = 'Syncing...';
+            titleDiv.textContent = this.syncProgressPercent > 0
+                ? `Syncing... ${this.syncProgressPercent}%`
+                : 'Syncing...';
             titleDiv.className = 'mb-1 text-primary';
         } else {
             iconDiv.classList.add('text-warning');
             iconDiv.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i>';
             titleDiv.textContent = 'Attention Needed';
             titleDiv.className = 'mb-1 text-warning';
+        }
+
+        // Progress bar / stage text
+        const progressWrap = document.getElementById('syncProgressContainer');
+        const progressBar = document.getElementById('syncProgressBar');
+        const progressLabel = document.getElementById('syncProgressLabel');
+        const progressPct = document.getElementById('syncProgressPercent');
+        if (progressWrap && progressBar && progressLabel && progressPct) {
+            if (this.status === 'syncing') {
+                progressWrap.classList.remove('d-none');
+                const pct = Math.max(0, Math.min(100, parseInt(this.syncProgressPercent || 0, 10)));
+                progressBar.style.width = `${pct}%`;
+                progressPct.textContent = `${pct}%`;
+                progressLabel.textContent = this.syncProgressMessage || 'Sync in progress...';
+            } else {
+                progressWrap.classList.add('d-none');
+                progressBar.style.width = '0%';
+                progressPct.textContent = '0%';
+                progressLabel.textContent = 'Preparing sync…';
+            }
         }
 
         if (this.lastSyncTime) {
@@ -437,6 +504,19 @@ const SyncManager = {
         }
     },
 
+    setSyncProgress(percent, message = '') {
+        this.syncProgressPercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+        this.syncProgressMessage = message || this.syncProgressMessage || 'Sync in progress...';
+        if (this.status === 'syncing') {
+            this.updateStatus('syncing', this.syncProgressMessage);
+        }
+    },
+
+    clearSyncProgress() {
+        this.syncProgressPercent = 0;
+        this.syncProgressMessage = '';
+    },
+
     // Called by DataManager before saving
     async checkConflict(key) {
         if (!window.electronAPI) return true; // No conflict check if not electron
@@ -479,3 +559,4 @@ const SyncManager = {
 
 // Expose
 window.SyncManager = SyncManager;
+

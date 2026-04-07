@@ -1136,6 +1136,15 @@ const App = {
             this.showNotification('Book Keeper sync module not loaded.', 'error');
             return;
         }
+        if (typeof SyncManager !== 'undefined') {
+            SyncManager.updateStatus('syncing', 'Starting manual sync...');
+            if (typeof SyncManager.setSyncProgress === 'function') {
+                SyncManager.setSyncProgress(1, 'Opening backup file picker');
+            }
+            if (typeof SyncManager.showAuditModal === 'function') {
+                SyncManager.showAuditModal();
+            }
+        }
 
         // 1. Desktop Sync (Native Electron Picker)
         if (window.electronAPI && typeof BookKeeperSync.initiateNativeSync === 'function') {

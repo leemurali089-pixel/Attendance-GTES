@@ -266,7 +266,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 7; // Include DC-style rows in balances; hide only from GST table UI
+        const logicVersion = 11; // BK import: credit-note type preserved; merge by bk id only; CN party column
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
