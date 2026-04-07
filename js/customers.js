@@ -4,8 +4,17 @@
  */
 
 const CustomerManager = {
+    _partyIdInitPromise: null,
+    _txPartyIdInitPromise: null,
+    PARTY_MIGRATION_VERSION: '2',
+
     async init() {
         await DataManager.init();
+        await this.ensurePartyIdsPersisted();
+        // Run heavy transaction backfill in background; do not block app startup/sync.
+        this.ensureTransactionPartyIdsPersisted().catch(err => {
+            console.warn('[CustomerManager] partyId transaction backfill failed:', err);
+        });
         console.log('CustomerManager initialized');
     },
 
@@ -19,6 +28,85 @@ const CustomerManager = {
         const lastId = customers[customers.length - 1].id;
         const num = parseInt(lastId.split('-')[1]) + 1;
         return `CUST-${num.toString().padStart(4, '0')}`;
+    },
+
+    /**
+     * Generate internal unique party ID (hidden from UI)
+     */
+    generatePartyId() {
+        // O(1) generation; collision risk is negligible for this app scale.
+        return `PTY-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    },
+
+    _getOrCreatePartyId(customer) {
+        if (!customer || typeof customer !== 'object') return '';
+        const existing = (customer.partyId || '').toString().trim();
+        if (existing) return existing;
+        const created = this.generatePartyId();
+        customer.partyId = created;
+        return created;
+    },
+
+    async ensurePartyIdsPersisted() {
+        if (this._partyIdInitPromise) return this._partyIdInitPromise;
+        this._partyIdInitPromise = (async () => {
+            const customers = DataManager.getData('customers') || [];
+            if (!Array.isArray(customers) || customers.length === 0) return;
+            let changed = false;
+            for (const c of customers) {
+                if (!c || typeof c !== 'object') continue;
+                const before = (c.partyId || '').toString().trim();
+                const after = this._getOrCreatePartyId(c);
+                if (!before && after) changed = true;
+            }
+            if (changed) {
+                await DataManager.saveData('customers', customers);
+            }
+        })().finally(() => {
+            this._partyIdInitPromise = null;
+        });
+        return this._partyIdInitPromise;
+    },
+
+    async ensureTransactionPartyIdsPersisted() {
+        const migrationKey = `gtes_party_migration_v${this.PARTY_MIGRATION_VERSION}`;
+        try {
+            if (localStorage.getItem(migrationKey) === 'done') return;
+        } catch (e) { /* ignore storage issues */ }
+        if (this._txPartyIdInitPromise) return this._txPartyIdInitPromise;
+
+        this._txPartyIdInitPromise = (async () => {
+        const resolveFromRecord = (record, typeHint = null) => {
+            const name = record?.customerName || record?.vendor || record?.vendorName || record?.partyName || '';
+            const id = record?.customerId || record?.vendorId || '';
+            const accountType = typeHint || (record?.isPurchase ? 'supplier' : 'customer');
+            return this.resolvePartyId({ customerId: id, customerName: name, accountType });
+        };
+
+        const patchCollection = async (key, mapper) => {
+            const arr = DataManager.getData(key) || [];
+            if (!Array.isArray(arr) || arr.length === 0) return;
+            let changed = false;
+            for (const rec of arr) {
+                if (!rec || typeof rec !== 'object') continue;
+                if ((rec.partyId || '').toString().trim()) continue;
+                const pid = mapper(rec);
+                if (pid) {
+                    rec.partyId = pid;
+                    changed = true;
+                }
+            }
+            if (changed) await DataManager.saveData(key, arr);
+        };
+
+        await patchCollection('invoices', (r) => resolveFromRecord(r, 'customer'));
+        await patchCollection('vouchers', (r) => resolveFromRecord(r, r?.isPurchase ? 'supplier' : 'customer'));
+        await patchCollection(DataManager.KEYS.EXPENSES || 'purchases', (r) => resolveFromRecord(r, 'supplier'));
+        try { localStorage.setItem(migrationKey, 'done'); } catch (e) { /* ignore */ }
+        })().finally(() => {
+            this._txPartyIdInitPromise = null;
+        });
+        return this._txPartyIdInitPromise;
     },
 
     /**
@@ -81,6 +169,7 @@ const CustomerManager = {
 
         const customer = {
             id: customerData.id || this.generateCustomerId(),
+            partyId: customerData.partyId || this.generatePartyId(),
             name: customerData.name,
             address: customerData.address || '',
             gstin: customerData.gstin || '',
@@ -127,7 +216,18 @@ const CustomerManager = {
     getCustomer(customerId) {
         if (!customerId || customerId === 'undefined') return undefined;
         const customers = DataManager.getData('customers') || [];
-        return customers.find(c => c.id === customerId);
+        const key = String(customerId).trim();
+        const byId = customers.find(c => c.id === key);
+        if (byId) {
+            this._getOrCreatePartyId(byId);
+            return byId;
+        }
+        const byPartyId = customers.find(c => (c.partyId || '').toString().trim() === key);
+        if (byPartyId) {
+            this._getOrCreatePartyId(byPartyId);
+            return byPartyId;
+        }
+        return undefined;
     },
 
     /**
@@ -135,6 +235,26 @@ const CustomerManager = {
      */
     getAllCustomers() {
         return DataManager.getData('customers') || [];
+    },
+
+    getCustomerByName(name, accountType = null) {
+        const q = (name || '').toString().trim().toLowerCase();
+        if (!q) return undefined;
+        const customers = this.getAllCustomers();
+        return customers.find(c => {
+            const nm = (c.name || '').toString().trim().toLowerCase();
+            if (nm !== q) return false;
+            if (!accountType) return true;
+            return (c.accountType || '').toString().trim().toLowerCase() === accountType.toLowerCase();
+        });
+    },
+
+    resolvePartyId({ customerId = '', customerName = '', accountType = null } = {}) {
+        const byId = this.getCustomer(customerId);
+        if (byId) return this._getOrCreatePartyId(byId);
+        const byName = this.getCustomerByName(customerName, accountType);
+        if (byName) return this._getOrCreatePartyId(byName);
+        return '';
     },
 
     /**

@@ -22,6 +22,7 @@ const DataManager = {
     KEYS: {
         EMPLOYEES: 'gtes_employees',
         ATTENDANCE: 'gtes_attendance',
+        ATTENDANCE_BACKUP_MANIFEST: 'gtes_attendance_backup_manifest',
         HOLIDAYS: 'gtes_holidays',
         ADVANCES: 'gtes_advances',
         BONUS_PAYOUTS: 'gtes_bonus_payouts',
@@ -511,7 +512,7 @@ const DataManager = {
             const loc = Array.isArray(localParsed) ? localParsed : [];
             const merged = this._mergeRecordArraysById(loc, data);
             if (merged.length !== data.length || merged.length !== loc.length) {
-                console.warn(
+                console.debug(
                     `[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
                     '(Union by id; fewer rows usually means duplicate ids or cloud rows without `id` — not a login error.)'
                 );
@@ -1064,7 +1065,99 @@ const DataManager = {
     },
 
     async saveAttendance(attendance) {
+        await this._createAttendanceBackupBeforeSave(attendance);
         await this.saveData(this.KEYS.ATTENDANCE, attendance);
+    },
+
+    _getAttendanceBackupKey(slot) {
+        return `gtes_attendance_backup_${slot}`;
+    },
+
+    _getAttendanceDateRange(records) {
+        if (!Array.isArray(records) || records.length === 0) return { startDate: null, endDate: null };
+        let minTs = Number.POSITIVE_INFINITY;
+        let maxTs = Number.NEGATIVE_INFINITY;
+        for (const r of records) {
+            const t = Date.parse(r?.date || 0);
+            if (!Number.isNaN(t) && t > 0) {
+                if (t < minTs) minTs = t;
+                if (t > maxTs) maxTs = t;
+            }
+        }
+        if (!Number.isFinite(minTs) || !Number.isFinite(maxTs)) return { startDate: null, endDate: null };
+        return {
+            startDate: new Date(minTs).toISOString().slice(0, 10),
+            endDate: new Date(maxTs).toISOString().slice(0, 10)
+        };
+    },
+
+    _isAttendanceSame(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            const x = a[i] || {};
+            const y = b[i] || {};
+            if ((x.id || '') !== (y.id || '')) return false;
+            if ((x.updatedAt || '') !== (y.updatedAt || '')) return false;
+            if ((x.date || '') !== (y.date || '')) return false;
+        }
+        return true;
+    },
+
+    async _createAttendanceBackupBeforeSave(nextAttendance) {
+        try {
+            const current = await this.getAttendance();
+            if (!Array.isArray(current) || current.length === 0) return;
+            if (this._isAttendanceSame(current, nextAttendance)) return;
+
+            const manifestKey = this.KEYS.ATTENDANCE_BACKUP_MANIFEST;
+            let manifest = await FileStorage.loadData(manifestKey);
+            if (!manifest || typeof manifest !== 'object') manifest = {};
+            const maxBackups = 3;
+            const nextSlot = Number.isInteger(manifest.nextSlot) ? manifest.nextSlot : 1;
+            const slot = Math.min(Math.max(nextSlot, 1), maxBackups);
+
+            await FileStorage.saveData(this._getAttendanceBackupKey(slot), current);
+
+            const range = this._getAttendanceDateRange(current);
+            const snapshots = Array.isArray(manifest.snapshots) ? manifest.snapshots.filter(Boolean) : [];
+            const pruned = snapshots.filter(s => s.slot !== slot);
+            pruned.unshift({
+                slot,
+                createdAt: new Date().toISOString(),
+                recordCount: current.length,
+                startDate: range.startDate,
+                endDate: range.endDate
+            });
+            manifest.snapshots = pruned.slice(0, maxBackups);
+            manifest.nextSlot = (slot % maxBackups) + 1;
+            await FileStorage.saveData(manifestKey, manifest);
+        } catch (e) {
+            console.warn('[Attendance Backup] Snapshot skipped:', e);
+        }
+    },
+
+    async listAttendanceBackups() {
+        const manifest = await FileStorage.loadData(this.KEYS.ATTENDANCE_BACKUP_MANIFEST);
+        if (!manifest || !Array.isArray(manifest.snapshots)) return [];
+        return [...manifest.snapshots].sort((a, b) => {
+            const ta = Date.parse(a?.createdAt || 0) || 0;
+            const tb = Date.parse(b?.createdAt || 0) || 0;
+            return tb - ta;
+        });
+    },
+
+    async restoreAttendanceBackup(slot) {
+        const slotNum = parseInt(slot, 10);
+        if (!Number.isInteger(slotNum) || slotNum < 1 || slotNum > 3) {
+            throw new Error('Invalid backup slot. Valid slots: 1, 2, 3');
+        }
+        const backup = await FileStorage.loadData(this._getAttendanceBackupKey(slotNum));
+        if (!Array.isArray(backup)) {
+            throw new Error(`Attendance backup slot ${slotNum} is empty`);
+        }
+        await this.saveData(this.KEYS.ATTENDANCE, backup, { skipPreSaveMerge: true });
+        return backup.length;
     },
 
     async getAttendanceByDateRange(startDate, endDate) {
@@ -2248,3 +2341,4 @@ const RecurringInvoiceManager = {
 
 // Initialize on load
 DataManager.init();
+

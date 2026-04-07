@@ -124,34 +124,34 @@ const VoucherManager = {
         const findInvIdx = (raw) => {
             let idx = invoices.findIndex(i => i.id === raw);
             if (idx !== -1) return idx;
-            const s = (raw || '').toString().trim().toLowerCase();
+            const s = (raw || '').toString().trim();
             if (!s) return -1;
             return invoices.findIndex(i =>
-                (i.invoiceNo && i.invoiceNo.toString().trim().toLowerCase() === s) ||
-                (i.id && i.id.toString().trim().toLowerCase() === s)
+                (i.invoiceNo != null && i.invoiceNo.toString().trim() === s) ||
+                (i.id != null && i.id.toString().trim() === s)
             );
         };
         const findExpIdx = (raw) => {
             let idx = expenses.findIndex(e => e.id === raw);
             if (idx !== -1) return idx;
-            const s = (raw || '').toString().trim().toLowerCase();
+            const s = (raw || '').toString().trim();
             if (!s) return -1;
             return expenses.findIndex(e =>
-                (e.billNo && e.billNo.toString().trim().toLowerCase() === s) ||
-                (e.vch_no && e.vch_no.toString().trim().toLowerCase() === s) ||
-                (e.invoiceNo && e.invoiceNo.toString().trim().toLowerCase() === s)
+                (e.billNo != null && e.billNo.toString().trim() === s) ||
+                (e.vch_no != null && e.vch_no.toString().trim() === s) ||
+                (e.invoiceNo != null && e.invoiceNo.toString().trim() === s)
             );
         };
         const findPurIdx = (raw) => {
             if (purchases === expenses) return -1;
             let idx = purchases.findIndex(p => p.id === raw);
             if (idx !== -1) return idx;
-            const s = (raw || '').toString().trim().toLowerCase();
+            const s = (raw || '').toString().trim();
             if (!s) return -1;
             return purchases.findIndex(p =>
-                (p.billNo && p.billNo.toString().trim().toLowerCase() === s) ||
-                (p.vch_no && p.vch_no.toString().trim().toLowerCase() === s) ||
-                (p.invoiceNo && p.invoiceNo.toString().trim().toLowerCase() === s)
+                (p.billNo != null && p.billNo.toString().trim() === s) ||
+                (p.vch_no != null && p.vch_no.toString().trim() === s) ||
+                (p.invoiceNo != null && p.invoiceNo.toString().trim() === s)
             );
         };
 
@@ -232,6 +232,53 @@ const VoucherManager = {
             };
         }
         return null;
+    },
+
+    /**
+     * Sum amounts on allocation / linked lines (BookKeeper remittance rows), excluding voucher-level TDS/discount fields.
+     */
+    sumAllocationLineAmounts(voucher) {
+        if (!voucher || typeof voucher !== 'object') return 0;
+        if (Array.isArray(voucher.allocations) && voucher.allocations.length > 0) {
+            return voucher.allocations.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+        }
+        const linked = voucher.linkedInvoices || [];
+        let sum = 0;
+        for (const link of linked) {
+            if (link && typeof link === 'object' && link.amount != null) {
+                sum += parseFloat(link.amount) || 0;
+            }
+        }
+        return sum;
+    },
+
+    /**
+     * Bank/cash + TDS + discount for UI/ledger/PDF. When imported rows only store bank received but allocation
+     * lines sum to invoice totals, infer the gap as TDS (BookKeeper "Tax Deducted Receivable") or discount from narration.
+     */
+    resolveSettlementDisplay(voucher) {
+        const bank = parseFloat(voucher?.amount) || 0;
+        let tds = parseFloat(voucher?.tdsAmount) || 0;
+        let disc = parseFloat(voucher?.discountAmount) || 0;
+        const allocSum = this.sumAllocationLineAmounts(voucher);
+        if (allocSum > 0.01) {
+            const gap = allocSum - bank - tds - disc;
+            if (gap > 0.02) {
+                const n = String(voucher?.remarks || voucher?.narration || '').toLowerCase();
+                if (/\b(discount|cash\s*disc|rebate|cash\s*discount)\b/.test(n) && !/\b(tds|tax\s*deduct|withheld)\b/.test(n)) {
+                    disc += gap;
+                } else {
+                    tds += gap;
+                }
+            }
+        }
+        return {
+            bankAmount: bank,
+            tdsAmount: tds,
+            discountAmount: disc,
+            allocSum,
+            totalSettlement: bank + tds + disc
+        };
     },
 
     /**
@@ -612,8 +659,10 @@ const VoucherManager = {
         if (filterType && filterType !== 'payment' && filterType !== 'receipt') return;
 
         const mirrorIfMissing = (internalRaw, canonicalRaw) => {
-            const I = (internalRaw || '').toString().toLowerCase().trim();
-            const C = (canonicalRaw || '').toString().toLowerCase().trim();
+            const I = (internalRaw || '').toString().trim();
+            let C = canonicalRaw;
+            if (C === undefined || C === null || C === '') return;
+            C = C.toString().trim();
             if (!I || !C || I === C) return;
             const amt = map.get(I);
             if (!amt || amt <= 0) return;
@@ -623,7 +672,7 @@ const VoucherManager = {
         if (!filterType || filterType === 'payment') {
             const exps = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
             for (const e of exps) {
-                const internal = (e.bookkeeperVchNo || '').toString().toLowerCase().trim();
+                const internal = (e.bookkeeperVchNo || '').toString().trim();
                 if (!internal) continue;
                 if (!map.get(internal)) continue;
                 mirrorIfMissing(internal, e.id);
@@ -633,7 +682,7 @@ const VoucherManager = {
         if (!filterType || filterType === 'receipt') {
             const invs = DataManager.getData('invoices') || [];
             for (const inv of invs) {
-                const internal = (inv.bookkeeperVchNo || '').toString().toLowerCase().trim();
+                const internal = (inv.bookkeeperVchNo || '').toString().trim();
                 if (!internal) continue;
                 if (!map.get(internal)) continue;
                 mirrorIfMissing(internal, inv.id);
@@ -659,6 +708,74 @@ const VoucherManager = {
 
         const map = new Map();
 
+        const normName = (s) => (s || '')
+            .toString()
+            .toLowerCase()
+            .replace(/[,\s]+/g, ' ')
+            .trim();
+
+        const partyMatchesDoc = (doc, voucher) => {
+            if (!doc || !voucher) return false;
+            const vId = voucher.customerId;
+            const vName = normName(voucher.customerName);
+            const docCustId = doc.customerId || doc.vendorId;
+            const docName = normName(doc.customerName || doc.vendor || doc.partyName || doc.supplier || doc.vendorName);
+            if (vId && docCustId && String(vId) === String(docCustId)) return true;
+            return Boolean(vName && docName && vName === docName);
+        };
+
+        const looksAmbiguousShortNo = (raw) => {
+            const s = (raw || '').toString().trim();
+            if (!s) return true;
+            // Pure numeric short ids like "1", "03", "003", "1110" are commonly duplicated across parties.
+            return /^\d+$/.test(s) && s.length <= 4;
+        };
+
+        /** Exact match only (case-sensitive): "00024" ≠ "0024" ≠ "24" ≠ "GTES/26-27/024". */
+        const keysMatchDocRef = (refKey, docFields) => {
+            const key = (refKey || '').toString().trim();
+            if (!key) return false;
+            return docFields.some(f => (f || '').toString().trim() === key);
+        };
+
+        const resolveDocIdsForVoucherKey = (raw, voucher, ctx) => {
+            const out = [];
+            const s = (raw || '').toString().trim();
+            if (!s || !voucher) return out;
+
+            // For receipts -> invoices; for payments -> expenses/purchases
+            if (!ctx || ctx === 'receipt') {
+                const invs = DataManager.getData('invoices') || [];
+                for (const inv of invs) {
+                    const invFields = [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo].filter(Boolean);
+                    if (keysMatchDocRef(s, invFields) && partyMatchesDoc(inv, voucher)) {
+                        if (inv.id) out.push(inv.id);
+                        if (inv.invoiceNo) out.push(inv.invoiceNo);
+                        break;
+                    }
+                }
+            }
+
+            if (!ctx || ctx === 'payment') {
+                const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+                const purchases = DataManager.getData('purchases') || [];
+                const collections = purchases === expenses ? [expenses] : [expenses, purchases];
+
+                for (const col of collections) {
+                    for (const doc of col) {
+                        const docFields = [doc.id, doc.billNo, doc.vch_no, doc.invoiceNo, doc.bookkeeperVchNo].filter(Boolean);
+                        if (keysMatchDocRef(s, docFields) && partyMatchesDoc(doc, voucher)) {
+                            if (doc.id) out.push(doc.id);
+                            if (doc.billNo) out.push(doc.billNo);
+                            if (doc.vch_no) out.push(doc.vch_no);
+                            break;
+                        }
+                    }
+                }
+            }
+            return out;
+        };
+
         // 1. Existing Vouchers from Database
         vouchers.forEach(v => {
             const vType = (v.type || '').toString().toLowerCase();
@@ -676,10 +793,25 @@ const VoucherManager = {
                     const keySet = new Set();
                     [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
                         if (raw === undefined || raw === null || raw === '') return;
-                        const k = raw.toString().toLowerCase().trim();
+                        const k = raw.toString().trim();
                         if (k) keySet.add(k);
                     });
+
+                    // Resolve ambiguous short numbers (e.g. "003") to party-specific document IDs (exact refs only).
+                    const resolved = new Set();
                     keySet.forEach(k => {
+                        if (looksAmbiguousShortNo(k)) {
+                            resolveDocIdsForVoucherKey(k, v, filterType).forEach(x => {
+                                const rk = x.toString().trim();
+                                if (rk) resolved.add(rk);
+                            });
+                        }
+                    });
+                    resolved.forEach(rk => keySet.add(rk));
+
+                    keySet.forEach(k => {
+                        // Avoid indexing truly ambiguous short numeric keys unless we could resolve them.
+                        if (looksAmbiguousShortNo(k) && !resolved.has(k)) return;
                         map.set(k, (map.get(k) || 0) + amount);
                     });
                 });
@@ -690,8 +822,19 @@ const VoucherManager = {
                     let amount;
                     const addKey = (raw, amt) => {
                         if (raw === undefined || raw === null || raw === '') return;
-                        const k = raw.toString().toLowerCase().trim();
+                        const k = raw.toString().trim();
                         if (!k) return;
+                        if (looksAmbiguousShortNo(k)) {
+                            const resolvedIds = resolveDocIdsForVoucherKey(k, v, filterType);
+                            if (resolvedIds.length) {
+                                resolvedIds.forEach(r => {
+                                    const rk = r.toString().trim();
+                                    if (rk) map.set(rk, (map.get(rk) || 0) + amt);
+                                });
+                                return;
+                            }
+                            return;
+                        }
                         map.set(k, (map.get(k) || 0) + amt);
                     };
                     if (typeof link === 'string') {
@@ -707,7 +850,7 @@ const VoucherManager = {
                         const ks = new Set();
                         [link.id, link.invoiceNo, link.billNo].forEach(raw => {
                             if (raw === undefined || raw === null || raw === '') return;
-                            const k = raw.toString().toLowerCase().trim();
+                            const k = raw.toString().trim();
                             if (k) ks.add(k);
                         });
                         ks.forEach(k => addKey(k, amount));
@@ -725,15 +868,14 @@ const VoucherManager = {
                 // If it's linked but not yet imported
                 if ((tx.isReady || tx.converted) && !tx.imported) {
                     if (tx.linkedVoucherId) {
-                        const lvid = tx.linkedVoucherId.toString().toLowerCase().trim();
+                        const lvid = tx.linkedVoucherId.toString().trim();
                         map.set(lvid, (map.get(lvid) || 0) + parseFloat(tx.amount || 0));
                     }
                     const mv = tx.mappedVoucher || tx.mappedData;
                     if (mv && mv.linkedInvoices) {
                         mv.linkedInvoices.forEach(id => {
-                            const cleanId = id.toString().toLowerCase().trim();
-                            // If it's a bulk link, we assume the whole amount for simplicity or check allocations if present
-                            const amt = mv.allocations?.find(a => (a.id||'').toString().toLowerCase().trim() === cleanId)?.amount || (tx.amount / mv.linkedInvoices.length);
+                            const cleanId = id.toString().trim();
+                            const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount || (tx.amount / mv.linkedInvoices.length);
                             map.set(cleanId, (map.get(cleanId) || 0) + parseFloat(amt));
                         });
                     }
@@ -754,37 +896,32 @@ const VoucherManager = {
     getDocumentBalance(docId, totalAmount, allocationsMap = null, altId = null, doc = null, options = {}) {
         let allocated = 0;
         const map = allocationsMap || this.getVoucherAllocationsMap();
-        const allowLooseFallback = options.allowLooseFallback !== false;
-        
-        // 1. Try primary ID match (Case-Insensitive)
-        const cleanDocId = (docId || '').toString().toLowerCase().trim();
-        const cleanAltId = (altId || '').toString().toLowerCase().trim();
-        
+        // Strict by default: exact string keys only (case-sensitive). Set allowLooseFallback: true for legacy fuzzy match.
+        const allowLooseFallback = options.allowLooseFallback === true;
+
+        const cleanDocId = (docId || '').toString().trim();
+        const cleanAltId = (altId || '').toString().trim();
+
         allocated = map.get(cleanDocId) || 0;
-        
-        // 2. Try alternative ID match if primary ID has no allocation
+
         if (allocated === 0 && cleanAltId && cleanAltId !== cleanDocId) {
             allocated = map.get(cleanAltId) || 0;
         }
 
-        // 2b. BookKeeper internal vch_no stored on imported invoice/purchase (e.g. 8577 vs bill 00349)
         if (allocated === 0 && doc && doc.bookkeeperVchNo) {
-            const vn = doc.bookkeeperVchNo.toString().toLowerCase().trim();
+            const vn = doc.bookkeeperVchNo.toString().trim();
             if (vn) allocated = map.get(vn) || 0;
         }
 
-        // 3. NEW: If it's a BookKeeper import, try to match by its internal numeric ID or full Id
         if (allocated === 0 && doc && doc.bookkeeperId) {
-            const fullBkId = doc.bookkeeperId.toLowerCase().trim();
-            const numericVid = fullBkId.replace('bk-inv-', '').replace('bk-exp-', '').replace('bk-pur-', '');
-            
-            allocated = map.get(fullBkId) || (numericVid ? (map.get(numericVid) || map.get(parseInt(numericVid))) : 0) || 0;
+            const fullBkId = doc.bookkeeperId.toString().trim();
+            if (fullBkId) allocated = map.get(fullBkId) || 0;
         }
-        
-        // 4. Fallback: match last path segment or long numeric id only (avoids false "paid" from short suffix collisions)
+
+        // Optional legacy fuzzy match (not used for GST invoice balances by default)
         if (allowLooseFallback && allocated === 0 && doc) {
             const lastSeg = (s) => {
-                const t = (s || '').toString().trim().toLowerCase();
+                const t = (s || '').toString().trim();
                 if (!t) return '';
                 const parts = t.split(/[\/\\]/);
                 return parts[parts.length - 1].trim();
@@ -795,7 +932,7 @@ const VoucherManager = {
             const aNum = (altId || '').toString().replace(/[^0-9]/g, '');
 
             for (const [key, val] of map.entries()) {
-                const cleanKey = key.toString().toLowerCase().trim();
+                const cleanKey = key.toString().trim();
                 const kLast = lastSeg(cleanKey);
                 const kNum = cleanKey.replace(/[^0-9]/g, '');
 
@@ -815,7 +952,7 @@ const VoucherManager = {
                 }
             }
         }
-        
+
         return Math.max(0, totalAmount - allocated);
     },
 

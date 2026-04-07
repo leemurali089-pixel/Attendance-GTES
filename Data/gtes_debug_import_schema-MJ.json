@@ -42,7 +42,7 @@
     "loyalty"
   ],
   "stats": {
-    "startTime": "2026-04-07T14:46:40.126Z",
+    "startTime": "2026-04-07T06:50:39.740Z",
     "company": {
       "name": "Gas Tech Engineering Service",
       "financialYear": "2022-04-01"
@@ -72,8 +72,8 @@
     },
     "sales": {
       "imported": 0,
-      "updated": 2366,
-      "total": 2366
+      "updated": 2362,
+      "total": 2362
     },
     "purchases": {
       "imported": 0,

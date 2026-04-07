@@ -530,9 +530,42 @@ const BusinessAnalytics = {
         return this._ledgerNormalizeDate(a).localeCompare(this._ledgerNormalizeDate(b));
     },
 
-    _partyMatches(account, partyId, partyName) {
+    /** Milliseconds for ledger sort tie-break (createdAt preferred). */
+    _ledgerEntryTimestamp(e) {
+        if (!e) return 0;
+        if (typeof e._ledgerTs === 'number' && !isNaN(e._ledgerTs)) return e._ledgerTs;
+        const raw = e.createdAt || e.date;
+        const t = raw ? new Date(raw).getTime() : 0;
+        return isNaN(t) ? 0 : t;
+    },
+
+    /**
+     * Book Keeper / Tally style: same calendar date — post sales & credit notes before bank receipts/payments
+     * so running balance matches classic books. Then createdAt, then voucher/invoice ref.
+     */
+    _sortLedgerEntries(entries, accountGroup) {
+        const receiptLike = accountGroup === 'vendor'
+            ? (e) => (e.type === 'Payment')
+            : (e) => (e.type === 'Receipt');
+        entries.sort((a, b) => {
+            const cd = this._compareLedgerDates(a.date, b.date);
+            if (cd !== 0) return cd;
+            const ra = receiptLike(a) ? 1 : 0;
+            const rb = receiptLike(b) ? 1 : 0;
+            if (ra !== rb) return ra - rb;
+            const ta = this._ledgerEntryTimestamp(a);
+            const tb = this._ledgerEntryTimestamp(b);
+            if (ta !== tb) return ta - tb;
+            const sa = String(a.invoiceNo || a.reference || '');
+            const sb = String(b.invoiceNo || b.reference || '');
+            return sa.localeCompare(sb, 'en', { numeric: true, sensitivity: 'base' });
+        });
+    },
+
+    _partyMatches(account, partyId, partyName, partyInternalId) {
         if (!account) return false;
         if (partyId && account.id && String(partyId) === String(account.id)) return true;
+        if (partyInternalId && account.partyId && String(partyInternalId) === String(account.partyId)) return true;
         const n = this._normalizePartyName(partyName);
         const an = this._normalizePartyName(account.name);
         return Boolean(n && an && n === an);
@@ -557,8 +590,9 @@ const BusinessAnalytics = {
         return isNaN(n) ? 0 : n;
     },
 
+    /** Document ref for voucher–invoice links: exact string (case-sensitive), trim only. */
     _ledgerKey(v) {
-        return (v == null ? '' : String(v)).trim().toLowerCase();
+        return (v == null ? '' : String(v)).trim();
     },
 
     _sumVoucherAllocationsForKeySet(voucher, keySet) {
@@ -592,18 +626,31 @@ const BusinessAnalytics = {
     },
 
     _resolveVoucherAmountForAccount(voucher, account, docKeySet) {
-        // Priority 1: explicit allocations on voucher
+        const vType = String(voucher.type || '').toLowerCase();
+        const totalSettlement = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay)
+            ? VoucherManager.resolveSettlementDisplay(voucher).totalSettlement
+            : (parseFloat(voucher.amount) || 0) + (parseFloat(voucher.tdsAmount) || 0) + (parseFloat(voucher.discountAmount) || 0);
+
+        // Party-scoped ledgers: one receipt/payment row must reflect the **full** voucher amount.
+        // Using only allocation lines that match invoice keys wrongly drops "on account" / opening-balance (-2) lines,
+        // so the ledger credit/debit looked too small while invoices still balanced partially.
+        if (this._partyMatches(account, voucher.customerId, voucher.customerName, voucher.partyId)) {
+            if (vType === 'receipt') return totalSettlement;
+            if (vType === 'payment' && !voucher.isPurchase) return totalSettlement;
+        }
+
+        // Purchase payments to vendor (party stored on the voucher like customer receipts)
+        if (vType === 'payment' && voucher.isPurchase !== false &&
+            this._partyMatches(account, voucher.customerId, voucher.customerName, voucher.partyId)) {
+            return totalSettlement;
+        }
+
+        // Legacy paths when party does not match (cross-linked refs — rare)
         const allocAmt = this._sumVoucherAllocationsForKeySet(voucher, docKeySet);
         if (allocAmt > 0) return allocAmt;
 
-        // Priority 2: linked invoice/bill ids (pro-rata when one voucher links multiple docs)
         const linkedAmt = this._sumVoucherLinkedShareForKeySet(voucher, docKeySet);
         if (linkedAmt > 0) return linkedAmt;
-
-        // Priority 3: direct party match fallback
-        if (this._partyMatches(account, voucher.customerId, voucher.customerName)) {
-            return (parseFloat(voucher.amount) || 0) + (parseFloat(voucher.tdsAmount) || 0) + (parseFloat(voucher.discountAmount) || 0);
-        }
 
         return 0;
     },
@@ -641,11 +688,54 @@ const BusinessAnalytics = {
         return amt;
     },
 
+    /** Sales invoices that belong in customer (AR) ledger — excludes non-GST / without-bill rows when type is set. */
+    _isGstStyleSalesInvoice(inv) {
+        if (!inv) return false;
+        const t = (inv.type || '').toLowerCase();
+        if (t === 'without-bill' || t === 'sales-non-gst' || t === 'non-gst-invoice') return false;
+        return true;
+    },
+
+    /** Credit note / sales return — reduces customer receivable (credit side of customer ledger). */
+    _isCreditNoteInvoice(inv) {
+        if (!inv) return false;
+        const t = (inv.type || '').toLowerCase();
+        if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return true;
+        if (t.includes('credit') && t.includes('note')) return true;
+        if (inv.isCreditNote === true) return true;
+        const bk = String(inv.bookkeeperVchType || inv.v_type || '').toLowerCase();
+        if (bk.includes('credit') && bk.includes('note')) return true;
+        if (bk.includes('sales return') || bk.includes('sales-return')) return true;
+        if (bk.includes('sales') && bk.includes('return') && !bk.includes('purchase')) return true;
+        const narr = String(inv.narration || inv.description || inv.remarks || '').toLowerCase();
+        if (/\b(sales\s*return|credit\s*note|cr\s*note)\b/.test(narr)) return true;
+        const total = parseFloat(inv.total ?? inv.amount ?? 0);
+        if (total < 0) return true;
+        return false;
+    },
+
+    _includeInCustomerLedgerInvoice(inv) {
+        return this._isCreditNoteInvoice(inv) || this._isGstStyleSalesInvoice(inv);
+    },
+
+    /** Debit note from supplier — reduces payables (debit side of vendor ledger). */
+    _isDebitNotePurchase(exp) {
+        if (!exp) return false;
+        const t = String(exp.type || exp.v_type || exp.billType || '').toLowerCase();
+        if (t === 'debit-note' || t === 'debit_note') return true;
+        if (t.includes('debit') && t.includes('note')) return true;
+        if (exp.isDebitNote === true) return true;
+        return false;
+    },
+
     _collectCustomerRawEntries(account) {
         const invoices = DataManager.getData('invoices') || [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
-        const customerInvoices = invoices.filter(inv => inv.customerId === account.id || inv.customerName === account.name);
+        const customerInvoices = invoices.filter(inv =>
+            this._partyMatches(account, inv.customerId, inv.customerName, inv.partyId) &&
+            this._includeInCustomerLedgerInvoice(inv)
+        );
         const customerInvoiceKeys = new Set();
         customerInvoices.forEach(inv => {
             [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo].forEach(k => {
@@ -655,49 +745,49 @@ const BusinessAnalytics = {
         });
 
         customerInvoices.forEach(inv => {
+                const isCn = this._isCreditNoteInvoice(inv);
+                const amt = Math.abs(parseFloat(inv.total) || 0);
+                const invTs = new Date(inv.createdAt || inv.date || 0).getTime();
                 entries.push({
                     date: inv.date,
-                    type: 'Invoice',
-                    vchType: 'Sales',
+                    createdAt: inv.createdAt,
+                    _ledgerTs: isNaN(invTs) ? 0 : invTs,
+                    type: isCn ? 'Credit Note' : 'Invoice',
+                    vchType: isCn ? 'Credit Note' : 'Sales',
                     reference: inv.id,
                     invoiceNo: inv.invoiceNo || '',
                     refNo: inv.poNumber || inv.purchaseOrderNo || inv.refNo || '',
                     particulars: account.name,
-                    description: `Invoice #${inv.invoiceNo || inv.id}`,
-                    debit: parseFloat(inv.total) || 0,
-                    credit: 0,
+                    description: isCn
+                        ? `Credit note #${inv.invoiceNo || inv.id}`
+                        : `Invoice #${inv.invoiceNo || inv.id}`,
+                    debit: isCn ? 0 : amt,
+                    credit: isCn ? amt : 0,
                     status: inv.status
                 });
             });
 
+        // Customer ledger: sales invoices + GST receipt vouchers only (no vendor/purchase payments or plain receipts)
         vouchers.forEach(v => {
                 const vType = String(v.type || '').toLowerCase();
                 if (vType === 'contra') return;
-                if (vType !== 'receipt' && vType !== 'payment') return;
+                if (vType !== 'receipt') return;
+                if (v.isPurchase) return;
+                if (v.hasGst === false) return;
+                // Strict party gate: do not let cross-linked invoice refs pull other-customer vouchers.
+                if (!this._partyMatches(account, v.customerId, v.customerName, v.partyId)) return;
                 const amt = this._resolveVoucherAmountForAccount(v, account, customerInvoiceKeys);
                 if (amt <= 0) return;
                 const mode = (v.paymentMode || v.mode || 'Cash').toString();
-                if (vType === 'payment' && v.isPurchase) return;
-                if (vType === 'payment' && !v.isPurchase) {
-                    entries.push({
-                        date: v.date,
-                        type: 'Payment',
-                        vchType: 'Payment',
-                        reference: v.id,
-                        refNo: v.referenceId || v.billNo || '',
-                        particulars: account.name,
-                        description: `Payment — ${mode}`,
-                        debit: amt,
-                        credit: 0,
-                        status: 'completed'
-                    });
-                    return;
-                }
+                const vTs = new Date(v.createdAt || v.date || 0).getTime();
                 entries.push({
                     date: v.date,
+                    createdAt: v.createdAt,
+                    _ledgerTs: isNaN(vTs) ? 0 : vTs,
                     type: 'Receipt',
                     vchType: 'Receipt',
                     reference: v.id,
+                    invoiceNo: v.voucherNo || v.id || '',
                     refNo: v.referenceId || v.billNo || '',
                     particulars: account.name,
                     description: `Receipt — ${mode}`,
@@ -707,7 +797,7 @@ const BusinessAnalytics = {
                 });
             });
 
-        entries.sort((a, b) => this._compareLedgerDates(a.date, b.date) || String(a.reference).localeCompare(String(b.reference)));
+        this._sortLedgerEntries(entries, 'customer');
         return entries;
     },
 
@@ -715,7 +805,7 @@ const BusinessAnalytics = {
         const expenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
-        const vendorExpenses = expenses.filter(exp => this._partyMatches(account, exp.vendorId || exp.customerId, exp.vendor || exp.vendorName || exp.partyName));
+        const vendorExpenses = expenses.filter(exp => this._partyMatches(account, exp.vendorId || exp.customerId, exp.vendor || exp.vendorName || exp.partyName, exp.partyId));
         const vendorBillKeys = new Set();
         vendorExpenses.forEach(exp => {
             [exp.id, exp.billNo, exp.supplierBillNo, exp.vch_no, exp.bookkeeperVchNo].forEach(k => {
@@ -725,17 +815,23 @@ const BusinessAnalytics = {
         });
 
         vendorExpenses.forEach(exp => {
-                const amt = parseFloat(exp.amount || exp.totalAmount) || 0;
+                const isDn = this._isDebitNotePurchase(exp);
+                const amt = Math.abs(parseFloat(exp.amount || exp.totalAmount) || 0);
+                if (amt <= 0) return;
+                const expTs = new Date(exp.createdAt || exp.date || 0).getTime();
                 entries.push({
                     date: exp.date,
-                    type: 'Purchase',
-                    vchType: 'Purchase',
+                    createdAt: exp.createdAt,
+                    _ledgerTs: isNaN(expTs) ? 0 : expTs,
+                    type: isDn ? 'Debit Note' : 'Purchase',
+                    vchType: isDn ? 'Debit Note' : 'Purchase',
                     reference: exp.id,
+                    invoiceNo: (exp.billNo || exp.vch_no || exp.id || '').toString(),
                     refNo: exp.poNumber || exp.supplierInvoiceNo || exp.refNo || '',
                     particulars: account.name,
-                    description: 'Purchase bill',
-                    debit: 0,
-                    credit: amt,
+                    description: isDn ? 'Debit note' : 'Purchase bill',
+                    debit: isDn ? amt : 0,
+                    credit: isDn ? 0 : amt,
                     status: exp.status || 'posted'
                 });
             });
@@ -743,13 +839,19 @@ const BusinessAnalytics = {
         vouchers
             .filter(v => v.type === 'payment' && v.isPurchase !== false)
             .forEach(v => {
+                // Strict party gate: prevent cross-party voucher bleed via ref-based fallbacks.
+                if (!this._partyMatches(account, v.customerId, v.customerName, v.partyId)) return;
                 const amt = this._resolveVoucherAmountForAccount(v, account, vendorBillKeys);
                 if (amt <= 0) return;
+                const vTs = new Date(v.createdAt || v.date || 0).getTime();
                 entries.push({
                     date: v.date,
+                    createdAt: v.createdAt,
+                    _ledgerTs: isNaN(vTs) ? 0 : vTs,
                     type: 'Payment',
                     vchType: 'Payment',
                     reference: v.id,
+                    invoiceNo: v.voucherNo || v.id || '',
                     refNo: v.referenceId || v.billNo || '',
                     particulars: account.name,
                     description: `Payment to supplier`,
@@ -759,7 +861,7 @@ const BusinessAnalytics = {
                 });
             });
 
-        entries.sort((a, b) => this._compareLedgerDates(a.date, b.date) || String(a.reference).localeCompare(String(b.reference)));
+        this._sortLedgerEntries(entries, 'vendor');
         return entries;
     },
 
@@ -852,6 +954,75 @@ const BusinessAnalytics = {
      */
     getCustomerLedger(customerId) {
         return this.getAccountLedger(customerId, { accountGroup: 'customer' });
+    },
+
+    /**
+     * Diagnostic: receipt allocations whose bill/invoice ref is not loaded as this party's invoice (exact ref).
+     * Run in devtools: BusinessAnalytics.getCustomerLedgerAllocationGaps('CUSTOMER_ID')
+     */
+    getCustomerLedgerAllocationGaps(accountId) {
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
+        const requestedRaw = (accountId == null ? '' : String(accountId)).trim();
+        const requestedNorm = this._normalizePartyName(requestedRaw);
+        const account = customers.find(c => {
+            const idMatch = c.id != null && String(c.id) === requestedRaw;
+            const nameRawMatch = (c.name || '').toString().trim() === requestedRaw;
+            const nameNormMatch = requestedNorm && this._normalizePartyName(c.name) === requestedNorm;
+            return idMatch || nameRawMatch || nameNormMatch;
+        });
+        if (!account) return null;
+
+        const invoices = DataManager.getData('invoices') || [];
+        const partyInvoices = invoices.filter(inv =>
+            this._partyMatches(account, inv.customerId, inv.customerName, inv.partyId) && this._includeInCustomerLedgerInvoice(inv)
+        );
+        const keySet = new Set();
+        partyInvoices.forEach(inv => {
+            [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo].forEach(k => {
+                const ck = this._ledgerKey(k);
+                if (ck) keySet.add(ck);
+            });
+        });
+
+        const vouchers = DataManager.getData('vouchers') || [];
+        const gaps = [];
+        const seen = new Set();
+        for (const v of vouchers) {
+            if (String(v.type || '').toLowerCase() !== 'receipt') continue;
+            if (v.isPurchase) continue;
+            if (v.hasGst === false) continue;
+            if (!this._partyMatches(account, v.customerId, v.customerName, v.partyId)) continue;
+            for (const a of (v.allocations || [])) {
+                for (const raw of [a.id, a.no, a.invoiceNo, a.billNo]) {
+                    const k = this._ledgerKey(raw);
+                    if (!k || keySet.has(k)) continue;
+                    const dedupe = `${v.id}|${k}`;
+                    if (seen.has(dedupe)) continue;
+                    seen.add(dedupe);
+                    let wrongParty = null;
+                    const other = invoices.find(inv =>
+                        [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo]
+                            .some(x => this._ledgerKey(x) === k)
+                    );
+                    if (other && !this._partyMatches(account, other.customerId, other.customerName, other.partyId)) {
+                        wrongParty = other.customerName || other.customerId || '(other)';
+                    }
+                    gaps.push({
+                        voucherId: v.id,
+                        voucherDate: v.date,
+                        missingRef: k,
+                        wrongPartyCustomer: wrongParty
+                    });
+                }
+            }
+        }
+        return {
+            customerId: account.id,
+            customerName: account.name,
+            partyInvoiceCount: partyInvoices.length,
+            gaps,
+            note: 'Refs are exact (case-sensitive). Missing rows usually mean sales not imported or wrong customer on invoice.'
+        };
     },
 
     /**

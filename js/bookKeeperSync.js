@@ -340,6 +340,9 @@ const BookKeeperSync = {
         
         if (typeof SyncManager !== 'undefined') {
             SyncManager.updateStatus('syncing', 'Syncing with Book Keeper...');
+            if (typeof SyncManager.setSyncProgress === 'function') {
+                SyncManager.setSyncProgress(2, 'Preparing sync');
+            }
             // BookKeeper import is a trusted source; do not spam conflict prompts.
             SyncManager.suppressConflictPrompts = true;
         }
@@ -355,10 +358,19 @@ const BookKeeperSync = {
             
             // 2. PHASE TWO: Actual Import
             // runFullImport executes the full data mapping.
-            const stats = await BookKeeperImport.runFullImport(fileOrBuffer);
+            const stats = await BookKeeperImport.runFullImport(fileOrBuffer, {
+                onProgress: (percent, stage) => {
+                    if (typeof SyncManager !== 'undefined' && typeof SyncManager.setSyncProgress === 'function') {
+                        SyncManager.setSyncProgress(percent, stage || 'Syncing with Book Keeper...');
+                    }
+                }
+            });
             
             // 3. PHASE THREE: Post-Import Integrity Check
             const isVerified = await this.verifyDataIntegrity();
+            if (typeof SyncManager !== 'undefined' && typeof SyncManager.setSyncProgress === 'function') {
+                SyncManager.setSyncProgress(99, 'Finalizing sync');
+            }
 
             // 4. Update sync metadata
             this.config.lastSyncDetails = {
@@ -374,6 +386,9 @@ const BookKeeperSync = {
 
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.updateStatus(isVerified ? 'synced' : 'warning', isVerified ? 'Synced with Book Keeper' : 'Synced with Data Warnings');
+                if (typeof SyncManager.clearSyncProgress === 'function') {
+                    SyncManager.clearSyncProgress();
+                }
                 SyncManager.logSyncEvent(isVerified ? 'success' : 'warning', `Book Keeper import complete (${stats.totalImported} records).`);
             }
 
@@ -394,6 +409,9 @@ const BookKeeperSync = {
             console.error('[Sync] Safe Import Error:', e);
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.updateStatus('conflict', 'Sync Failed: ' + e.message);
+                if (typeof SyncManager.clearSyncProgress === 'function') {
+                    SyncManager.clearSyncProgress();
+                }
                 SyncManager.logSyncEvent('error', 'Import failed: ' + e.message);
             }
             if (window.App && App.showNotification) {
@@ -402,6 +420,9 @@ const BookKeeperSync = {
         } finally {
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.suppressConflictPrompts = false;
+                if (typeof SyncManager.clearSyncProgress === 'function' && SyncManager.status !== 'syncing') {
+                    SyncManager.clearSyncProgress();
+                }
             }
         }
     },

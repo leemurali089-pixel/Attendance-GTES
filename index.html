@@ -4,6 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https: data: blob:; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self' https: data:; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://*.firebasedatabase.app wss://*.firebaseio.com wss://*.firebasedatabase.app; object-src 'none'; base-uri 'self';">
     <title id="appTitle">Attendance & Salary Management</title>
 
     <!-- Bootstrap 5 CSS -->
@@ -1637,17 +1639,17 @@
     <script src="js/migrateToCloud.js?v=1.1"></script>
 
     <!-- File Storage Module (must load before data.js) -->
-    <script src="js/fileStorage.js?v=1.1"></script>
+    <script src="js/fileStorage.js?v=1.2"></script>
 
     <!-- Application Scripts -->
-    <script src="js/data.js?v=1.1"></script>
+    <script src="js/data.js?v=1.2"></script>
     <script src="js/userManager.js?v=1.1"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/updateChecker.js?v=1.1"></script>
 
     <!-- Book Keeper Integration (Load before SyncManager) -->
-    <script src="js/bookKeeperSync.js?v=1.1"></script>
-    <script src="js/syncManager.js?v=1.1"></script>
+    <script src="js/bookKeeperSync.js?v=1.2"></script>
+    <script src="js/syncManager.js?v=1.4"></script>
     
     <!-- Hidden input for web file import fallback -->
     <input type="file" id="bkImportFile" accept=".db,.sqlite,.sqlite3" style="display: none;">
@@ -1662,28 +1664,28 @@
     <script src="js/emailService.js?v=1.1"></script>
     <script src="js/salary.js?v=1.1"></script>
     <script src="js/employeeView.js?v=1.1"></script>
-    <script src="js/customers.js?v=1.1"></script>
+    <script src="js/customers.js?v=1.3"></script>
     <script src="js/inventory.js?v=1.1"></script>
     <script src="js/delivery.js?v=1.1"></script>
     <script src="js/jobcard.js?v=1.1"></script>
     <script src="js/invoices.js?v=1.1"></script>
     <script src="js/vouchers.js?v=1.1"></script>
-    <script src="js/vouchersUI.js?v=1.1"></script>
+    <script src="js/vouchersUI.js?v=1.2"></script>
     <script src="js/paymentsUI.js?v=1.1"></script>
     <script src="js/whatsappService.js?v=1.1"></script>
     <script src="js/tasksUI.js?v=1.1"></script>
-    <script src="js/invoicesUI.js?v=1.1"></script>
+    <script src="js/invoicesUI.js?v=1.2"></script>
     <script src="js/deliveryUI.js?v=1.1"></script>
-    <script src="js/accountingUI.js?v=1.1"></script>
+    <script src="js/accountingUI.js?v=1.2"></script>
     <script src="js/admin.js?v=1.1"></script>
     <script src="js/reports.js?v=1.1"></script>
-    <script src="js/businessAnalytics.js?v=1.1"></script>
+    <script src="js/businessAnalytics.js?v=1.2"></script>
     <script src="js/analyticsUI.js?v=1.1"></script>
     <script src="js/bankImportHelper.js?v=1.1"></script>
     <script src="js/exportImportHelper.js?v=1.1"></script>
-    <script src="js/bookKeeperImport.js?v=1.1"></script>
+    <script src="js/bookKeeperImport.js?v=1.7"></script>
     <script src="js/seedData.js?v=1.1"></script>
-    <script src="js/app.js?v=1.1"></script>
+    <script src="js/app.js?v=1.2"></script>
 
     <!-- Employee Details Modal -->
     <div class="modal fade" id="employeeDetailsModal" tabindex="-1" aria-labelledby="employeeDetailsModalLabel"

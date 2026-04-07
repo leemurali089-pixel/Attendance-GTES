@@ -133,9 +133,47 @@ const AccountingUI = {
             const isPur = tx.type === 'purchase';
             const id = tx.id;
             const ref = isInv ? tx.invoiceNo : (isPur ? tx.billNo : tx.id);
-            const party = isInv ? tx.customerName : (isPur ? tx.vendor : (tx.customerName || tx.customerId));
-            const badgeClass = isInv ? 'bg-primary' : (isPur ? 'bg-warning text-dark' : (tx.type === 'receipt' ? 'bg-success' : 'bg-danger'));
-            const typeLabel = (isInv ? 'Invoice' : (isPur ? 'Purchase' : (tx.type || 'Voucher'))).toUpperCase();
+            const txt = (v) => String(v || '').trim();
+            const low = (v) => txt(v).toLowerCase();
+            const isSalesReturnLedger = (v) => {
+                const s = low(v);
+                return s.includes('sales return') || s.includes('sales-return') || s.includes('credit note') || s.includes('credit-note');
+            };
+            const isPurchaseReturnLedger = (v) => {
+                const s = low(v);
+                return s.includes('purchase return') || s.includes('purchases return') || s.includes('purchase-return') || s.includes('debit note') || s.includes('debit-note');
+            };
+            const isCreditNote = isInv && (
+                tx.isCreditNote === true ||
+                ['credit-note', 'credit_note', 'sales-return', 'sales_return'].includes(low(tx.type)) ||
+                low(tx.v_type).includes('credit') && low(tx.v_type).includes('note') ||
+                low(tx.bookkeeperVchType).includes('sales return')
+            );
+            const isDebitNote = isPur && (
+                tx.isDebitNote === true ||
+                ['debit-note', 'debit_note', 'purchase-return', 'purchase_return'].includes(low(tx.type)) ||
+                low(tx.v_type).includes('debit') && low(tx.v_type).includes('note') ||
+                low(tx.v_type).includes('purchase') && low(tx.v_type).includes('return')
+            );
+            const party = (() => {
+                if (isInv) {
+                    const candidates = [tx.customerName, tx.accountName, tx.partyName, tx.customerAccountName, tx.customer];
+                    const named = candidates.find(v => txt(v) && !isSalesReturnLedger(v));
+                    return named || candidates.find(v => txt(v)) || tx.customerId;
+                }
+                if (isPur) {
+                    const candidates = [tx.vendor, tx.accountName, tx.partyName, tx.vendorAccountName, tx.supplierName];
+                    const named = candidates.find(v => txt(v) && !isPurchaseReturnLedger(v));
+                    return named || candidates.find(v => txt(v)) || 'Unknown Vendor';
+                }
+                return tx.customerName || tx.accountName || tx.partyName || tx.customerId;
+            })();
+            const badgeClass = isInv
+                ? (isCreditNote ? 'bg-secondary' : 'bg-primary')
+                : (isPur ? (isDebitNote ? 'bg-secondary' : 'bg-warning text-dark') : (tx.type === 'receipt' ? 'bg-success' : 'bg-danger'));
+            const typeLabel = (isInv
+                ? (isCreditNote ? 'SALES RETURN' : 'INVOICE')
+                : (isPur ? (isDebitNote ? 'PURCHASE RETURN' : 'PURCHASE') : (tx.type || 'Voucher').toUpperCase()));
             const amount = parseFloat(tx.total || tx.amount || 0).toFixed(2);
             const viewFunc = isInv ? `InvoicesUI.previewInvoice` : (isPur ? `InvoicesUI.previewPurchase` : `VouchersUI.previewVoucher`);
 

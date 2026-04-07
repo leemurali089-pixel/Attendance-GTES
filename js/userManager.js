@@ -59,6 +59,15 @@ const UserManager = {
 
     // Get all users
     async getUsers() {
+        // Fast path for login UX: prefer already-cached users first.
+        const cached = DataManager.getData(this.STORAGE_KEY);
+        const cachedNorm = typeof DataManager._normalizeGtesUsersPayload === 'function'
+            ? DataManager._normalizeGtesUsersPayload(cached)
+            : cached;
+        if (Array.isArray(cachedNorm) && cachedNorm.length > 0) {
+            return cachedNorm;
+        }
+
         const data = await DataManager.loadData(this.STORAGE_KEY);
         const norm = typeof DataManager._normalizeGtesUsersPayload === 'function'
             ? DataManager._normalizeGtesUsersPayload(data)
@@ -206,9 +215,8 @@ const UserManager = {
         };
         // Use sessionStorage instead of file storage (clears when app/window closes)
         sessionStorage.setItem(this.SESSION_KEY, JSON.stringify(sessionData));
-
-        // Also clear any legacy file-based session to prevent conflicts
-        await DataManager.saveData(this.SESSION_KEY, null);
+        // Do not block login on legacy file-session cleanup.
+        try { localStorage.removeItem(this.SESSION_KEY); } catch (e) { }
     },
 
     // Get current logged-in user
@@ -251,8 +259,7 @@ const UserManager = {
     // Logout
     async logout() {
         sessionStorage.removeItem(this.SESSION_KEY);
-        // Ensure file storage is also clear
-        await DataManager.saveData(this.SESSION_KEY, null);
+        try { localStorage.removeItem(this.SESSION_KEY); } catch (e) { }
     },
 
     // Update user

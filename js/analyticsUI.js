@@ -1207,7 +1207,7 @@ const AnalyticsUI = {
                 <td style="${td}">—</td>
                 <td style="${tdNum}">${oDr > 0 ? '₹' + this.formatCurrency(oDr) : '—'}</td>
                 <td style="${tdNum}">${oCr > 0 ? '₹' + this.formatCurrency(oCr) : '—'}</td>
-                <td style="${tdNum}"><strong>₹${this.formatCurrency(Math.abs(obBal))}</strong></td>
+                <td style="${tdNum}"><strong>${this.formatLedgerSignedBalance(obBal)}</strong></td>
             </tr>`;
         }
 
@@ -1221,7 +1221,7 @@ const AnalyticsUI = {
                 <td style="${td}">${this._escapeLedgerHtml(e.vchType || e.type)}</td>
                 <td style="${tdNum}">${e.debit > 0 ? '₹' + this.formatCurrency(e.debit) : '—'}</td>
                 <td style="${tdNum}">${e.credit > 0 ? '₹' + this.formatCurrency(e.credit) : '—'}</td>
-                <td style="${tdNum}">₹${this.formatCurrency(Math.abs(e.balance))}</td>
+                <td style="${tdNum}">${this.formatLedgerSignedBalance(e.balance)}</td>
             </tr>`;
         });
 
@@ -1277,7 +1277,7 @@ const AnalyticsUI = {
                     <td style="padding:6px;border:1px solid #000;"><strong>Period totals</strong></td>
                     <td style="padding:6px;border:1px solid #000;text-align:right;">Debit ₹${this.formatCurrency(ledger.summary.totalDebit)}</td>
                     <td style="padding:6px;border:1px solid #000;text-align:right;">Credit ₹${this.formatCurrency(ledger.summary.totalCredit)}</td>
-                    <td style="padding:6px;border:1px solid #000;text-align:right;"><strong>Closing ₹${this.formatCurrency(Math.abs(ledger.summary.balance))}</strong></td>
+                    <td style="padding:6px;border:1px solid #000;text-align:right;"><strong>Closing ${this.formatLedgerSignedBalance(ledger.summary.balance)}</strong></td>
                 </tr>
             </table>
             <div style="margin-top:24px;font-size:9px;text-align:right;">
@@ -1373,7 +1373,7 @@ const AnalyticsUI = {
                 <div class="text-end">
                     <p class="mb-1 small text-muted">Closing balance</p>
                     <h4 class="mb-0 ${ledger.summary.balance !== 0 ? 'text-warning' : 'text-success'}">
-                        ₹${this.formatCurrency(Math.abs(ledger.summary.balance))}
+                        ${this.formatLedgerSignedBalance(ledger.summary.balance)}
                         <small class="text-muted">${balLabel}</small>
                     </h4>
                 </div>
@@ -1415,18 +1415,18 @@ const AnalyticsUI = {
                                 <td>—</td>
                                 <td class="text-end">${oDr > 0 ? '₹' + this.formatCurrency(oDr) : '—'}</td>
                                 <td class="text-end">${oCr > 0 ? '₹' + this.formatCurrency(oCr) : '—'}</td>
-                                <td class="text-end fw-bold">₹${this.formatCurrency(Math.abs(ledger.openingBalance))}</td>
+                                <td class="text-end fw-bold">${this.formatLedgerSignedBalance(ledger.openingBalance)}</td>
                                 <td></td>
                             </tr>`;
         })() : ''}
                         ${ledger.entries.map(e => {
             let viewAction = '';
-            if (e.type === 'Invoice') viewAction = `InvoicesUI.previewInvoice('${e.reference}')`;
+            if (e.type === 'Invoice' || e.type === 'Credit Note') viewAction = `InvoicesUI.previewInvoice('${e.reference}')`;
             else if (e.type === 'Receipt' || e.type === 'Payment') viewAction = `VouchersUI.previewVoucher('${e.reference}')`;
             else if ((e.type || '').includes('Challan')) viewAction = `DeliveryUI.viewChallan('${e.reference}')`;
-            else if (e.type === 'Purchase') viewAction = `InvoicesUI.previewPurchase('${e.reference}')`;
+            else if (e.type === 'Purchase' || e.type === 'Debit Note') viewAction = `InvoicesUI.previewPurchase('${e.reference}')`;
 
-            const badge = e.type === 'Receipt' ? 'success' : (e.type === 'Payment' ? 'primary' : (e.type === 'Purchase' ? 'warning' : 'info'));
+            const badge = e.type === 'Receipt' ? 'success' : (e.type === 'Payment' ? 'primary' : (e.type === 'Purchase' ? 'warning' : (e.type === 'Credit Note' ? 'secondary' : (e.type === 'Debit Note' ? 'secondary' : 'info'))));
 
             return `
                             <tr>
@@ -1441,7 +1441,7 @@ const AnalyticsUI = {
                                 <td class="text-end ${e.credit > 0 ? 'text-success' : ''}">
                                     ${e.credit > 0 ? '₹' + this.formatCurrency(e.credit) : '—'}
                                 </td>
-                                <td class="text-end fw-bold">₹${this.formatCurrency(Math.abs(e.balance))}</td>
+                                <td class="text-end fw-bold">${this.formatLedgerSignedBalance(e.balance)}</td>
                                 <td class="text-center">
                                     ${viewAction ? `
                                         <button class="btn btn-sm btn-outline-info" onclick="${viewAction}" title="View">
@@ -1458,7 +1458,7 @@ const AnalyticsUI = {
                             <td colspan="5"><strong>Period totals</strong></td>
                             <td class="text-end text-danger"><strong>₹${this.formatCurrency(ledger.summary.totalDebit)}</strong></td>
                             <td class="text-end text-success"><strong>₹${this.formatCurrency(ledger.summary.totalCredit)}</strong></td>
-                            <td class="text-end fw-bold"><strong>₹${this.formatCurrency(Math.abs(ledger.summary.balance))}</strong></td>
+                            <td class="text-end fw-bold"><strong>${this.formatLedgerSignedBalance(ledger.summary.balance)}</strong></td>
                             <td></td>
                         </tr>
                     </tfoot>
@@ -1747,6 +1747,14 @@ const AnalyticsUI = {
         return parseFloat(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     },
 
+    /** Ledger running/closing balance: show sign (negative = customer advance / vendor advance per Book Keeper). */
+    formatLedgerSignedBalance(balance) {
+        const n = parseFloat(balance);
+        if (isNaN(n) || n === 0) return '₹0';
+        const sign = n < 0 ? '-' : '';
+        return `${sign}₹${this.formatCurrency(Math.abs(n))}`;
+    },
+
     formatDate(dateStr) {
         if (!dateStr) return '-';
         const date = new Date(dateStr);
@@ -1803,7 +1811,7 @@ const AnalyticsUI = {
         message += `Group: ${ledger.groupLabel}\n`;
         message += `Period: ${period}\n`;
         message += `Generated: ${new Date().toLocaleDateString('en-IN')}\n\n`;
-        message += `Closing balance: ₹${this.formatCurrency(Math.abs(ledger.summary.balance))}\n`;
+        message += `Closing balance: ${this.formatLedgerSignedBalance(ledger.summary.balance)}\n`;
         message += `Period debit: ₹${this.formatCurrency(ledger.summary.totalDebit)}\n`;
         message += `Period credit: ₹${this.formatCurrency(ledger.summary.totalCredit)}\n\n`;
 

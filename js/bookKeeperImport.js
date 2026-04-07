@@ -71,6 +71,11 @@ const BookKeeperImport = {
         }
     },
 
+    /** Lets the UI repaint between heavy import phases (import still runs in main thread, but feels responsive). */
+    async _yieldToUI() {
+        await new Promise(resolve => setTimeout(resolve, 0));
+    },
+
     /**
      * Get table names from database
      */
@@ -1346,10 +1351,12 @@ const BookKeeperImport = {
 
             // Mapping for Customer/Supplier
             let customerId = '';
+            let customerPartyId = '';
             if (bkCustomerName) {
                 const existingCust = customers.find(c => c.name.toLowerCase() === bkCustomerName.toLowerCase());
                 if (existingCust) {
                     customerId = existingCust.id;
+                    customerPartyId = existingCust.partyId || '';
                 } else {
                     try {
                         const newCust = await CustomerManager.addCustomer({
@@ -1360,6 +1367,7 @@ const BookKeeperImport = {
                         });
                         customers.push(newCust);
                         customerId = newCust.id;
+                        customerPartyId = newCust.partyId || '';
                     } catch (e) {
                         console.error('Error auto-creating customer for voucher:', e);
                     }
@@ -1468,13 +1476,27 @@ const BookKeeperImport = {
                 });
             }
 
+            const pickVoucherAmt = (keys) => {
+                for (const k of keys) {
+                    if (v[k] == null || v[k] === '') continue;
+                    const n = parseFloat(String(v[k]).replace(/[^\d.-]/g, ''));
+                    if (!isNaN(n) && n !== 0) return n;
+                }
+                return 0;
+            };
+            const tdsImported = pickVoucherAmt(['tds', 'tds_amount', 'tax_deducted', 'tax_deduction', 't_d_s', 'tds_amt', 'tax_deduct', 'tdsamt']);
+            const discountImported = pickVoucherAmt(['discount', 'disc', 'disc_amt', 'less', 'discount_amount', 'cash_discount', 'bill_discount', 'v_discount', 'less_amount', 'disc_amount']);
+
             const voucher = {
                 id: v.vch_no || `VCH-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 bookkeeperId: bkId,
                 date: this.formatDate(v.date),
                 customerId: customerId,
+                partyId: customerPartyId || (customerId ? CustomerManager.resolvePartyId({ customerId, customerName: bkCustomerName }) : ''),
                 customerName: bkCustomerName,
                 amount: parseFloat(v.amount) || 0,
+                tdsAmount: tdsImported,
+                discountAmount: discountImported,
                 type: isReceipt ? 'receipt' : 'payment',
                 paymentMode: pMode, // Use detected mode
                 mode: pMode,        // Backward compatibility
@@ -1605,9 +1627,58 @@ const BookKeeperImport = {
             ? `, COALESCE(NULLIF(TRIM(CAST(v.ref_no AS TEXT)), ''), '') as bk_sale_ref_no`
             : `, '' as bk_sale_ref_no`;
 
-        // First get unique sales vouchers with customer details
-        const salesVouchers = this.query(`
-            SELECT DISTINCT v.v_id, v.debit as customer, v.date, ${amtField} as amount, v.narration, ${vchNoField}, 
+        // Party detection:
+        // - Normal sales: debit is usually the party.
+        // - Credit note / sales return: some books put "Sales Return"/"Credit Note" on one side;
+        //   pick the opposite side when that happens, otherwise prefer debit.
+        const partyExpr = `CASE
+            WHEN LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit note%'
+                 OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales return%'
+              THEN CASE
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%sales%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%sale%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%credit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%credit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%sales%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%sale%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%credit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%credit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                     ELSE COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                   END
+            ELSE COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+            END`;
+        const accJoinExpr = `CASE
+            WHEN LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit note%'
+                 OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales return%'
+              THEN CASE
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%sales%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%sale%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%credit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%credit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%sales%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%sale%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%credit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%credit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                     ELSE COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                   END
+            ELSE COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+            END`;
+
+        // Party column must not be bank/cash — use same CASE as customer (not raw debit: NULL/empty debit dropped April rows in SQLite)
+        const partyNotBank = `(
+            LOWER(CAST(${partyExpr} AS TEXT)) NOT LIKE '%cash%'
+            AND LOWER(CAST(${partyExpr} AS TEXT)) NOT LIKE '%bank%'
+            AND LOWER(CAST(${partyExpr} AS TEXT)) NOT LIKE '%petty%'
+            AND TRIM(COALESCE(CAST(${partyExpr} AS TEXT), '')) != ''
+        )`;
+
+        // Include credit notes / sales returns; exclude only challans / job cards
+        let salesVouchers = this.query(`
+            SELECT DISTINCT v.v_id, ${partyExpr} as customer, v.date, ${amtField} as amount, v.narration, ${vchNoField}, 
                    CAST(v.vch_no AS TEXT) as bk_internal_vch,
                    COALESCE(${balanceField}, 0) as balance_amount,
                    COALESCE(${paidField}, 0) as total_paid,
@@ -1616,16 +1687,47 @@ const BookKeeperImport = {
                    ${saleRefSelect}
                    ${accSelect}
             FROM ${voucherTable} v
-            LEFT JOIN ${accountTable} acc ON v.debit = acc.aname
-            WHERE (v.v_type LIKE '%Sales%' 
-               OR v.v_type LIKE '%Tax Invoice%' 
-               OR v.v_type LIKE '%Invoice%'
-               OR v.v_type LIKE '%Sale%')
-               AND v.debit NOT LIKE '%Cash%' AND v.debit NOT LIKE '%Bank%'
-               AND v.v_type NOT LIKE '%Challan%'
+            LEFT JOIN ${accountTable} acc ON acc.aname = ${accJoinExpr}
+            WHERE v.v_type NOT LIKE '%Challan%'
                AND v.v_type NOT LIKE '%Job Card%'
+               AND (
+                 v.v_type LIKE '%Sales%' OR v.v_type LIKE '%Tax Invoice%' OR v.v_type LIKE '%Invoice%' OR v.v_type LIKE '%Sale%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit note%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales return%'
+               )
+               AND ${partyNotBank}
+               AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase%bill%'
+               AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase invoice%'
             ORDER BY v.date DESC
         `);
+        // Fallback: some ledgers/schemas can make strict party expression too selective.
+        // If that happens, re-run with a relaxed party projection and filter in JS.
+        if (!Array.isArray(salesVouchers) || salesVouchers.length === 0) {
+            salesVouchers = this.query(`
+                SELECT DISTINCT v.v_id,
+                       COALESCE(NULLIF(TRIM(CAST(v.debit AS TEXT)), ''), TRIM(CAST(v.credit AS TEXT))) as customer,
+                       v.date, ${amtField} as amount, v.narration, ${vchNoField},
+                       CAST(v.vch_no AS TEXT) as bk_internal_vch,
+                       COALESCE(${balanceField}, 0) as balance_amount,
+                       COALESCE(${paidField}, 0) as total_paid,
+                       COALESCE(${roundOffField}, 0) as round_off,
+                       v.v_type
+                       ${saleRefSelect}
+                       ${accSelect}
+                FROM ${voucherTable} v
+                LEFT JOIN ${accountTable} acc ON 1=1
+                WHERE v.v_type NOT LIKE '%Challan%'
+                  AND v.v_type NOT LIKE '%Job Card%'
+                  AND (
+                    v.v_type LIKE '%Sales%' OR v.v_type LIKE '%Tax Invoice%' OR v.v_type LIKE '%Invoice%' OR v.v_type LIKE '%Sale%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit note%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales return%'
+                  )
+                  AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase%bill%'
+                  AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase invoice%'
+                ORDER BY v.date DESC
+            `);
+        }
 
         const existingInvoices = DataManager.getData('invoices') || [];
         const existingTxns = DataManager.getData('inventoryTransactions') || [];
@@ -1642,10 +1744,16 @@ const BookKeeperImport = {
 
             // Mapping for Customer
             let customerId = '';
+            let customerPartyId = '';
             const bkCustomerName = (sale.customer || '').trim();
+            const n = bkCustomerName.toLowerCase();
+            if (!bkCustomerName || n.includes('bank') || n.includes('cash') || n.includes('petty')) continue;
             if (bkCustomerName) {
                 const existingCust = customers.find(c => c.name.toLowerCase() === bkCustomerName.toLowerCase());
-                if (existingCust) customerId = existingCust.id;
+                if (existingCust) {
+                    customerId = existingCust.id;
+                    customerPartyId = existingCust.partyId || '';
+                }
                 else {
                     try {
                         const newCust = await CustomerManager.addCustomer({
@@ -1653,6 +1761,7 @@ const BookKeeperImport = {
                         });
                         customers.push(newCust);
                         customerId = newCust.id;
+                        customerPartyId = newCust.partyId || '';
                     } catch (e) { }
                 }
             }
@@ -1872,6 +1981,7 @@ const BookKeeperImport = {
                 bookkeeperVchNo: (sale.bk_internal_vch != null ? String(sale.bk_internal_vch) : '').trim(),
                 date: this.formatDate(sale.date),
                 customerId: customerId,
+                partyId: customerPartyId || (customerId ? CustomerManager.resolvePartyId({ customerId, customerName: bkCustomerName, accountType: 'customer' }) : ''),
                 customerName: bkCustomerName,
                 customerAddress: `${sale.address || ''} ${sale.address2 || ''} ${sale.state || ''} ${sale.pincode || ''} India`.trim(),
                 customerGstin: sale.gstin || '',
@@ -1989,6 +2099,16 @@ const BookKeeperImport = {
                 type: 'with-bill'
             };
 
+            const saleVtLower = String(sale.v_type || '').toLowerCase();
+            const isBkCreditNote = (saleVtLower.includes('credit') && saleVtLower.includes('note'))
+                || saleVtLower.includes('sales return') || saleVtLower.includes('sales-return');
+            if (isBkCreditNote || totalAmt < 0) {
+                invoice.type = 'credit-note';
+                invoice.bookkeeperVchType = sale.v_type || '';
+                if (totalAmt < 0) invoice.total = Math.abs(totalAmt);
+            }
+            invoice.isCreditNote = Boolean(isBkCreditNote || totalAmt < 0);
+
             // Calculate Subtotal and GST
             invoice.subtotal = invoice.items.reduce((sum, item) => sum + item.amount, 0);
 
@@ -2071,18 +2191,39 @@ const BookKeeperImport = {
                 invoice.subtotal = baseAmt;
             }
 
-            // Mark as GST Bill (With Bill) - this ensures it appears in the "With Bill (GST)" tab
-            invoice.type = 'with-bill';
+            // GST tab flags — do not wipe credit-note / sales return type
+            if (invoice.type !== 'credit-note') {
+                invoice.type = 'with-bill';
+            }
             invoice.billType = 'gst';
             invoice.hasGst = true;
 
-            // Update or Add
-            const idx = existingInvoices.findIndex(i => i.bookkeeperId === bkId || (invNo && (i.invoiceNo || '').toLowerCase() === invNo.toLowerCase()));
+            const partyKey = (n) => String(n || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
+            const saleParty = partyKey(bkCustomerName);
+            const invNoLc = invNo ? String(invNo).toLowerCase() : '';
+
+            // Only merge by BookKeeper voucher id — never by invoiceNo alone (same no. for different customers)
+            let idx = existingInvoices.findIndex(i => i.bookkeeperId === bkId);
+            if (idx < 0 && invNoLc) {
+                idx = existingInvoices.findIndex(i =>
+                    !i.bookkeeperId &&
+                    String(i.invoiceNo || '').toLowerCase() === invNoLc &&
+                    partyKey(i.customerName) === saleParty
+                );
+            }
+
             if (idx >= 0) {
                 invoice.id = existingInvoices[idx].id;
                 existingInvoices[idx] = invoice;
                 updated++;
             } else {
+                const idClash = invNoLc && existingInvoices.some(i =>
+                    partyKey(i.customerName) !== saleParty &&
+                    (String(i.id || '').toLowerCase() === invNoLc || String(i.invoiceNo || '').toLowerCase() === invNoLc)
+                );
+                if (idClash) {
+                    invoice.id = bkId;
+                }
                 existingInvoices.push(invoice);
                 imported++;
             }
@@ -2187,9 +2328,50 @@ const BookKeeperImport = {
             this.importStats.debugColumns['DETECTED_LINE_ITEMS'] = { table: lineItemTable, columns: cols };
         }
 
+        // Vendor detection for purchases:
+        // - Normal purchase: credit is usually supplier.
+        // - Debit note / purchase return: one side may be "Purchases Return"/"Debit Note" ledger.
+        //   In that case pick the opposite side as supplier party.
+        const vendorExpr = `CASE
+            WHEN LOWER(CAST(v.v_type AS TEXT)) LIKE '%debit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%debit note%'
+                 OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%purchase%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%purchases%return%'
+              THEN CASE
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%purchase%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%purchases%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%debit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%debit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%purchase%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%purchases%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%debit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%debit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                     ELSE COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                   END
+            ELSE COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+            END`;
+        const accJoinVendorExpr = `CASE
+            WHEN LOWER(CAST(v.v_type AS TEXT)) LIKE '%debit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%debit note%'
+                 OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%purchase%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%purchases%return%'
+              THEN CASE
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%purchase%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%purchases%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%debit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.credit AS TEXT), ''))) LIKE '%debit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.debit), ''), TRIM(v.credit))
+                     WHEN LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%purchase%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%purchases%return%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%debit%note%'
+                       OR LOWER(TRIM(COALESCE(CAST(v.debit AS TEXT), ''))) LIKE '%debit note%'
+                       THEN COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                     ELSE COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+                   END
+            ELSE COALESCE(NULLIF(TRIM(v.credit), ''), TRIM(v.debit))
+            END`;
+
         // Get purchases with vendor details
         const purchaseVouchers = this.query(`
-            SELECT DISTINCT v.v_id, v.credit as vendor_name, v.date, ${amtFieldPurchase} as amount, v.narration, ${vchNoField},
+            SELECT DISTINCT v.v_id, ${vendorExpr} as vendor_name, v.date, ${amtFieldPurchase} as amount, v.narration, ${vchNoField},
                    CAST(v.vch_no AS TEXT) as bk_internal_vch,
                    ${refNoField},
                    COALESCE(${balanceField}, 0) as balance_amount,
@@ -2200,9 +2382,12 @@ const BookKeeperImport = {
                    v.v_type
                    ${accSelect}
             FROM vouchers v
-            LEFT JOIN account_detail acc ON v.credit = acc.aname
+            LEFT JOIN account_detail acc ON acc.aname = ${accJoinVendorExpr}
             WHERE (v.v_type LIKE '%Purchase%' OR v.v_type LIKE '%Bill%')
-               AND v.credit NOT LIKE '%Cash%' AND v.credit NOT LIKE '%Bank%'
+               AND LOWER(CAST(${vendorExpr} AS TEXT)) NOT LIKE '%cash%'
+               AND LOWER(CAST(${vendorExpr} AS TEXT)) NOT LIKE '%bank%'
+               AND LOWER(CAST(${vendorExpr} AS TEXT)) NOT LIKE '%petty%'
+               AND TRIM(COALESCE(CAST(${vendorExpr} AS TEXT), '')) != ''
             ORDER BY v.date DESC
         `);
 
@@ -2534,6 +2719,9 @@ const BookKeeperImport = {
                 }
                 return rawVendor;
             })();
+            const vendorPartyId = (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
+                ? CustomerManager.resolvePartyId({ customerName: cleanVendor, accountType: 'supplier' })
+                : '';
 
             const expense = {
                 id: purchase.vch_no || `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -2541,6 +2729,7 @@ const BookKeeperImport = {
                 bookkeeperVchNo: (purchase.bk_internal_vch != null ? String(purchase.bk_internal_vch) : '').trim(),
                 date: this.formatDate(purchase.date),
                 vendor: cleanVendor,
+                partyId: vendorPartyId || '',
                 vendorAddress: `${purchase.address || ''} ${purchase.address2 || ''} ${purchase.state || ''} ${purchase.pincode || ''} India`.trim(),
                 vendorGstin: purchase.gstin || '',
                 vendorPan: purchase.pan || '',
@@ -2559,6 +2748,14 @@ const BookKeeperImport = {
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper'
             };
+
+            const purVtLower = String(purchase.v_type || '').toLowerCase();
+            if ((purVtLower.includes('debit') && purVtLower.includes('note')) || pTotalAmt < 0) {
+                expense.type = 'debit-note';
+                expense.isDebitNote = true;
+                expense.v_type = purchase.v_type || '';
+            }
+            if (pTotalAmt < 0) expense.amount = Math.abs(pTotalAmt);
 
             // Hardened Status Logic
             if (pPaidAmt >= pTotalAmt && pTotalAmt > 0) expense.status = 'paid';
@@ -2910,6 +3107,18 @@ const BookKeeperImport = {
     },
 
     async runFullImport(fileOrBuffer, options = {}) {
+        const reportProgress = (percent, stage) => {
+            if (typeof options.onProgress === 'function') {
+                try { options.onProgress(percent, stage); } catch (e) { }
+            }
+        };
+        const debugImportEnabled = (() => {
+            try {
+                return localStorage.getItem('BK_DEBUG_IMPORT') === '1';
+            } catch (e) {
+                return false;
+            }
+        })();
         this.importStats = {
             startTime: new Date(),
             company: null,
@@ -2927,35 +3136,39 @@ const BookKeeperImport = {
         };
 
         try {
+            reportProgress(5, 'Opening Book Keeper database');
             await this.openDatabase(fileOrBuffer);
+            await this._yieldToUI();
 
-            // 0. INSPECT SCHEMA (DEBUG MODE)
-            // Blindly capture column names to debug "0 Imported" issues permanently
-            if (this.inspectSchema) {
+            // 0. INSPECT SCHEMA (DEBUG MODE - opt-in only)
+            if (debugImportEnabled && this.inspectSchema) {
                 this.importStats.debugColumns = await this.inspectSchema();
                 console.log('[Import] Schema Inspection:', this.importStats.debugColumns);
             }
 
             const tables = this.getTables();
             console.log('[Import] 📊 ALL Tables found in DB:', tables);
+            reportProgress(10, 'Reading schema');
 
             // Initial Analysis
             this.importStats.foundTables = tables.filter(t => !t.startsWith('sqlite_') && !t.startsWith('android_'));
 
-            // DEBUG SCHEMA - Log sample data for investigation
-            const debugTables = ['item_measure', 'items', 'vouchers', 'sale_item', 'voucher_tax', 'tax_details', 'inventory_transaction', 'stock', 'sales', 'purchases', 'bill', 'combined_vouchers'];
-            debugTables.forEach(t => {
-                if (tables.includes(t)) {
-                    try {
-                        const sample = this.query(`SELECT * FROM ${t} LIMIT 3`);
-                        console.log(`[Import] [DEBUG] Data sample from [${t}]:`, sample);
-                        if (sample.length > 0) {
-                            if (!this.importStats.debugColumns) this.importStats.debugColumns = {};
-                            this.importStats.debugColumns[t] = Object.keys(sample[0]);
-                        }
-                    } catch (e) { }
-                }
-            });
+            if (debugImportEnabled) {
+                // DEBUG SCHEMA - Log sample data only when explicitly enabled.
+                const debugTables = ['item_measure', 'items', 'vouchers', 'sale_item', 'voucher_tax', 'tax_details', 'inventory_transaction', 'stock', 'sales', 'purchases', 'bill', 'combined_vouchers'];
+                debugTables.forEach(t => {
+                    if (tables.includes(t)) {
+                        try {
+                            const sample = this.query(`SELECT * FROM ${t} LIMIT 3`);
+                            console.log(`[Import] [DEBUG] Data sample from [${t}]:`, sample);
+                            if (sample.length > 0) {
+                                if (!this.importStats.debugColumns) this.importStats.debugColumns = {};
+                                this.importStats.debugColumns[t] = Object.keys(sample[0]);
+                            }
+                        } catch (e) { }
+                    }
+                });
+            }
 
             // 1. Company Information
             // Smart detect company table
@@ -2970,6 +3183,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Company', error: e.message });
                 }
             }
+            reportProgress(15, 'Company imported');
+            await this._yieldToUI();
 
             // 2. Customers
             // Smart detect accounts table
@@ -2983,6 +3198,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Customers', error: e.message });
                 }
             }
+            reportProgress(28, 'Parties imported');
+            await this._yieldToUI();
 
             // 3. Inventory & Items
             // Smart detect Inventory table. 
@@ -3005,11 +3222,14 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Inventory', error: e.message });
                 }
 
+                await this._yieldToUI();
+
                 // Try to find batches if inventory exists
                 if (tables.includes('inventory_batch') || tables.includes('batch_details')) {
                     try { this.importStats.batches = await this.importBatches(); } catch (e) { }
                 }
             }
+            reportProgress(42, 'Inventory imported');
 
             // Services
             let serviceTable = this.detectTableByColumns(
@@ -3023,7 +3243,9 @@ const BookKeeperImport = {
 
             if (options.services !== false && serviceTable && serviceTable !== inventoryTable) {
                 try { this.importStats.services = await this.importServices(serviceTable); } catch (e) { }
+                await this._yieldToUI();
             }
+            reportProgress(50, 'Services imported');
 
             if (options.warehouses !== false && tables.includes('warehouse')) {
                 try {
@@ -3032,6 +3254,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Warehouses', error: e.message });
                 }
             }
+            reportProgress(55, 'Warehouses imported');
+            await this._yieldToUI();
 
             // Detect Voucher Table for next steps
             let voucherTable = this.detectTableByColumns(tables, ['vouchers', 'voucher', 'trans_vouchers', 'transactions'], ['v_date', 'v_amount', 'v_type'], 1) ||
@@ -3050,6 +3274,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Sales', error: e.message });
                 }
             }
+            reportProgress(70, 'Sales invoices imported');
+            await this._yieldToUI();
 
             // 5. Purchases (Expenses)
             if (options.purchases !== false && tables.includes('vouchers')) {
@@ -3063,6 +3289,8 @@ const BookKeeperImport = {
                     this.importStats.purchases = { imported: 0, updated: 0, total: 0, error: e.message };
                 }
             }
+            reportProgress(80, 'Purchases imported');
+            await this._yieldToUI();
 
             // 6. Estimates
             if (options.estimates !== false && voucherTable) {
@@ -3072,6 +3300,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Estimates', error: e.message });
                 }
             }
+            reportProgress(86, 'Estimates imported');
+            await this._yieldToUI();
 
             // 7. Vouchers & Orders (after sales/purchases so allocations link to imported invoices & bills)
             if (options.vouchers !== false) {
@@ -3082,6 +3312,8 @@ const BookKeeperImport = {
                     try { await this.importOrders(); } catch (e) { }
                 }
             }
+            reportProgress(92, 'Vouchers imported');
+            await this._yieldToUI();
 
             // Finalize inventory stock after sales/purchases generated inventoryTransactions.
             try {
@@ -3101,6 +3333,7 @@ const BookKeeperImport = {
             } catch (e) {
                 console.warn('[Import] Inventory stock snapshot apply failed:', e);
             }
+            await this._yieldToUI();
 
             // 8. Delivery Challans
             if (options.challans !== false && tables.includes('vouchers')) {
@@ -3110,6 +3343,8 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Challans', error: e.message });
                 }
             }
+            reportProgress(96, 'Challans imported');
+            await this._yieldToUI();
 
             // 9. Tax Schemes
             if (options.taxSchemes !== false && tables.includes('tax')) {
@@ -3119,42 +3354,44 @@ const BookKeeperImport = {
                     this.importStats.errors.push({ section: 'Tax Schemes', error: e.message });
                 }
             }
+            reportProgress(98, 'Tax schemes imported');
+            await this._yieldToUI();
 
-            // 10. DIAGNOSTIC DUMP (CRITICAL FOR DEBUGGING)
-            try {
-                // Collect detailed column info for all major tables
-                const detailedDebug = {
-                    tables: tables,
-                    stats: this.importStats,
-                    columns: {},
-                    sampleData: {} // Capture 1 row from each table to see ACTUAL data format
-                };
+            // 10. DIAGNOSTIC DUMP (opt-in only; disabled by default for performance)
+            if (debugImportEnabled) {
+                try {
+                    const detailedDebug = {
+                        tables: tables,
+                        stats: this.importStats,
+                        columns: {},
+                        sampleData: {}
+                    };
 
-                const importantTables = ['vouchers', 'items', 'item_measure', 'stock', 'inventory_batch', 'sales', 'purchases', 'service_sales', 'service_purchases', 'bill_receipt_payment', 'account_detail', 'sale_item', 'purchase_item', 'bill_item'];
-                for (const t of importantTables) {
-                    if (tables.includes(t)) {
-                        try {
-                            const cols = this.query(`SELECT * FROM ${t} LIMIT 1`);
-                            if (cols.length > 0) {
-                                detailedDebug.columns[t] = Object.keys(cols[0]);
-                                detailedDebug.sampleData[t] = cols[0];
-                            }
-                        } catch (e) { }
+                    const importantTables = ['vouchers', 'items', 'item_measure', 'stock', 'inventory_batch', 'sales', 'purchases', 'service_sales', 'service_purchases', 'bill_receipt_payment', 'account_detail', 'sale_item', 'purchase_item', 'bill_item'];
+                    for (const t of importantTables) {
+                        if (tables.includes(t)) {
+                            try {
+                                const cols = this.query(`SELECT * FROM ${t} LIMIT 1`);
+                                if (cols.length > 0) {
+                                    detailedDebug.columns[t] = Object.keys(cols[0]);
+                                    detailedDebug.sampleData[t] = cols[0];
+                                }
+                            } catch (e) { }
+                        }
                     }
+
+                    const debugKey = 'gtes_debug_import_schema';
+                    await DataManager.saveData(debugKey, detailedDebug);
+                    console.log(`[Import] 🔍 Debug Schema saved via DataManager (Key: ${debugKey})`);
+                    console.log('[Import] Schema Column Map:', detailedDebug.columns);
+                } catch (e) {
+                    console.error('[Import] Failed to save debug schema to file', e);
                 }
-
-                // USE DATA MANAGER instead of direct fs to avoid renderer issues
-                const debugKey = 'gtes_debug_import_schema';
-                await DataManager.saveData(debugKey, detailedDebug);
-
-                console.log(`[Import] 🔍 Debug Schema saved via DataManager (Key: ${debugKey})`);
-                console.log('[Import] Schema Column Map:', detailedDebug.columns);
-            } catch (e) {
-                console.error('[Import] Failed to save debug schema to file', e);
             }
 
             this.importStats.endTime = new Date();
             this.importStats.duration = (this.importStats.endTime - this.importStats.startTime) / 1000;
+            reportProgress(100, 'Import completed');
             return this.importStats;
 
         } catch (error) {

@@ -140,21 +140,26 @@ const InvoicesUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                         <div class="row g-2 mb-3">
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label class="form-label small text-white-50">Financial Year</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterYear" onchange="InvoicesUI.updateTable()">
                                     <option value="">All Year</option>
                                     ${yearOptions}
                                 </select>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
+                                <label class="form-label small text-white-50">Calendar month</label>
+                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterCalendarMonth"
+                                    title="Optional — e.g. April 2024" onchange="InvoicesUI.updateTable()" />
+                            </div>
+                            <div class="col-md-3">
                                 <label class="form-label small text-white-50">Customer</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterCustomer" onchange="InvoicesUI.updateTable()">
                                     <option value="">All Customers</option>
                                     ${customerOptions}
                                 </select>
                             </div>
-                            <div class="col-md-4 text-end">
+                            <div class="col-md-3 text-end">
                                 <label class="form-label small text-white-50 d-block">Filter by Status</label>
                                 <div class="btn-group w-100" role="group">
                                     <input type="radio" class="btn-check" name="statusFilter" id="statusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
@@ -217,12 +222,20 @@ const InvoicesUI = {
         invoices = invoices.filter(inv => inv.type === typeFilter);
 
         const yearFilter = document.getElementById('filterYear')?.value;
+        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
 
+        const invYm = (d) => {
+            if (!d) return '';
+            const s = String(d);
+            return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
+        };
+
         const filteredAll = invoices.filter(inv => {
             const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
+            const monthMatch = !calMonth || invYm(inv.date) === calMonth;
             const customerMatch = !customerFilter || inv.customerName === customerFilter;
             const statusMatch = statusFilter === 'all' || 
                              (statusFilter === 'paid' && inv.isPaid) ||
@@ -233,7 +246,7 @@ const InvoicesUI = {
                                (inv.customerName || '').toLowerCase().includes(query) ||
                                (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
 
-            return yearMatch && customerMatch && statusMatch && searchMatch;
+            return yearMatch && monthMatch && customerMatch && statusMatch && searchMatch;
         });
 
         const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
@@ -1059,6 +1072,9 @@ const InvoicesUI = {
         const sgstAmount = isGST ? (parseFloat(document.getElementById('sgstTotal')?.textContent) || 0) : 0;
 
         const hId = formData.get('customerId');
+        const resolvedPartyId = (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
+            ? CustomerManager.resolvePartyId({ customerId: hId, customerName: formData.get('customerName'), accountType: 'customer' })
+            : '';
         const invoiceData = {
             id: formData.get('invoiceNo'),
             invoiceNo: formData.get('invoiceNo'), // Also store explicitly for table display
@@ -1066,6 +1082,7 @@ const InvoicesUI = {
             customerName: formData.get('customerName'),
             customerAddress: formData.get('customerAddress'),
             customerId: hId || ('CUST-' + Date.now()),
+            partyId: resolvedPartyId || '',
             date: formData.get('date'),
             poNumber: formData.get('poNumber'),
             items: items,
@@ -1092,7 +1109,10 @@ const InvoicesUI = {
         if (!hId) {
             const customers = DataManager.getData('customers') || [];
             const foundCust = customers.find(c => c.name === invoiceData.customerName);
-            if (foundCust) invoiceData.customerId = foundCust.id;
+            if (foundCust) {
+                invoiceData.customerId = foundCust.id;
+                invoiceData.partyId = foundCust.partyId || invoiceData.partyId || '';
+            }
         }
 
         try {
@@ -1250,6 +1270,9 @@ const InvoicesUI = {
             date: formData.get('date'),
             customerName: formData.get('customerName'),
             customerId: formData.get('customerId'),
+            partyId: (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
+                ? CustomerManager.resolvePartyId({ customerId: formData.get('customerId'), customerName: formData.get('customerName'), accountType: 'customer' })
+                : '',
             customerAddress: formData.get('customerAddress'),
             poNumber: formData.get('poNumber'),
             narration: formData.get('narration'),
@@ -2204,8 +2227,27 @@ const InvoicesUI = {
         });
     },
 
+    /**
+     * Credit notes / sales returns reduce receivable in the ledger (credit side). They are not "pending bills"
+     * to collect; including their positive `balance` in outstanding modals inflated totals vs ledger closing.
+     */
+    _isCreditNoteSalesDoc(inv) {
+        if (!inv) return false;
+        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics._isCreditNoteInvoice) {
+            return BusinessAnalytics._isCreditNoteInvoice(inv);
+        }
+        const t = (inv.type || '').toLowerCase();
+        if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return true;
+        if (inv.isCreditNote === true) return true;
+        const bk = String(inv.bookkeeperVchType || inv.v_type || '').toLowerCase();
+        if (bk.includes('credit') && bk.includes('note')) return true;
+        return false;
+    },
+
     showSalesOutstandingModal(mode) {
-        const lines = this._getFilteredSalesInvoicesAll().filter(inv => (inv.balance || 0) > 0.05);
+        const lines = this._getFilteredSalesInvoicesAll().filter(inv =>
+            (inv.balance || 0) > 0.05 && !this._isCreditNoteSalesDoc(inv)
+        );
         const isGST = this.currentMode === 'gst';
         const title = mode === 'parties'
             ? (isGST ? 'Outstanding by customer (GST)' : 'Outstanding by customer (Plain)')

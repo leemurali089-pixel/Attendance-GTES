@@ -4107,7 +4107,7 @@ const DeliveryUI = {
         }
         let el;
         try {
-            el = await VouchersUI.getVoucherElement(id);
+            el = await VouchersUI.getVoucherElement(id, { skipQr: true });
         } catch (e) {
             console.error(e);
             App.showNotification('Preview failed', 'error');
@@ -4139,9 +4139,12 @@ const DeliveryUI = {
         if (!voucher) return;
 
         const filename = `${voucher.type === 'receipt' ? 'Receipt' : 'Payment'}_${id}.pdf`;
+        const vchScale = this.GTES_VOUCHER_HTML2PDF_SCALE || 1.06;
         const opt = this.buildGtesHtml2PdfOptions({
             filename,
-            margin: [0.35, 0.35, 0.35, 0.35]
+            margin: [0.35, 0.35, 0.35, 0.35],
+            image: { type: 'jpeg', quality: 0.85 },
+            html2canvas: { scale: vchScale }
         });
 
         if (typeof html2pdf === 'undefined') {

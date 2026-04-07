@@ -4,6 +4,16 @@ const AttendanceModule = {
     bulkTimeSlots: [],
     currentBulkDate: null,
 
+    _forceInteractiveUi() {
+        // Global loader can remain visible if any async view load hangs; it blocks all clicks.
+        const loader = document.getElementById('globalLoader');
+        if (loader) loader.classList.add('d-none');
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    },
+
     async load() {
         await this.renderAttendanceView();
     },
@@ -80,6 +90,19 @@ const AttendanceModule = {
         const view = document.getElementById('attendanceView');
         if (!view) return;
 
+        // Replacing innerHTML destroys #attendanceFormModal; old bootstrap.Modal instance then points at
+        // detached DOM — show() adds a backdrop but the dialog is broken and the app feels "frozen".
+        if (this.modal) {
+            try {
+                this.modal.dispose();
+            } catch (_) { /* already disposed / node gone */ }
+            this.modal = null;
+        }
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+
         const employees = await DataManager.getActiveEmployees();
         const timeSlots = DataManager.generateTimeSlots();
         const today = new Date();
@@ -142,7 +165,7 @@ const AttendanceModule = {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="attendanceFormTitle">Add Attendance Record</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            <button type="button" class="btn-close" onclick="AttendanceModule.closeAttendanceModal()"></button>
                         </div>
                         <div class="modal-body">
                             <form id="attendanceForm">
@@ -204,7 +227,7 @@ const AttendanceModule = {
                             </form>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-secondary" onclick="AttendanceModule.closeAttendanceModal()">Cancel</button>
                             <button type="button" class="btn btn-primary" onclick="AttendanceModule.saveAttendanceRecord()">Save</button>
                         </div>
                     </div>
@@ -212,10 +235,21 @@ const AttendanceModule = {
             </div>
         `;
 
-        // Initialize modal
+        // Initialize modal (fresh instance every time this view is rendered)
         const modalElement = document.getElementById('attendanceFormModal');
         if (modalElement) {
-            this.modal = new bootstrap.Modal(modalElement);
+            // Keep modal under <body> (not inside view containers) to avoid stacking-context issues
+            // where backdrop sits above modal and blocks all interactions.
+            if (modalElement.parentElement !== document.body) {
+                document.body.appendChild(modalElement);
+            }
+            this.modal = new bootstrap.Modal(modalElement, { backdrop: true, keyboard: true, focus: true });
+            modalElement.addEventListener('hidden.bs.modal', () => {
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('overflow');
+                document.body.style.removeProperty('padding-right');
+            });
         }
     },
 
@@ -227,9 +261,18 @@ const AttendanceModule = {
             return '<tr><td colspan="8" class="text-center text-muted">No attendance records for this date</td></tr>';
         }
 
-        return Promise.all(dateRecords.map(async record => {
+        const holidays = await DataManager.getHolidays();
+        const holidayReasonByDate = new Map();
+        holidays.forEach(h => {
+            const ds = DataManager.formatDate(new Date(h.date));
+            holidayReasonByDate.set(ds, h.reason || '');
+        });
+
+        const rows = dateRecords.map(record => {
             const date = new Date(record.date);
-            const isHoliday = await DataManager.isHoliday(date) || DataManager.isSunday(date);
+            const dateKey = DataManager.formatDate(date);
+            const isListedHoliday = holidayReasonByDate.has(dateKey);
+            const isHoliday = isListedHoliday || DataManager.isSunday(date);
             const isHWorking = record.status === 'H-Working' || record.overTime === 'H-Working' || record.overTime === 'Holiday working';
             let rowClass = '';
             // Apply status-based row classes
@@ -246,7 +289,8 @@ const AttendanceModule = {
             } else if (record.status === 'Half Day') {
                 rowClass = 'table-half-day';
             }
-            const holidayReason = record.holidayReason || await DataManager.getHolidayReason(date) || '';
+            const holidayReason = record.holidayReason
+                || (DataManager.isSunday(date) ? 'Sunday' : (holidayReasonByDate.get(dateKey) || ''));
 
             return `
                 <tr class="${rowClass}" data-id="${record.id}">
@@ -267,7 +311,8 @@ const AttendanceModule = {
                     </td>
                 </tr>
             `;
-        })).then(rows => rows.join(''));
+        });
+        return rows.join('');
     },
 
     getStatusBadgeColor(status) {
@@ -289,6 +334,19 @@ const AttendanceModule = {
         if (tbody) {
             tbody.innerHTML = await this.renderAttendanceRows(dateStr);
         }
+    },
+
+    closeAttendanceModal() {
+        this._forceInteractiveUi();
+        const modalElement = document.getElementById('attendanceFormModal');
+        if (!modalElement) return;
+        const instance = bootstrap.Modal.getOrCreateInstance(modalElement);
+        instance.hide();
+        // Hard cleanup in case Bootstrap lifecycle was interrupted.
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
     },
 
     async addAttendanceRecord() {
@@ -320,9 +378,9 @@ const AttendanceModule = {
             }
         }
 
-        if (this.modal) {
-            this.modal.show();
-        }
+        this._forceInteractiveUi();
+        const modalElement = document.getElementById('attendanceFormModal');
+        if (modalElement) bootstrap.Modal.getOrCreateInstance(modalElement).show();
     },
 
     async addBulkAttendance() {
@@ -1135,7 +1193,7 @@ const AttendanceModule = {
         }
 
         await DataManager.saveAttendance(attendance);
-        this.modal.hide();
+        this.closeAttendanceModal();
         await this.loadAttendanceForDate();
         App.showNotification('Attendance record saved successfully', 'success');
     },
@@ -1151,6 +1209,14 @@ const AttendanceModule = {
 
         const form = document.getElementById('attendanceForm');
         if (form) {
+            const employeeSelect = document.getElementById('attendanceEmployee');
+            // Editing must work even if employee is inactive/renamed and not in the current dropdown options.
+            if (employeeSelect) {
+                const hasOption = Array.from(employeeSelect.options || []).some(opt => opt.value === record.employee);
+                if (!hasOption && record.employee) {
+                    employeeSelect.insertAdjacentHTML('beforeend', `<option value="${record.employee}">${record.employee}</option>`);
+                }
+            }
             document.getElementById('attendanceId').value = record.id;
             document.getElementById('attendanceRecordDate').value = DataManager.formatDate(record.date);
             document.getElementById('attendanceEmployee').value = record.employee;
@@ -1163,14 +1229,9 @@ const AttendanceModule = {
             document.getElementById('attendanceFormTitle').textContent = 'Edit Attendance Record';
         }
 
-        // Add event listeners for OT calculation
-        document.getElementById('attendanceCheckIn').addEventListener('change', () => this.calculateOTHours());
-        document.getElementById('attendanceCheckOut').addEventListener('change', () => this.calculateOTHours());
-        document.getElementById('attendanceOverTime').addEventListener('change', () => this.calculateOTHours());
-
-        if (this.modal) {
-            this.modal.show();
-        }
+        this._forceInteractiveUi();
+        const modalElement = document.getElementById('attendanceFormModal');
+        if (modalElement) bootstrap.Modal.getOrCreateInstance(modalElement).show();
     },
 
     async deleteAttendanceRecord(recordId) {
