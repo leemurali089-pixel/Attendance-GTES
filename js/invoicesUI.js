@@ -25,6 +25,48 @@ const InvoicesUI = {
         }
     },
 
+    _parseFinancialYearRange(fyLabel) {
+        const s = String(fyLabel || '').trim();
+        const m = s.match(/^(\d{4})-(\d{2})$/);
+        if (!m) return { startDate: '', endDate: '' };
+        const startYear = parseInt(m[1], 10);
+        if (!Number.isFinite(startYear)) return { startDate: '', endDate: '' };
+        return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
+    },
+
+    _salesLedgerRangeFromFilters(yearFilter, calMonth) {
+        if (calMonth && /^\d{4}-\d{2}$/.test(String(calMonth))) {
+            const y = parseInt(String(calMonth).slice(0, 4), 10);
+            const m = parseInt(String(calMonth).slice(5, 7), 10);
+            const lastDay = new Date(y, m, 0).getDate();
+            return {
+                startDate: `${y}-${String(m).padStart(2, '0')}-01`,
+                endDate: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+            };
+        }
+        return this._parseFinancialYearRange(yearFilter);
+    },
+
+    _purchaseLedgerRangeFromFilters(yearFilter) {
+        return this._parseFinancialYearRange(yearFilter);
+    },
+
+    _resolveLedgerForParty(party, accountGroup, dateRange) {
+        if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
+        const probes = [party?.partyId, party?.customerId, party?.vendorId, party?.name].filter(Boolean);
+        for (const probe of probes) {
+            try {
+                const l = BusinessAnalytics.getAccountLedger(probe, {
+                    accountGroup,
+                    startDate: dateRange?.startDate || undefined,
+                    endDate: dateRange?.endDate || undefined
+                });
+                if (l) return l;
+            } catch (e) { }
+        }
+        return null;
+    },
+
     load(params = {}) {
         const mode = params.mode || null;
         if (!mode) {
@@ -253,9 +295,30 @@ const InvoicesUI = {
         const forTable = filteredAll.filter(inv => !isDc(inv));
 
         // Summary includes DC-style bills (View DC) so totals match receipts / Book Keeper
-        const totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
+        let totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
         const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
-        const outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
+        let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
+        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+            const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
+            const partyMap = new Map();
+            filteredAll.forEach(inv => {
+                const key = (inv.partyId || inv.customerId || inv.customerName || '').toString().trim();
+                if (!key || partyMap.has(key)) return;
+                partyMap.set(key, { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName });
+            });
+            let ledgerSum = 0;
+            let ledgerPartyCount = 0;
+            for (const party of partyMap.values()) {
+                const l = this._resolveLedgerForParty(party, 'customer', range);
+                const bal = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
+                if (bal > 0.05) {
+                    ledgerSum += bal;
+                    ledgerPartyCount += 1;
+                }
+            }
+            totalPending = ledgerSum;
+            outstandingParties = ledgerPartyCount;
+        }
 
         // Update Summary Cards if visible
         const updateEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -284,6 +347,26 @@ const InvoicesUI = {
         // Sort by date desc
         forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+        const salesReturnDocs = invoices.filter(x => {
+            const t = String(x?.type || '').toLowerCase();
+            const bk = String(x?.bookkeeperVchType || x?.v_type || '').toLowerCase();
+            return x?.isCreditNote === true ||
+                (t.includes('credit') && t.includes('note')) ||
+                (t.includes('sales') && t.includes('return')) ||
+                bk.includes('credit note') ||
+                bk.includes('sales return');
+        });
+        const hasCreditAdjustment = (inv) => {
+            const baseNo = String(inv?.invoiceNo || inv?.id || '').trim();
+            if (!baseNo) return false;
+            return salesReturnDocs.some(cn => {
+                const ref = String(
+                    cn?.referenceNo || cn?.refNo || cn?.invoiceRef || cn?.salesInvoiceRef || cn?.baseInvoiceNo || ''
+                ).trim();
+                return ref && ref === baseNo;
+            });
+        };
+
         const html = `
             <table class="table table-dark table-hover align-middle border-secondary">
                 <thead>
@@ -306,12 +389,15 @@ const InvoicesUI = {
                     '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
             
             const itemsList = (inv.items || []).map(item => item.name).join(', ');
+            const creditAdjBadge = hasCreditAdjustment(inv)
+                ? '<span class="badge bg-secondary-subtle text-secondary border border-secondary ms-2">Credit Note</span>'
+                : '';
                     
             return `
                         <tr>
                             <td>${DataManager.formatDateDisplay(inv.date)}</td>
                             <td>
-                                <div class="fw-bold text-info">${inv.invoiceNo || inv.id}</div>
+                                <div class="fw-bold text-info">${inv.invoiceNo || inv.id}${creditAdjBadge}</div>
                                 <div style="font-size: 10px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
                                     ${itemsList}
                                 </div>
@@ -1437,7 +1523,10 @@ const InvoicesUI = {
         const upiId = settings.upiId || '';
         const qrUrl = upiId ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${total}&cu=INR`)}` : '';
 
-        const docTitle = isPlainPdf ? 'Invoice' : 'Tax Invoice';
+        const isCreditNote = this._isCreditNoteSalesDoc(invoice);
+        const docTitle = isCreditNote ? 'Credit Note / Sales Return' : (isPlainPdf ? 'Invoice' : 'Tax Invoice');
+        const docNoLabel = isCreditNote ? 'Credit Note No' : 'Invoice No';
+        const salesRefNo = this._inferSalesReferenceNo(invoice);
         const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
         const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
 
@@ -1532,7 +1621,7 @@ const InvoicesUI = {
                     <td style="width: 38%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
                         <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 8px;">${docTitle}</div>
                         <div style="font-size: 10px; color: #222; line-height: 1.5;">
-                            <strong>Invoice No:</strong> ${this.escapePdfHtml(invoice.invoiceNo || invoice.id)}<br>
+                            <strong>${docNoLabel}:</strong> ${this.escapePdfHtml(invoice.invoiceNo || invoice.id)}<br>
                             <strong>Date:</strong> ${this.escapePdfHtml(invoice.date)}
                         </div>
                     </td>
@@ -1554,10 +1643,13 @@ const InvoicesUI = {
                             <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Invoice Details</div>
                             <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 110px; color: #444;">PO / Ref No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.poNumber || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Sales Invoice Ref:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(salesRefNo)}</strong></td></tr>
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Vehicle No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.vehicleNo || '-')}</strong></td></tr>
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">LR / WayBill:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.lrNo || '-')}</strong></td></tr>
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Dispatch Via:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.dispatchDetails?.via || '-')}</strong></td></tr>
-                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${payColor};">${payStatus}</strong></td></tr>
+                                ${isCreditNote
+                ? `<tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Return Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: #334155;">POSTED</strong></td></tr>`
+                : `<tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${payColor};">${payStatus}</strong></td></tr>`}
                             </table>
                         </div>
                     </td>
@@ -1587,6 +1679,12 @@ const InvoicesUI = {
                             <span style="font-size: 10px; color: #111;">${this.escapePdfHtml(invoice.narration)}</span>
                         </div>` : ''}
                         <div style="margin-top: 10px; font-size: 10px; color: #333; font-style: italic;">Amount in Words: ${this.numberToWords(total)} Only</div>
+                        <div style="margin-top: 8px; font-size: 10px; color: #111;">
+                            <strong>Ledger Effect:</strong>
+                            ${isCreditNote
+                ? `Credit (Customer A/c) ₹${Math.abs(total).toFixed(2)}`
+                : `Debit (Customer A/c) ₹${Math.abs(total).toFixed(2)}`}
+                        </div>
                         ${qrUrl ? `
                         <table style="margin-top: 14px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; border-collapse: collapse;"><tr>
                             <td style="padding: 8px; vertical-align: middle;"><img src="${qrUrl}" alt="UPI" style="width: 72px; height: 72px; display: block;" /></td>
@@ -1837,21 +1935,28 @@ const InvoicesUI = {
         
         // Enhance with balance and status
         const purchases = purchasesRaw.map(p => {
-            const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
-            const balance = (typeof VoucherManager !== 'undefined') ? 
-                VoucherManager.getDocumentBalance(
+            const isDebitNote = this._isDebitNotePurchaseDoc(p);
+            const docTotal = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
+            let balance = (typeof VoucherManager !== 'undefined') ? 
+                (isDebitNote ? 0 : VoucherManager.getDocumentBalance(
                     p.id,
                     docTotal,
                     voucherMap,
                     p.billNo || p.vch_no || p.invoiceNo,
                     p,
                     { allowLooseFallback: false }
-                ) : 
-                docTotal;
+                )) :
+                (isDebitNote ? 0 : docTotal);
+            const importedStatus = String(p.status || '').toLowerCase();
+            if (!isDebitNote && balance >= (docTotal - 0.05)) {
+                if (importedStatus === 'paid') balance = 0;
+                else if (importedStatus === 'partial') balance = Math.max(0.01, docTotal * 0.5);
+            }
             return {
                 ...p,
+                isDebitNote,
                 balance,
-                isPaid: balance <= 0.05,
+                isPaid: isDebitNote ? true : balance <= 0.05,
                 isPartial: balance > 0.05 && balance < (docTotal - 0.05)
             };
         });
@@ -1879,9 +1984,30 @@ const InvoicesUI = {
         });
 
         // Update Summary Cards
-        const totalPending = filtered.reduce((sum, p) => sum + p.balance, 0);
+        let totalPending = filtered.reduce((sum, p) => sum + p.balance, 0);
         const pendingCount = filtered.filter(p => p.balance > 0.05).length;
-        const outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
+        let outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
+        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+            const range = this._purchaseLedgerRangeFromFilters(yearFilter);
+            const partyMap = new Map();
+            filtered.forEach(p => {
+                const key = (p.partyId || p.vendorId || p.vendor || p.customerId || '').toString().trim();
+                if (!key || partyMap.has(key)) return;
+                partyMap.set(key, { partyId: p.partyId, vendorId: p.vendorId, customerId: p.customerId, name: p.vendor || p.vendorName || p.partyName });
+            });
+            let ledgerSum = 0;
+            let ledgerPartyCount = 0;
+            for (const party of partyMap.values()) {
+                const l = this._resolveLedgerForParty(party, 'vendor', range);
+                const bal = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
+                if (bal > 0.05) {
+                    ledgerSum += bal;
+                    ledgerPartyCount += 1;
+                }
+            }
+            totalPending = ledgerSum;
+            outstandingParties = ledgerPartyCount;
+        }
 
         const updateEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
         updateEl('summaryPurchasePendingAmount', `₹${totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -1916,11 +2042,13 @@ const InvoicesUI = {
                     ${filtered.map(p => {
             const itemsList = (p.items || []).map(item => item.name).join(', ');
             const searchTerms = `${p.billNo} ${p.vendor} ${itemsList}`.toLowerCase();
-            const statusBadge = p.isPaid ? 
-                '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
-                (p.isPartial ? 
-                    '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>' : 
-                    '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
+            const statusBadge = p.isDebitNote
+                ? '<span class="badge bg-secondary-subtle text-secondary border border-secondary">Debit Note</span>'
+                : (p.isPaid
+                    ? '<span class="badge bg-success-subtle text-success border border-success">Paid</span>'
+                    : (p.isPartial
+                        ? '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>'
+                        : '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>'));
 
             return `
                         <tr data-search="${searchTerms}" data-year="${DataManager.getFinancialYear(p.date)}" data-vendor="${p.vendor}" data-status="${p.isPaid ? 'paid' : (p.isPartial ? 'partial' : 'pending')}">
@@ -1932,7 +2060,7 @@ const InvoicesUI = {
                                 </div>
                             </td>
                             <td>${p.vendor || 'Unknown'}</td>
-                            <td class="text-end">₹${(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0).toFixed(2)}</td>
+                            <td class="text-end">₹${Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0).toFixed(2)}</td>
                             <td class="text-end fw-bold ${p.balance > 0 ? 'text-danger' : 'text-success'}">₹${p.balance.toFixed(2)}</td>
                             <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
@@ -2004,6 +2132,37 @@ const InvoicesUI = {
         };
 
         const displayVendor = getCleanVendor(p.vendor || p.vendorName);
+        const isDebitNote = this._isDebitNotePurchaseDoc(p);
+        const purchaseRefNo = this._inferPurchaseReferenceNo(p);
+        const purchaseDocTitle = isDebitNote ? 'Debit Note / Purchase Return' : 'Purchase Bill';
+        const purchaseDocNoLabel = isDebitNote ? 'Debit Note No' : 'Bill No';
+
+        const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || DataManager.getData('gtes_inventory_items') || [];
+        const masterServices = DataManager.getData(DataManager.KEYS.SERVICES || 'gtes_services') || DataManager.getData('gtes_services') || [];
+        const allMasterItems = [...masterInventory, ...masterServices];
+
+        const dnDocTotal = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
+        let pdfItems = (p.items && p.items.length) ? JSON.parse(JSON.stringify(p.items)) : [];
+        let pdfLineTaxes = null;
+
+        if (isDebitNote && this._debitNoteUsesFallbackLineItems(p)) {
+            const basePur = this._findBasePurchaseForDebitNote(p, purchases);
+            if (basePur && basePur.items && basePur.items.length > 0) {
+                const cloned = JSON.parse(JSON.stringify(basePur.items));
+                pdfItems = this._pickDebitNoteLinesMatchingTotal(cloned, dnDocTotal);
+            }
+        }
+
+        if (pdfItems.length > 0) {
+            pdfLineTaxes = this._accumulatePurchasePdfFooterTaxes(pdfItems, allMasterItems);
+        }
+
+        const pdfCgst = pdfLineTaxes ? pdfLineTaxes.cgst : (parseFloat(p.cgst) || 0);
+        const pdfSgst = pdfLineTaxes ? pdfLineTaxes.sgst : (parseFloat(p.sgst) || 0);
+        const pdfIgst = pdfLineTaxes ? pdfLineTaxes.igst : (parseFloat(p.igst) || 0);
+        const pdfTaxableSub = pdfLineTaxes
+            ? pdfLineTaxes.taxable
+            : (parseFloat(p.subtotal) || (dnDocTotal - pdfCgst - pdfSgst - pdfIgst));
 
         const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
@@ -2014,19 +2173,25 @@ const InvoicesUI = {
         element.style.color = '#000';
         element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
 
-        const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || DataManager.getData('gtes_inventory_items') || [];
-        const masterServices = DataManager.getData(DataManager.KEYS.SERVICES || 'gtes_services') || DataManager.getData('gtes_services') || [];
-        const allMasterItems = [...masterInventory, ...masterServices];
-
-        const itemsHtml = (p.items && p.items.length > 0) ? (p.items || []).map((item, idx) => {
+        const itemsHtml = (pdfItems && pdfItems.length > 0) ? pdfItems.map((item, idx) => {
             const details = this.getItemDisplayDetails(item, allMasterItems, false);
             const nm = this.escapePdfHtml(item.name);
             const ds = details.displayDesc ? this.escapePdfHtml(details.displayDesc) : '';
 
-            const cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
-            const sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
-            const cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
-            const sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            let cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
+            let sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
+            let cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
+            let sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            const igstA = parseFloat(item.igst) || parseFloat(item.igstAmount) || 0;
+            const igstR = parseFloat(String(item.igstRate || '').replace(/[^0-9.]/g, '')) || 0;
+            const gstWhole = parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) || 0;
+            if (igstA > 0.01 && Math.abs(cgstA + sgstA) < 0.01) {
+                cgstA = igstA / 2;
+                sgstA = igstA / 2;
+                const halfRate = igstR > 0 ? igstR / 2 : (gstWhole > 0 ? gstWhole / 2 : 9);
+                cgstR = halfRate;
+                sgstR = halfRate;
+            }
 
             return `
             <tr style="font-size: 10px; page-break-inside: avoid;">
@@ -2077,10 +2242,10 @@ const InvoicesUI = {
                         </div>
                     </td>
                     <td style="width: 35%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
-                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 6px;">Purchase Bill</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 6px;">${purchaseDocTitle}</div>
                         <div style="font-size: 10px; color: #222;">
                             Date: <strong>${this.escapePdfHtml(p.date)}</strong><br>
-                            Bill No: <strong>${this.escapePdfHtml(p.billNo)}</strong>
+                            ${purchaseDocNoLabel}: <strong>${this.escapePdfHtml(p.billNo)}</strong>
                         </div>
                     </td>
                 </tr>
@@ -2100,9 +2265,12 @@ const InvoicesUI = {
                         <div style="border: 1px solid #000; padding: 10px;">
                             <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Bill Details</div>
                             <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
-                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 120px; color: #444;">Supplier Bill No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(p.supplierBillNo || p.supplierInvoiceNo || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 120px; color: #444;">Supplier Bill No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(p.supplierBillNo || p.supplierInvoiceNo || p.purchaseInvoiceRef || p.referenceNo || p.billNo || '-')}</strong></td></tr>
+                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Purchase Invoice Ref:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(purchaseRefNo)}</strong></td></tr>
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Ref No / PO:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(p.poNumber || '-')}</strong></td></tr>
-                                <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'}">${(p.status || 'pending').toUpperCase()}</strong></td></tr>
+                                ${isDebitNote
+                ? `<tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Return Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: #334155;">POSTED</strong></td></tr>`
+                : `<tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Payment Status:</td><td style="padding: 2px 0; vertical-align: top;"><strong style="color: ${p.status === 'paid' ? '#27ae60' : '#e67e22'}">${(p.status || 'pending').toUpperCase()}</strong></td></tr>`}
                             </table>
                         </div>
                     </td>
@@ -2138,12 +2306,18 @@ const InvoicesUI = {
             <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0;">
                 <tr>
                     <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
-                        <div style="margin-bottom: 5px;"><strong>CGST Amt:</strong> ${(p.cgst || 0).toFixed(2)}</div>
-                        <div style="margin-bottom: 5px;"><strong>SGST Amt:</strong> ${(p.sgst || 0).toFixed(2)}</div>
-                        ${p.igst > 0 ? `<div style="margin-bottom: 5px;"><strong>IGST Amt:</strong> ${(p.igst || 0).toFixed(2)}</div>` : ''}
-                        <div style="margin-bottom: 15px;"><strong>Total Tax:</strong> ${((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0)).toFixed(2)}</div>
+                        <div style="margin-bottom: 5px;"><strong>CGST Amt:</strong> ${pdfCgst.toFixed(2)}</div>
+                        <div style="margin-bottom: 5px;"><strong>SGST Amt:</strong> ${pdfSgst.toFixed(2)}</div>
+                        ${pdfIgst > 0 ? `<div style="margin-bottom: 5px;"><strong>IGST Amt:</strong> ${pdfIgst.toFixed(2)}</div>` : ''}
+                        <div style="margin-bottom: 15px;"><strong>Total Tax:</strong> ${(pdfCgst + pdfSgst + pdfIgst).toFixed(2)}</div>
                         <div style="margin-top: 30px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
                             We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
+                        </div>
+                        <div style="margin-top: 10px; font-size: 10px; color: #111;">
+                            <strong>Ledger Effect:</strong>
+                            ${isDebitNote
+                ? `Debit (Vendor A/c) ₹${Math.abs(parseFloat(p.amount) || 0).toFixed(2)}`
+                : `Credit (Vendor A/c) ₹${Math.abs(parseFloat(p.amount) || 0).toFixed(2)}`}
                         </div>
                     </td>
                     <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
@@ -2151,20 +2325,20 @@ const InvoicesUI = {
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
                                 <tr>
                                     <td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${(p.subtotal || p.amount - ((p.cgst || 0) + (p.sgst || 0) + (p.igst || 0))).toFixed(2)}</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${pdfTaxableSub.toFixed(2)}</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 6px 8px; text-align: right; color: #334155;">CGST Total</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.cgst || 0).toFixed(2)}</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${pdfCgst.toFixed(2)}</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 6px 8px; text-align: right; color: #334155;">SGST Total</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.sgst || 0).toFixed(2)}</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${pdfSgst.toFixed(2)}</td>
                                 </tr>
-                                ${p.igst > 0 ? `
+                                ${pdfIgst > 0 ? `
                                 <tr>
                                     <td style="padding: 6px 8px; text-align: right; color: #334155;">IGST Total</td>
-                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${(p.igst || 0).toFixed(2)}</td>
+                                    <td style="padding: 6px 10px 6px 8px; text-align: right; min-width: 100px;">₹${pdfIgst.toFixed(2)}</td>
                                 </tr>
                                 ` : ''}
                                 ${p.roundOff ? `
@@ -2244,6 +2418,245 @@ const InvoicesUI = {
         return false;
     },
 
+    _isDebitNotePurchaseDoc(exp) {
+        if (!exp) return false;
+        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics._isDebitNotePurchase) {
+            return BusinessAnalytics._isDebitNotePurchase(exp);
+        }
+        const t = String(exp.type || exp.v_type || exp.billType || '').toLowerCase();
+        const billNo = String(exp.billNo || exp.bookkeeperVchNo || exp.id || '').toUpperCase();
+        if (t === 'debit-note' || t === 'debit_note') return true;
+        if (t.includes('debit') && t.includes('note')) return true;
+        if (t.includes('purchase') && t.includes('return')) return true;
+        if (/^PRR/.test(billNo) || /^DN/.test(billNo) || /^DRN/.test(billNo)) return true;
+        if (exp.isDebitNote === true) return true;
+        return false;
+    },
+
+    _normVendorName(v) {
+        return String(v || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
+    },
+
+    _purchaseBillRefVariants(raw) {
+        const t = String(raw ?? '').trim();
+        if (!t || t === '-') return [];
+        const out = new Set([t]);
+        const stripped = t.replace(/^0+/, '') || t;
+        if (stripped !== t) out.add(stripped);
+        const n = parseInt(t, 10);
+        if (!isNaN(n)) out.add(String(n));
+        return [...out];
+    },
+
+    _debitNoteUsesFallbackLineItems(p) {
+        if (!p || !this._isDebitNotePurchaseDoc(p)) return false;
+        const items = p.items || [];
+        if (items.length === 0) return true;
+        if (items.length > 1) return false;
+        const it = items[0];
+        const n = String(it.name || '').toLowerCase();
+        const d = String(it.description || '').toLowerCase();
+        if (n.includes('general purchase') || d.includes('expense entry')) return true;
+        const hsn = String(it.hsn || it.hsn_code || '').trim();
+        const taxMicro =
+            (parseFloat(it.cgst) || 0) + (parseFloat(it.sgst) || 0) + (parseFloat(it.igst) || 0) +
+            (parseFloat(it.cgstAmount) || 0) + (parseFloat(it.sgstAmount) || 0) + (parseFloat(it.igstAmount) || 0);
+        const qty = parseFloat(it.quantity) || 0;
+        if (!hsn && taxMicro < 0.01 && qty <= 1.001) {
+            const lineAmt = parseFloat(it.amount) || parseFloat(it.rate) || 0;
+            const docAmt = Math.abs(parseFloat(p.amount) || 0);
+            if (docAmt > 0 && Math.abs(lineAmt - docAmt) < Math.max(1, docAmt * 0.02)) return true;
+        }
+        return false;
+    },
+
+    _findBasePurchaseForDebitNote(p, allExpenses) {
+        if (!p || !Array.isArray(allExpenses)) return null;
+        const refSet = new Set();
+        for (const r of [p.purchaseInvoiceRef, p.referenceNo, p.refNo]) {
+            this._purchaseBillRefVariants(r).forEach(x => refSet.add(x));
+        }
+        if (refSet.size === 0) {
+            const inf = this._inferPurchaseReferenceNo(p);
+            if (inf && inf !== '-') this._purchaseBillRefVariants(inf).forEach(x => refSet.add(x));
+        }
+        if (refSet.size === 0) return null;
+        const vendorWant = this._normVendorName(p.vendor || p.vendorName);
+        const pool = allExpenses.filter(e =>
+            e &&
+            e !== p &&
+            !this._isDebitNotePurchaseDoc(e) &&
+            String(e.category || '').toLowerCase().includes('purchase')
+        );
+        const billMatchesRef = (e) => {
+            const keys = [e.billNo, e.id, e.supplierBillNo, e.vch_no, e.invoiceNo, e.bookkeeperVchNo];
+            for (const k of keys) {
+                if (k == null || k === '') continue;
+                for (const v of this._purchaseBillRefVariants(k)) {
+                    if (refSet.has(v)) return true;
+                }
+            }
+            return false;
+        };
+        let vendorHit = null;
+        let anyHit = null;
+        for (const e of pool) {
+            if (!billMatchesRef(e)) continue;
+            if (!anyHit) anyHit = e;
+            const v = this._normVendorName(e.vendor || e.vendorName);
+            if (vendorWant && v && v === vendorWant) {
+                vendorHit = e;
+                break;
+            }
+        }
+        return vendorHit || anyHit;
+    },
+
+    _sumPurchaseLineTaxes(items) {
+        let cgst = 0;
+        let sgst = 0;
+        let igst = 0;
+        let taxable = 0;
+        for (const it of items || []) {
+            taxable += parseFloat(it.amount) || 0;
+            cgst += parseFloat(it.cgst) || parseFloat(it.cgstAmount) || 0;
+            sgst += parseFloat(it.sgst) || parseFloat(it.sgstAmount) || 0;
+            igst += parseFloat(it.igst) || parseFloat(it.igstAmount) || 0;
+        }
+        return { cgst, sgst, igst, taxable };
+    },
+
+    _purchaseItemLineGrandTotal(it) {
+        if (!it || typeof it !== 'object') return 0;
+        const t = parseFloat(it.totalAmount);
+        if (!Number.isNaN(t) && Math.abs(t) > 0.01) return Math.abs(t);
+        const taxable = parseFloat(it.amount) || 0;
+        const cgst = parseFloat(it.cgst) || parseFloat(it.cgstAmount) || 0;
+        const sgst = parseFloat(it.sgst) || parseFloat(it.sgstAmount) || 0;
+        const igst = parseFloat(it.igst) || parseFloat(it.igstAmount) || 0;
+        return Math.abs(taxable + cgst + sgst + igst);
+    },
+
+    /**
+     * Debit notes often store only a header total while the referenced purchase has many lines.
+     * Keep all lines only when their sum matches the note total; otherwise pick the smallest subset
+     * (pair, else single closest line) that matches the note amount.
+     */
+    _pickDebitNoteLinesMatchingTotal(baseItems, dnGrandTotal) {
+        const raw = Array.isArray(baseItems) ? baseItems : [];
+        const items = raw.map(x => JSON.parse(JSON.stringify(x)));
+        if (items.length === 0) return [];
+        const target = Math.abs(parseFloat(dnGrandTotal) || 0);
+        if (target <= 0.01) return items;
+        const tol = Math.max(1, target * 0.02);
+        const cloneOne = (it) => JSON.parse(JSON.stringify(it));
+        const lineG = items.map(it => ({ it, g: this._purchaseItemLineGrandTotal(it) }));
+        const sumAll = lineG.reduce((s, x) => s + x.g, 0);
+        if (Math.abs(sumAll - target) <= tol) return items;
+
+        if (lineG.length <= 12 && sumAll > target + tol) {
+            for (let i = 0; i < lineG.length; i++) {
+                for (let j = i + 1; j < lineG.length; j++) {
+                    const s = lineG[i].g + lineG[j].g;
+                    if (Math.abs(s - target) <= tol) {
+                        return [cloneOne(lineG[i].it), cloneOne(lineG[j].it)];
+                    }
+                }
+            }
+        }
+
+        let best = lineG[0].it;
+        let bestDiff = Math.abs(lineG[0].g - target);
+        for (const x of lineG) {
+            const d = Math.abs(x.g - target);
+            if (d < bestDiff) {
+                bestDiff = d;
+                best = x.it;
+            }
+        }
+        if (sumAll < target - tol) return items;
+        if (sumAll > target + tol) return [cloneOne(best)];
+        if (bestDiff <= tol * 3) return [cloneOne(best)];
+        return items;
+    },
+
+    /** Match purchase PDF footer taxes to row rendering (including IGST shown as split CGST/SGST). */
+    _accumulatePurchasePdfFooterTaxes(items, allMasterItems) {
+        let cgst = 0;
+        let sgst = 0;
+        let igst = 0;
+        let taxable = 0;
+        for (const item of items || []) {
+            const details = this.getItemDisplayDetails(item, allMasterItems, false);
+            taxable += details.amount;
+            let cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
+            let sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
+            let cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
+            let sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            const igstA = parseFloat(item.igst) || parseFloat(item.igstAmount) || 0;
+            if (igstA > 0.01 && Math.abs(cgstA + sgstA) < 0.01) {
+                cgstA = igstA / 2;
+                sgstA = igstA / 2;
+                cgst += cgstA;
+                sgst += sgstA;
+            } else {
+                cgst += cgstA;
+                sgst += sgstA;
+                igst += igstA;
+            }
+        }
+        return { cgst, sgst, igst, taxable };
+    },
+
+    _inferSalesReferenceNo(inv) {
+        const direct = inv?.referenceNo || inv?.refNo || inv?.refInvoiceNo || inv?.baseInvoiceNo || inv?.originalInvoiceNo;
+        if (direct && String(direct).trim()) return String(direct).trim();
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef && this._isCreditNoteSalesDoc(inv)) {
+            const parsed = String(VoucherManager.resolveCreditNoteSalesRef(inv) || '').trim();
+            if (parsed) return parsed;
+        }
+        if (!inv) return '-';
+        const all = DataManager.getData('invoices') || [];
+        const partyId = inv.partyId || '';
+        const custId = inv.customerId || '';
+        const custName = (inv.customerName || '').toLowerCase().trim();
+        const invDate = new Date(inv.date || 0).getTime() || Date.now();
+        const isCandidate = (x) => {
+            if (!x || x.id === inv.id) return false;
+            if (this._isCreditNoteSalesDoc(x)) return false;
+            const sameParty = (partyId && x.partyId === partyId)
+                || (custId && x.customerId === custId)
+                || (custName && String(x.customerName || '').toLowerCase().trim() === custName);
+            if (!sameParty) return false;
+            const xDate = new Date(x.date || 0).getTime() || 0;
+            return xDate <= invDate;
+        };
+        const prior = all.filter(isCandidate).sort((a, b) => (new Date(b.date || 0) - new Date(a.date || 0)));
+        return prior[0]?.invoiceNo || prior[0]?.id || '-';
+    },
+
+    _inferPurchaseReferenceNo(exp) {
+        const direct = exp?.referenceNo || exp?.refNo || exp?.purchaseInvoiceRef || exp?.purchaseInvoiceNo || exp?.refInvoiceNo || exp?.baseInvoiceNo || exp?.originalInvoiceNo || exp?.supplierInvoiceNo || exp?.supplierBillNo;
+        if (direct && String(direct).trim()) return String(direct).trim();
+        if (!exp) return '-';
+        const all = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const partyId = exp.partyId || '';
+        const vendor = (exp.vendor || exp.vendorName || '').toLowerCase().trim();
+        const expDate = new Date(exp.date || 0).getTime() || Date.now();
+        const isCandidate = (x) => {
+            if (!x || x.id === exp.id) return false;
+            if (this._isDebitNotePurchaseDoc(x)) return false;
+            const sameParty = (partyId && x.partyId === partyId)
+                || (vendor && String(x.vendor || x.vendorName || '').toLowerCase().trim() === vendor);
+            if (!sameParty) return false;
+            const xDate = new Date(x.date || 0).getTime() || 0;
+            return xDate <= expDate;
+        };
+        const prior = all.filter(isCandidate).sort((a, b) => (new Date(b.date || 0) - new Date(a.date || 0)));
+        const best = prior[0];
+        return best?.billNo || best?.supplierBillNo || best?.id || '-';
+    },
+
     showSalesOutstandingModal(mode) {
         const lines = this._getFilteredSalesInvoicesAll().filter(inv =>
             (inv.balance || 0) > 0.05 && !this._isCreditNoteSalesDoc(inv)
@@ -2301,18 +2714,24 @@ const InvoicesUI = {
             .filter(p => (p.category || '').toLowerCase().includes('purchase'));
         const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap(null, 'payment') : new Map();
         const purchases = purchasesRaw.map(p => {
-            const docTotal = parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0;
-            const balance = (typeof VoucherManager !== 'undefined') ?
-                VoucherManager.getDocumentBalance(
+            const isDebitNote = this._isDebitNotePurchaseDoc(p);
+            const docTotal = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
+            let balance = (typeof VoucherManager !== 'undefined') ?
+                (isDebitNote ? 0 : VoucherManager.getDocumentBalance(
                     p.id,
                     docTotal,
                     voucherMap,
                     p.billNo || p.vch_no || p.invoiceNo,
                     p,
                     { allowLooseFallback: false }
-                ) :
-                docTotal;
-            return { ...p, balance, isPaid: balance <= 0.05, isPartial: balance > 0.05 && balance < (docTotal - 0.05) };
+                )) :
+                (isDebitNote ? 0 : docTotal);
+            const importedStatus = String(p.status || '').toLowerCase();
+            if (!isDebitNote && balance >= (docTotal - 0.05)) {
+                if (importedStatus === 'paid') balance = 0;
+                else if (importedStatus === 'partial') balance = Math.max(0.01, docTotal * 0.5);
+            }
+            return { ...p, isDebitNote, balance, isPaid: isDebitNote ? true : balance <= 0.05, isPartial: balance > 0.05 && balance < (docTotal - 0.05) };
         });
         const yearFilter = document.getElementById('filterPurchaseYear')?.value;
         const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
@@ -2336,7 +2755,7 @@ const InvoicesUI = {
     },
 
     showPurchaseOutstandingModal(mode) {
-        const lines = this._getFilteredPurchasesAll().filter(p => (p.balance || 0) > 0.05);
+        const lines = this._getFilteredPurchasesAll().filter(p => (p.balance || 0) > 0.05 && !p.isDebitNote);
         const title = mode === 'vendors' ? 'Suppliers with outstanding' : 'Pending purchase bills';
         let body = '';
         if (mode === 'vendors') {
@@ -2345,7 +2764,21 @@ const InvoicesUI = {
                 const key = p.vendor || 'Unknown';
                 map.set(key, (map.get(key) || 0) + (p.balance || 0));
             });
-            const rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
+            let rows = [...map.entries()].map(([name, amt]) => {
+                let alignedAmt = amt;
+                // Align supplier outstanding modal with Customer Ledger logic when available.
+                // Ledger is party-based (includes supplier payments even if bill links are imperfect).
+                if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+                    try {
+                        const l = BusinessAnalytics.getAccountLedger(name, { accountGroup: 'vendor' });
+                        if (l && l.summary && Number.isFinite(Number(l.summary.balance))) {
+                            alignedAmt = Math.max(0, parseFloat(l.summary.balance) || 0);
+                        }
+                    } catch (e) { /* keep fallback amount */ }
+                }
+                return [name, alignedAmt];
+            }).filter(([, amt]) => (parseFloat(amt) || 0) > 0.05);
+            rows = rows.sort((a, b) => b[1] - a[1]);
             body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
                 <thead><tr><th>Supplier</th><th class="text-end">Total pending</th></tr></thead>
                 <tbody>${rows.map(([name, amt]) => `<tr><td>${this.escapePdfHtml(name)}</td><td class="text-end text-danger fw-bold">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>`).join('')}</tbody>

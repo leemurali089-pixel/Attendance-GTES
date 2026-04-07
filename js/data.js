@@ -73,15 +73,27 @@ const DataManager = {
             .filter(Boolean);
     },
 
-    _mergeRecordArraysById(localArr, cloudArr) {
+    /**
+     * Union-merge two record arrays. Vouchers: prefer bookkeeperId (BK-*) as key so repeating vch_no
+     * (e.g. "110") from different parties does not collapse into one row during sync.
+     */
+    _mergeRecordArraysById(localArr, cloudArr, storageKey = null) {
         const a = Array.isArray(localArr) ? localArr : [];
         const b = Array.isArray(cloudArr) ? cloudArr : [];
         const map = new Map();
-        const take = (item) => {
-            if (!item || typeof item !== 'object') return;
+        const mergeKey = (item) => {
+            if (!item || typeof item !== 'object') return null;
+            if (storageKey === 'vouchers') {
+                const bk = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
+                if (bk) return `bk:${bk}`;
+            }
             const id = item.id;
-            if (id === undefined || id === null || id === '') return;
-            const idKey = String(id);
+            if (id === undefined || id === null || id === '') return null;
+            return `id:${String(id)}`;
+        };
+        const take = (item) => {
+            const idKey = mergeKey(item);
+            if (!idKey) return;
             const prev = map.get(idKey);
             if (!prev) {
                 map.set(idKey, item);
@@ -446,7 +458,7 @@ const DataManager = {
             try {
                 const cloudExisting = await FileStorage.loadData(key);
                 if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
-                    payload = this._mergeRecordArraysById(cloudExisting, data);
+                    payload = this._mergeRecordArraysById(cloudExisting, data, key);
                     this._cache[key] = payload;
                     try {
                         localStorage.setItem(key, JSON.stringify(payload));
@@ -510,11 +522,11 @@ const DataManager = {
 
         if (this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
             const loc = Array.isArray(localParsed) ? localParsed : [];
-            const merged = this._mergeRecordArraysById(loc, data);
+            const merged = this._mergeRecordArraysById(loc, data, key);
             if (merged.length !== data.length || merged.length !== loc.length) {
                 console.debug(
                     `[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
-                    '(Union by id; fewer rows usually means duplicate ids or cloud rows without `id` — not a login error.)'
+                    '(Union by id; vouchers also use bookkeeperId when present — not a login error.)'
                 );
             }
             data = merged;

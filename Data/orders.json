@@ -3637,7 +3637,7 @@
     "id": "GTES/26-27/QU02",
     "bookkeeperId": "BK-ORD-267",
     "type": "purchase_order",
-    "date": "2025-09-12",
+    "date": "2026-04-06",
     "items": [
       {
         "name": "NEW EMPTY CYLINDER",
@@ -3646,7 +3646,7 @@
         "amount": 0
       }
     ],
-    "total": 616550,
+    "total": 495600,
     "status": "open",
     "source": "bookkeeper"
   }

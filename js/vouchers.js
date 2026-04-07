@@ -216,7 +216,11 @@ const VoucherManager = {
      */
     getVoucher(id) {
         const vouchers = DataManager.getData('vouchers') || [];
-        let v = vouchers.find(v => v.id === id);
+        const sid = (id == null ? '' : String(id)).trim();
+        if (!sid) return null;
+        let v = vouchers.find(x => x.id === sid);
+        if (v) return v;
+        v = vouchers.find(x => x.bookkeeperId === sid);
         if (v) return v;
 
         // Fallback: Check Expenses (for Purchase Vouchers)
@@ -692,6 +696,227 @@ const VoucherManager = {
     },
 
     /**
+     * BookKeeper often puts the original invoice number only in narration (e.g. "Invoice No: 0373").
+     */
+    parseSalesInvoiceRefFromNarration(text) {
+        const s = String(text || '').trim();
+        if (!s) return '';
+        const clean = (raw) => String(raw || '').replace(/[,;.]+$/g, '').trim();
+        const patterns = [
+            /invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /original\s+invoice\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /against\s+invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /sales\s+invoice\s*(?:no\.?|number)?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /bill\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i
+        ];
+        for (const re of patterns) {
+            const m = s.match(re);
+            if (m && m[1]) {
+                const v = clean(m[1]);
+                if (v && v.length <= 48) return v;
+            }
+        }
+        return '';
+    },
+
+    parsePurchaseInvoiceRefFromNarration(text) {
+        const s = String(text || '').trim();
+        if (!s) return '';
+        const clean = (raw) => String(raw || '').replace(/[,;.]+$/g, '').trim();
+        const patterns = [
+            /purchase\s*invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /supplier\s*invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /against\s+(?:bill|invoice)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i
+        ];
+        for (const re of patterns) {
+            const m = s.match(re);
+            if (m && m[1]) {
+                const v = clean(m[1]);
+                if (v && v.length <= 48) return v;
+            }
+        }
+        return '';
+    },
+
+    resolveCreditNoteSalesRef(inv) {
+        if (!inv) return '';
+        const tryStr = (v) => {
+            const t = String(v ?? '').trim();
+            return t && t !== '-' ? t : '';
+        };
+        const fromFields = [
+            inv.referenceNo, inv.refNo, inv.refInvoiceNo, inv.baseInvoiceNo,
+            inv.originalInvoiceNo, inv.salesInvoiceRef, inv.linkedInvoiceId,
+            inv.againstInvoice, inv.ref_no, inv.vch_ref
+        ];
+        for (const c of fromFields) {
+            const t = tryStr(c);
+            if (t) return t;
+        }
+        return this.parseSalesInvoiceRefFromNarration(inv.narration || inv.remarks || inv.description || '');
+    },
+
+    resolveDebitNotePurchaseRef(exp) {
+        if (!exp) return '';
+        const tryStr = (v) => {
+            const t = String(v ?? '').trim();
+            return t && t !== '-' ? t : '';
+        };
+        const fromFields = [
+            exp.referenceNo, exp.refNo, exp.purchaseInvoiceRef, exp.purchaseInvoiceNo,
+            exp.refInvoiceNo, exp.baseInvoiceNo, exp.originalInvoiceNo,
+            exp.supplierInvoiceNo, exp.supplierBillNo, exp.ref_no, exp.vch_ref
+        ];
+        for (const c of fromFields) {
+            const t = tryStr(c);
+            if (t) return t;
+        }
+        return this.parsePurchaseInvoiceRefFromNarration(exp.narration || exp.description || exp.remarks || '');
+    },
+
+    /**
+     * Credit / debit notes that reference a specific sales or purchase bill reduce that bill's
+     * outstanding (same keys as voucher allocations) so balances, paid/partial, and voucher
+     * pending picklists stay aligned. Notes without a resolvable reference bill are skipped.
+     */
+    _applyReferencedReturnNoteOffsets(map, filterType) {
+        if (filterType && filterType !== 'payment' && filterType !== 'receipt') return;
+
+        const normName = (s) => (s || '').toString().toLowerCase().replace(/[,\s]+/g, ' ').trim();
+
+        const billRefVariants = (raw) => {
+            const t = String(raw ?? '').trim();
+            if (!t || t === '-') return [];
+            const out = new Set([t]);
+            const stripped = t.replace(/^0+/, '') || t;
+            if (stripped !== t) out.add(stripped);
+            const n = parseInt(t, 10);
+            if (!isNaN(n)) out.add(String(n));
+            return [...out];
+        };
+
+        const refVariantSet = (refStr) => new Set(billRefVariants(refStr));
+
+        const isCreditNoteInv = (inv) => {
+            if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager._isCreditNoteDoc === 'function') {
+                return InvoiceManager._isCreditNoteDoc(inv);
+            }
+            if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics._isCreditNoteInvoice === 'function') {
+                return BusinessAnalytics._isCreditNoteInvoice(inv);
+            }
+            return false;
+        };
+
+        const isDebitNoteExp = (exp) => {
+            if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics._isDebitNotePurchase === 'function') {
+                return BusinessAnalytics._isDebitNotePurchase(exp);
+            }
+            const t = String(exp?.type || exp?.v_type || exp?.billType || '').toLowerCase();
+            return (t.includes('debit') && t.includes('note')) || exp?.isDebitNote === true;
+        };
+
+        const addToKeys = (doc, amount, keysPick) => {
+            if (!doc || amount <= 0.005) return;
+            const keys = keysPick(doc);
+            keys.forEach(k => {
+                const ck = (k || '').toString().trim();
+                if (!ck) return;
+                map.set(ck, (map.get(ck) || 0) + amount);
+            });
+        };
+
+        if (!filterType || filterType === 'receipt') {
+            const invoices = DataManager.getData('invoices') || [];
+            for (const cn of invoices) {
+                if (!isCreditNoteInv(cn)) continue;
+                const ref = String(this.resolveCreditNoteSalesRef(cn) || '').trim();
+                if (!ref || ref === '-') continue;
+                const want = refVariantSet(ref);
+                if (want.size === 0) continue;
+                const partyId = cn.partyId || '';
+                const partyName = normName(cn.customerName || '');
+                let base = null;
+                for (const inv of invoices) {
+                    if (isCreditNoteInv(inv)) continue;
+                    const fields = [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo];
+                    let hit = false;
+                    for (const k of fields) {
+                        if (k == null || k === '') continue;
+                        for (const v of billRefVariants(k)) {
+                            if (want.has(v)) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                        if (hit) break;
+                    }
+                    if (!hit) continue;
+                    if (!base) base = inv;
+                    const sameParty = (partyId && inv.partyId === partyId)
+                        || (partyName && normName(inv.customerName || '') === partyName);
+                    if (sameParty) {
+                        base = inv;
+                        break;
+                    }
+                }
+                if (!base) continue;
+                const amt = Math.abs(parseFloat(cn.total ?? cn.amount ?? 0) || 0);
+                addToKeys(base, amt, (d) => [d.id, d.invoiceNo, d.billNo, d.bookkeeperVchNo]);
+            }
+        }
+
+        if (!filterType || filterType === 'payment') {
+            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+            const purchases = DataManager.getData('purchases') || [];
+            const cols = purchases === expenses ? [expenses] : [expenses, purchases];
+            const seenDn = new Set();
+            for (const col of cols) {
+                for (const dn of col || []) {
+                    if (!isDebitNoteExp(dn)) continue;
+                    const dnKey = (dn.id || dn.billNo || '').toString().trim();
+                    if (dnKey && seenDn.has(dnKey)) continue;
+                    if (dnKey) seenDn.add(dnKey);
+                    const ref = String(this.resolveDebitNotePurchaseRef(dn) || '').trim();
+                    if (!ref || ref === '-') continue;
+                    const want = refVariantSet(ref);
+                    if (want.size === 0) continue;
+                    const partyId = dn.partyId || '';
+                    const partyName = normName(dn.vendor || dn.vendorName || '');
+                    let base = null;
+                    for (const e2 of expenses) {
+                        if (isDebitNoteExp(e2)) continue;
+                        if (!String(e2.category || '').toLowerCase().includes('purchase')) continue;
+                        const fields = [e2.id, e2.billNo, e2.vch_no, e2.invoiceNo, e2.bookkeeperVchNo];
+                        let hit = false;
+                        for (const k of fields) {
+                            if (k == null || k === '') continue;
+                            for (const v of billRefVariants(k)) {
+                                if (want.has(v)) {
+                                    hit = true;
+                                    break;
+                                }
+                            }
+                            if (hit) break;
+                        }
+                        if (!hit) continue;
+                        if (!base) base = e2;
+                        const sameParty = (partyId && e2.partyId === partyId)
+                            || (partyName && normName(e2.vendor || e2.vendorName || '') === partyName);
+                        if (sameParty) {
+                            base = e2;
+                            break;
+                        }
+                    }
+                    if (!base) continue;
+                    const amt = Math.abs(parseFloat(dn.total ?? dn.amount ?? dn.vch_amt ?? 0) || 0);
+                    addToKeys(base, amt, (d) => [d.id, d.billNo, d.vch_no, d.invoiceNo, d.bookkeeperVchNo]);
+                }
+            }
+        }
+    },
+
+    /**
      * NEW: Get a map of all document allocations for fast lookup
      * @param {Array} extraTransactions - Optional list of pending bank transactions to include.
      */
@@ -700,7 +925,9 @@ const VoucherManager = {
         
         // Use a more dynamic key for caching (including filterType to prevent cross-contamination)
         const readyCount = (extraTransactions || []).filter(tx => tx.isReady || tx.converted).length;
-        const cacheKey = `${filterType || 'all'}_v${vouchers.length}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}`;
+        const invCount = (DataManager.getData('invoices') || []).length;
+        const expCount = (DataManager.getData(DataManager.KEYS.EXPENSES) || []).length;
+        const cacheKey = `${filterType || 'all'}_v${vouchers.length}_i${invCount}_x${expCount}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}`;
 
         if (this._allocationsCache && this._lastVoucherCount === cacheKey) {
             return this._allocationsCache;
@@ -884,6 +1111,7 @@ const VoucherManager = {
         }
 
         this._applyBookkeeperVchAliasMirrors(map, filterType);
+        this._applyReferencedReturnNoteOffsets(map, filterType);
 
         this._allocationsCache = map;
         this._lastVoucherCount = cacheKey;
