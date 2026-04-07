@@ -4,11 +4,176 @@
  * Integrated with Synced Data
  */
 const VouchersUI = {
-    currentMode: 'gst', // 'gst', 'non-gst', or 'purchase'
+    currentMode: 'gst', // 'gst', 'non-gst', 'purchase', 'credit-note', or 'debit-note'
     _voucherFilterDebounceTimer: null,
     
     async init() {
         console.log('Vouchers UI Initialized');
+    },
+
+    /** Receipt/payment voucher has explicit link to a sales/purchase document. */
+    _voucherHasLinkedDocs(v) {
+        if (!v || typeof v !== 'object') return false;
+        if (v.linkedInvoiceId && String(v.linkedInvoiceId).trim()) return true;
+        const li = v.linkedInvoices;
+        if (Array.isArray(li) && li.length > 0) {
+            for (const x of li) {
+                if (x == null) continue;
+                if (typeof x === 'string' && String(x).trim()) return true;
+                if (typeof x === 'object') {
+                    if (x.id || x.invoiceNo || x.billNo) return true;
+                }
+            }
+        }
+        const allocs = v.allocations;
+        if (Array.isArray(allocs) && allocs.length > 0) {
+            for (const a of allocs) {
+                if (!a || typeof a !== 'object') continue;
+                const refs = [a.id, a.no, a.invoiceNo, a.billNo];
+                if (refs.some(x => x != null && String(x).trim() !== '')) return true;
+            }
+        }
+        return false;
+    },
+
+    _normPartyName(s) {
+        return String(s || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
+    },
+
+    _billRefVariants(raw) {
+        const t = String(raw ?? '').trim();
+        if (!t || t === '-') return [];
+        const out = new Set([t]);
+        const stripped = t.replace(/^0+/, '') || t;
+        if (stripped !== t) out.add(stripped);
+        const n = parseInt(t, 10);
+        if (!isNaN(n)) out.add(String(n));
+        return [...out];
+    },
+
+    _refVariantSet(refStr) {
+        return new Set(this._billRefVariants(refStr));
+    },
+
+    _invoiceRefMatches(inv, wantSet) {
+        if (!wantSet || wantSet.size === 0) return false;
+        const keys = [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo];
+        for (const k of keys) {
+            if (k == null || k === '') continue;
+            for (const v of this._billRefVariants(k)) {
+                if (wantSet.has(v)) return true;
+            }
+        }
+        return false;
+    },
+
+    _purchaseRefMatches(exp, wantSet) {
+        if (!wantSet || wantSet.size === 0) return false;
+        const keys = [exp.id, exp.billNo, exp.supplierBillNo, exp.vch_no, exp.invoiceNo, exp.bookkeeperVchNo];
+        for (const k of keys) {
+            if (k == null || k === '') continue;
+            for (const v of this._billRefVariants(k)) {
+                if (wantSet.has(v)) return true;
+            }
+        }
+        return false;
+    },
+
+    _findReferencedSalesInvoice(refStr, cnInv) {
+        const want = this._refVariantSet(refStr);
+        if (want.size === 0) return null;
+        const invoices = DataManager.getData('invoices') || [];
+        const partyId = cnInv.partyId || '';
+        const partyName = this._normPartyName(cnInv.customerName || '');
+        let anyHit = null;
+        let partyHit = null;
+        for (const inv of invoices) {
+            if (this._isCreditNoteInvoice(inv)) continue;
+            if (!this._invoiceRefMatches(inv, want)) continue;
+            if (!anyHit) anyHit = inv;
+            const sameParty = (partyId && inv.partyId === partyId)
+                || (partyName && this._normPartyName(inv.customerName) === partyName);
+            if (sameParty) {
+                partyHit = inv;
+                break;
+            }
+        }
+        return partyHit || anyHit;
+    },
+
+    _findReferencedPurchaseBill(refStr, dnExp) {
+        const want = this._refVariantSet(refStr);
+        if (want.size === 0) return null;
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const partyId = dnExp.partyId || '';
+        const partyName = this._normPartyName(dnExp.vendor || dnExp.vendorName || '');
+        let anyHit = null;
+        let partyHit = null;
+        for (const exp of expenses) {
+            if (this._isDebitNotePurchase(exp)) continue;
+            if (!(String(exp.category || '').toLowerCase().includes('purchase'))) continue;
+            if (!this._purchaseRefMatches(exp, want)) continue;
+            if (!anyHit) anyHit = exp;
+            const sameParty = (partyId && exp.partyId === partyId)
+                || (partyName && this._normPartyName(exp.vendor || exp.vendorName) === partyName);
+            if (sameParty) {
+                partyHit = exp;
+                break;
+            }
+        }
+        return partyHit || anyHit;
+    },
+
+    /**
+     * Credit note "linked": referenced sales invoice exists, is paid/partial, and settlements
+     * (receipt allocations to that bill + other credit notes against same ref) cover this note amount.
+     */
+    _creditNoteSettlementLinked(inv) {
+        const ref = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef)
+            ? String(VoucherManager.resolveCreditNoteSalesRef(inv) || '').trim()
+            : String(inv.referenceNo || inv.refNo || inv.refInvoiceNo || inv.baseInvoiceNo || inv.originalInvoiceNo || inv.salesInvoiceRef || '').trim();
+        if (!ref || ref === '-') return false;
+        const base = this._findReferencedSalesInvoice(ref, inv);
+        if (!base) return false;
+        const st = String(base.status || '').toLowerCase();
+        if (st === 'cancelled' || st === 'void' || st === 'canceled') return false;
+        if (typeof VoucherManager === 'undefined') return false;
+        const docTotal = Math.abs(parseFloat(base.total ?? base.amount ?? 0) || 0);
+        const map = VoucherManager.getVoucherAllocationsMap(null, 'receipt');
+        const bal = VoucherManager.getDocumentBalance(base.id, docTotal, map, base.invoiceNo, base, { allowLooseFallback: false });
+        const applied = docTotal - bal;
+        const noteAmt = Math.abs(parseFloat(inv.total ?? inv.amount ?? 0) || 0);
+        return applied + 0.05 >= noteAmt;
+    },
+
+    /**
+     * Debit note "linked": referenced purchase exists, is paid/partial, and settlements
+     * (payment allocations + other debit notes for same ref) cover this note amount.
+     */
+    _debitNoteSettlementLinked(exp) {
+        const ref = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveDebitNotePurchaseRef)
+            ? String(VoucherManager.resolveDebitNotePurchaseRef(exp) || '').trim()
+            : String(exp.referenceNo || exp.refNo || exp.purchaseInvoiceRef || exp.purchaseInvoiceNo || exp.refInvoiceNo || exp.baseInvoiceNo || exp.originalInvoiceNo || exp.supplierInvoiceNo || exp.supplierBillNo || '').trim();
+        if (!ref || ref === '-') return false;
+        const base = this._findReferencedPurchaseBill(ref, exp);
+        if (!base) return false;
+        const st = String(base.status || '').toLowerCase();
+        if (st === 'cancelled' || st === 'void' || st === 'canceled') return false;
+        if (typeof VoucherManager === 'undefined') return false;
+        const docTotal = Math.abs(parseFloat(base.total ?? base.amount ?? base.vch_amt ?? 0) || 0);
+        const map = VoucherManager.getVoucherAllocationsMap(null, 'payment');
+        const bal = VoucherManager.getDocumentBalance(base.id, docTotal, map, base.billNo || base.vch_no || base.invoiceNo, base, { allowLooseFallback: false });
+        const applied = docTotal - bal;
+        const noteAmt = Math.abs(parseFloat(exp.total ?? exp.amount ?? exp.vch_amt ?? 0) || 0);
+        return applied + 0.05 >= noteAmt;
+    },
+
+    _creditNoteRowLinkStatus(inv) {
+        return this._creditNoteSettlementLinked(inv) ? 'linked' : 'unlinked';
+    },
+
+    _debitNoteRowLinkStatus(exp) {
+        return this._debitNoteSettlementLinked(exp) ? 'linked' : 'unlinked';
     },
 
     load(params = {}) {
@@ -56,6 +221,20 @@ const VouchersUI = {
                             <p class="text-muted">Expense Tracking</p>
                         </div>
                     </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary hover-lift h-100 text-center p-5" onclick="VouchersUI.load({mode: 'credit-note'})" style="cursor:pointer">
+                            <i class="bi bi-arrow-counterclockwise text-secondary display-1 mb-4"></i>
+                            <h3 class="card-title text-white">Credit Note / Sales Return</h3>
+                            <p class="text-muted">Customer Return Notes</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark border-secondary hover-lift h-100 text-center p-5" onclick="VouchersUI.load({mode: 'debit-note'})" style="cursor:pointer">
+                            <i class="bi bi-arrow-clockwise text-secondary display-1 mb-4"></i>
+                            <h3 class="card-title text-white">Debit Note / Purchase Return</h3>
+                            <p class="text-muted">Vendor Return Notes</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -69,11 +248,15 @@ const VouchersUI = {
         const vouchers = DataManager.getData('vouchers') || [];
         const fYears = [...new Set(vouchers.map(v => DataManager.getFinancialYear(v.date)))].filter(Boolean).sort().reverse();
         const yearOptions = fYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        const isNoteMode = this.currentMode === 'credit-note' || this.currentMode === 'debit-note';
+        const fyColClass = isNoteMode ? 'col-md-6' : 'col-md-4';
+        const typeColClass = isNoteMode ? 'col-md-6 d-none' : 'col-md-4';
+        const linkColClass = isNoteMode ? 'col-md-6' : 'col-md-4';
 
         view.innerHTML = `
             <div class="container-fluid">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi bi-cash-stack text-info me-2"></i> ${this.currentMode === 'gst' ? 'GST Vouchers' : (this.currentMode === 'purchase' ? 'Purchase Vouchers' : 'Plain Vouchers')}</h2>
+                    <h2><i class="bi bi-cash-stack text-info me-2"></i> ${this.currentMode === 'gst' ? 'GST Vouchers' : (this.currentMode === 'purchase' ? 'Purchase Vouchers' : (this.currentMode === 'credit-note' ? 'Credit Note / Sales Return' : (this.currentMode === 'debit-note' ? 'Debit Note / Purchase Return' : 'Plain Vouchers')))}</h2>
                     <div>
                         <button class="btn btn-secondary btn-sm me-2" onclick="VouchersUI.importBankStatement()">
                             <i class="bi bi-bank"></i> Import Bank Statement
@@ -81,7 +264,7 @@ const VouchersUI = {
                         <button class="btn btn-outline-info btn-sm me-2" onclick="ExportImportHelper.openImportExport('vouchers')">
                             <i class="bi bi-arrow-left-right me-1"></i> Export/Import
                         </button>
-                        <button class="btn btn-primary btn-sm me-2" onclick="VouchersUI.showCreateModal('${this.currentMode === 'purchase' ? 'payment' : 'receipt'}')">
+                        <button class="btn btn-primary btn-sm me-2 ${this.currentMode === 'credit-note' || this.currentMode === 'debit-note' ? 'd-none' : ''}" onclick="VouchersUI.showCreateModal('${this.currentMode === 'purchase' ? 'payment' : 'receipt'}')">
                             <i class="bi bi-plus-lg"></i> New ${this.currentMode === 'purchase' ? 'Purchase' : 'Voucher'}
                         </button>
                         <button class="btn btn-outline-light btn-sm" onclick="VouchersUI.load()">
@@ -93,14 +276,14 @@ const VouchersUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                          <div class="row g-2 mb-3">
-                            <div class="col-md-6">
+                            <div class="${fyColClass}">
                                 <label class="form-label small text-muted">Financial Year</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterVoucherYear" onchange="VouchersUI.filterVouchers()">
                                     <option value="">All Year</option>
                                     ${yearOptions}
                                 </select>
                             </div>
-                            <div class="col-md-6">
+                            <div class="${typeColClass}">
                                 <label class="form-label small text-muted">Voucher Type</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterVoucherType" onchange="VouchersUI.filterVouchers()">
                                     <option value="">All Types</option>
@@ -109,7 +292,16 @@ const VouchersUI = {
                                     <option value="contra">Contra</option>
                                 </select>
                             </div>
+                            <div class="${linkColClass}">
+                                <label class="form-label small text-muted">Link to bill / invoice</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterVoucherLink" onchange="VouchersUI.filterVouchers()" title="Receipts/payments: allocation lines. Credit/debit notes: referenced bill exists and receipts/payments plus return notes against that ref cover this note (ref may be taken from narration).">
+                                    <option value="">All</option>
+                                    <option value="linked">Linked</option>
+                                    <option value="unlinked">Not linked</option>
+                                </select>
+                            </div>
                         </div>
+                        <p class="small text-muted mb-0">${this.currentMode === 'credit-note' || this.currentMode === 'debit-note' ? 'Linked = sales/purchase invoice ref is resolved (including from narration) and receipts/payments + return notes against that bill cover this note. Not linked = missing ref, cancelled base, or not enough settlement.' : 'Shows vouchers with or without linked invoice/bill lines.'}</p>
                          <div class="input-group">
                             <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
                              <input type="text" class="form-control bg-dark text-light border-secondary" id="voucherSearch" placeholder="Search vouchers by number, party, or remarks..." oninput="VouchersUI.filterVouchersDebounced()">
@@ -129,6 +321,15 @@ const VouchersUI = {
     },
 
     updateTable() {
+        if (this.currentMode === 'credit-note') {
+            this.updateCreditNotesTable();
+            return;
+        }
+        if (this.currentMode === 'debit-note') {
+            this.updateDebitNotesTable();
+            return;
+        }
+
         // Fetch vouchers
         let vouchers = DataManager.getData('vouchers') || [];
         
@@ -199,9 +400,10 @@ const VouchersUI = {
             const searchStr = `${v.id} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
             const typeStr = (v.type || 'general').toLowerCase();
+            const linkStr = this._voucherHasLinkedDocs(v) ? 'linked' : 'unlinked';
 
             return `
-                        <tr data-search="${searchStr}" data-year="${yearStr}" data-type="${typeStr}">
+                        <tr data-search="${searchStr}" data-year="${yearStr}" data-type="${typeStr}" data-link="${linkStr}">
                             <td>${v.date}</td>
                             <td class="fw-bold text-info">${v.id}</td>
                             <td><span class="badge bg-${v.type === 'receipt' ? 'success' : (v.type === 'payment' ? 'danger' : 'warning')} text-capitalize">${v.type || 'General'}</span></td>
@@ -237,10 +439,138 @@ const VouchersUI = {
         this.filterVouchers();
     },
 
+    _isCreditNoteInvoice(inv) {
+        if (!inv) return false;
+        if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics._isCreditNoteInvoice === 'function') {
+            return BusinessAnalytics._isCreditNoteInvoice(inv);
+        }
+        const t = String(inv.type || '').toLowerCase();
+        if (t.includes('credit') && t.includes('note')) return true;
+        if (t.includes('sales') && t.includes('return')) return true;
+        if (inv.isCreditNote === true) return true;
+        const bk = String(inv.bookkeeperVchType || inv.v_type || '').toLowerCase();
+        return bk.includes('credit note') || bk.includes('sales return');
+    },
+
+    _isDebitNotePurchase(exp) {
+        if (!exp) return false;
+        if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics._isDebitNotePurchase === 'function') {
+            return BusinessAnalytics._isDebitNotePurchase(exp);
+        }
+        const t = String(exp.type || exp.v_type || exp.billType || '').toLowerCase();
+        if (t.includes('debit') && t.includes('note')) return true;
+        if (t.includes('purchase') && t.includes('return')) return true;
+        return exp.isDebitNote === true;
+    },
+
+    updateCreditNotesTable() {
+        const container = document.getElementById('vouchersTableContainer');
+        if (!container) return;
+        const invoices = (DataManager.getData('invoices') || [])
+            .filter(inv => this._isCreditNoteInvoice(inv))
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+        if (invoices.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-receipt-cutoff fs-1 d-block mb-3"></i>No credit notes found.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="table table-dark table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Credit Note #</th>
+                        <th>Customer</th>
+                        <th>Sales Invoice Ref</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${invoices.map(inv => {
+            const amount = Math.abs(parseFloat(inv.total ?? inv.amount ?? 0) || 0);
+            const refNo = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef)
+                ? (VoucherManager.resolveCreditNoteSalesRef(inv) || '-')
+                : (inv.referenceNo || inv.refNo || inv.refInvoiceNo || inv.baseInvoiceNo || inv.originalInvoiceNo || '-');
+            const search = `${inv.invoiceNo || inv.id} ${inv.customerName || ''} ${refNo}`.toLowerCase();
+            const linkStr = this._creditNoteRowLinkStatus(inv);
+            return `
+                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(inv.date)}" data-type="credit-note" data-link="${linkStr}">
+                            <td>${inv.date || ''}</td>
+                            <td class="fw-bold text-info">${inv.invoiceNo || inv.id}</td>
+                            <td>${inv.customerName || inv.customerId || 'N/A'}</td>
+                            <td>${refNo}</td>
+                            <td class="text-end">₹${amount.toFixed(2)}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewInvoice('${inv.id}')" title="View"><i class="bi bi-eye"></i></button>
+                                <button class="btn btn-sm btn-outline-light ms-1" onclick="InvoicesUI.generatePDF('${inv.id}')" title="Print/PDF"><i class="bi bi-printer"></i></button>
+                            </td>
+                        </tr>`;
+        }).join('')}
+                </tbody>
+            </table>
+        `;
+        this.filterVouchers();
+    },
+
+    updateDebitNotesTable() {
+        const container = document.getElementById('vouchersTableContainer');
+        if (!container) return;
+        const purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            .filter(exp => this._isDebitNotePurchase(exp))
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+        if (purchases.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-receipt-cutoff fs-1 d-block mb-3"></i>No debit notes found.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="table table-dark table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Debit Note #</th>
+                        <th>Vendor</th>
+                        <th>Purchase Invoice Ref</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${purchases.map(p => {
+            const amount = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
+            const docNo = p.billNo || p.vch_no || p.id || '';
+            const refNo = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveDebitNotePurchaseRef)
+                ? (VoucherManager.resolveDebitNotePurchaseRef(p) || '-')
+                : (p.referenceNo || p.refNo || p.purchaseInvoiceRef || p.purchaseInvoiceNo || p.refInvoiceNo || p.baseInvoiceNo || p.originalInvoiceNo || p.supplierInvoiceNo || p.supplierBillNo || '-');
+            const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
+            const linkStr = this._debitNoteRowLinkStatus(p);
+            return `
+                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(p.date)}" data-type="debit-note" data-link="${linkStr}">
+                            <td>${p.date || ''}</td>
+                            <td class="fw-bold text-info">${docNo}</td>
+                            <td>${p.vendor || p.vendorName || 'N/A'}</td>
+                            <td>${refNo}</td>
+                            <td class="text-end">₹${amount.toFixed(2)}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${p.id}')" title="View"><i class="bi bi-eye"></i></button>
+                                <button class="btn btn-sm btn-outline-light ms-1" onclick="DeliveryUI.downloadPurchasePdf('${p.id}')" title="Print/PDF"><i class="bi bi-printer"></i></button>
+                            </td>
+                        </tr>`;
+        }).join('')}
+                </tbody>
+            </table>
+        `;
+        this.filterVouchers();
+    },
+
     filterVouchers() {
         const query = document.getElementById('voucherSearch') ? document.getElementById('voucherSearch').value.toLowerCase() : '';
         const yearFilter = document.getElementById('filterVoucherYear') ? document.getElementById('filterVoucherYear').value : '';
         const typeFilter = document.getElementById('filterVoucherType') ? document.getElementById('filterVoucherType').value : '';
+        const linkFilter = document.getElementById('filterVoucherLink') ? document.getElementById('filterVoucherLink').value : '';
 
         const rows = document.querySelectorAll('#vouchersTableContainer tbody tr');
 
@@ -249,8 +579,9 @@ const VouchersUI = {
                 const searchMatch = !query || (row.dataset.search || '').includes(query);
                 const yearMatch = !yearFilter || (row.dataset.year === yearFilter);
                 const typeMatch = !typeFilter || (row.dataset.type === typeFilter);
+                const linkMatch = !linkFilter || (row.dataset.link === linkFilter);
 
-                if (searchMatch && yearMatch && typeMatch) {
+                if (searchMatch && yearMatch && typeMatch && linkMatch) {
                     row.style.display = '';
                 } else {
                     row.style.display = 'none';
@@ -1696,6 +2027,7 @@ const VouchersUI = {
             
             const nameLc = name.toLowerCase();
             pendingDocs = Array.from(uniqueDocsMap.values()).filter(doc => {
+                if (this._isDebitNotePurchase(doc)) return false;
                 const party = (doc.vendor || doc.customerName || doc.partyName || doc.supplier || '').toString().trim().toLowerCase();
                 const partyMatch = party === nameLc;
                 const st = (doc.status || '').toLowerCase();
@@ -1707,6 +2039,7 @@ const VouchersUI = {
             const allInvoices = DataManager.getData('invoices') || [];
             const nameLc = name.toLowerCase();
             pendingDocs = allInvoices.filter(inv => {
+                if (this._isCreditNoteInvoice(inv)) return false;
                 const invName = (inv.customerName || '').toString().trim().toLowerCase();
                 const nameMatch = (customer && inv.customerId && inv.customerId === customer.id) ||
                     (invName && invName === nameLc);

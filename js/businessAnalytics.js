@@ -767,13 +767,12 @@ const BusinessAnalytics = {
                 });
             });
 
-        // Customer ledger: sales invoices + GST receipt vouchers only (no vendor/purchase payments or plain receipts)
+        // Customer ledger: sales invoices + all customer receipts (GST and non-GST); exclude vendor/purchase receipts
         vouchers.forEach(v => {
                 const vType = String(v.type || '').toLowerCase();
                 if (vType === 'contra') return;
                 if (vType !== 'receipt') return;
                 if (v.isPurchase) return;
-                if (v.hasGst === false) return;
                 // Strict party gate: do not let cross-linked invoice refs pull other-customer vouchers.
                 if (!this._partyMatches(account, v.customerId, v.customerName, v.partyId)) return;
                 const amt = this._resolveVoucherAmountForAccount(v, account, customerInvoiceKeys);
@@ -990,7 +989,6 @@ const BusinessAnalytics = {
         for (const v of vouchers) {
             if (String(v.type || '').toLowerCase() !== 'receipt') continue;
             if (v.isPurchase) continue;
-            if (v.hasGst === false) continue;
             if (!this._partyMatches(account, v.customerId, v.customerName, v.partyId)) continue;
             for (const a of (v.allocations || [])) {
                 for (const raw of [a.id, a.no, a.invoiceNo, a.billNo]) {

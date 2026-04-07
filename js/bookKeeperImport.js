@@ -1327,7 +1327,8 @@ const BookKeeperImport = {
                 continue;
             }
 
-            const isReceipt = v.v_type?.includes('Receipt');
+            const vt = String(v.v_type || '').toLowerCase();
+            const isReceipt = vt.includes('receipt');
 
             // Smart Account Selection: Ignore common Bank/Cash accounts
             const isBankOrCash = (name) => {
@@ -1488,7 +1489,8 @@ const BookKeeperImport = {
             const discountImported = pickVoucherAmt(['discount', 'disc', 'disc_amt', 'less', 'discount_amount', 'cash_discount', 'bill_discount', 'v_discount', 'less_amount', 'disc_amount']);
 
             const voucher = {
-                id: v.vch_no || `VCH-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                // Never use vch_no as id — numbers repeat across years/series; sync merge dedupes by id and drops rows.
+                id: bkId,
                 bookkeeperId: bkId,
                 date: this.formatDate(v.date),
                 customerId: customerId,
@@ -2101,11 +2103,14 @@ const BookKeeperImport = {
 
             const saleVtLower = String(sale.v_type || '').toLowerCase();
             const isBkCreditNote = (saleVtLower.includes('credit') && saleVtLower.includes('note'))
-                || saleVtLower.includes('sales return') || saleVtLower.includes('sales-return');
+                || saleVtLower.includes('sales return') || saleVtLower.includes('sales-return')
+                || /^.*\/CR\d+$/i.test(String(invNo || '').trim())
+                || /^CR[-/]/i.test(String(invNo || '').trim());
             if (isBkCreditNote || totalAmt < 0) {
                 invoice.type = 'credit-note';
                 invoice.bookkeeperVchType = sale.v_type || '';
                 if (totalAmt < 0) invoice.total = Math.abs(totalAmt);
+                invoice.status = 'posted';
             }
             invoice.isCreditNote = Boolean(isBkCreditNote || totalAmt < 0);
 
@@ -2197,6 +2202,11 @@ const BookKeeperImport = {
             }
             invoice.billType = 'gst';
             invoice.hasGst = true;
+
+            if (invoice.isCreditNote && typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef) {
+                const rr = String(VoucherManager.resolveCreditNoteSalesRef(invoice) || '').trim();
+                if (rr && !String(invoice.referenceNo || '').trim()) invoice.referenceNo = rr;
+            }
 
             const partyKey = (n) => String(n || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
             const saleParty = partyKey(bkCustomerName);
@@ -2423,6 +2433,14 @@ const BookKeeperImport = {
 
             // Track found IDs to avoid duplicates if aggregating across tables
             const foundItemKeys = new Set();
+            const pushItemRow = (table, row, idxKey = '') => {
+                const itemName = (row.service || row.item || row.item_name || row.name || row.particulars || row.description || '').trim();
+                const key = `${table}_${row.id || purchase.v_id}_${idxKey}_${itemName}`;
+                if (!foundItemKeys.has(key)) {
+                    itemsRaw.push({ ...row, __srcTable: table });
+                    foundItemKeys.add(key);
+                }
+            };
 
             for (const table of possiblePurchaseTables) {
                 if (!this.getTables().includes(table)) continue;
@@ -2434,14 +2452,7 @@ const BookKeeperImport = {
                             const orderClause = sortCol ? ` ORDER BY ${sortCol}` : '';
                             const results = this.query(`SELECT * FROM ${table} WHERE ${idCol} = '${purchase.v_id}' OR ${idCol} = ${purchase.v_id}${orderClause}`);
                             if (results.length > 0) {
-                                results.forEach((res, idx) => {
-                                    const itemName = (res.service || res.item || res.item_name || res.name || res.particulars || '').trim();
-                                    const key = `${table}_${res.id || purchase.v_id}_${idx}_${itemName}`;
-                                    if (!foundItemKeys.has(key)) {
-                                        itemsRaw.push(res);
-                                        foundItemKeys.add(key);
-                                    }
-                                });
+                                results.forEach((res, idx) => pushItemRow(table, res, idx));
                                 console.log(`[Import] Found ${results.length} purchase items in [${table}] via [${idCol}]`);
                             }
                         } catch (e) {
@@ -2462,31 +2473,59 @@ const BookKeeperImport = {
                                     const orderClause = sortCol ? ` ORDER BY ${sortCol}` : '';
                                     const numResults = this.query(`SELECT * FROM ${table} WHERE CAST(${vchCol} AS INTEGER) = ${numericBillNo}${orderClause}`);
                                     if (numResults.length > 0) {
-                                        numResults.forEach((res, idx) => {
-                                            const itemName = (res.service || res.item || res.item_name || res.name || res.particulars || '').trim();
-                                            const key = `${table}_${res.id || purchase.v_id}_${idx}_${itemName}`;
-                                            if (!foundItemKeys.has(key)) {
-                                                itemsRaw.push(res);
-                                                foundItemKeys.add(key);
-                                            }
-                                        });
+                                        numResults.forEach((res, idx) => pushItemRow(table, res, idx));
                                         console.log(`[Import] Found ${numResults.length} purchase items in [${table}] via numeric [${vchCol}]`);
                                     }
                                 } catch (e) { }
                             } else if (results.length > 0) {
-                                results.forEach((res, idx) => {
-                                    const itemName = (res.service || res.item || res.item_name || res.name || res.particulars || '').trim();
-                                    const key = `${table}_${res.id || purchase.v_id}_${idx}_${itemName}`;
-                                    if (!foundItemKeys.has(key)) {
-                                        itemsRaw.push(res);
-                                        foundItemKeys.add(key);
-                                    }
-                                });
+                                results.forEach((res, idx) => pushItemRow(table, res, idx));
                                 console.log(`[Import] Found ${results.length} purchase items in [${table}] via [${vchCol}]`);
                             }
                         }
                     }
                 }
+            }
+
+            const looksLikeLineItem = (row) => {
+                if (!row || typeof row !== 'object') return false;
+                const nm = String(row.service || row.item || row.item_name || row.name || row.particulars || row.description || '').trim();
+                const qty = parseFloat(row.units || row.quantity || row.qty || row.qty_in || row.quantity_in || row.u_in || row.Qty || 0) || 0;
+                const rate = parseFloat(row.rate || row.Rate || row.item_rate || row.unit_rate || 0) || 0;
+                const amt = parseFloat(row.amount || row.total || row.total_amount || row.Subtotal || row.taxable_value || 0) || 0;
+                // Exclude voucher/purchase header rows that accidentally match by id but carry no line signals
+                if (!nm && qty <= 0 && rate <= 0 && amt <= 0) return false;
+                return true;
+            };
+            const preferredRows = itemsRaw.filter(looksLikeLineItem);
+            if (preferredRows.length > 0) itemsRaw = preferredRows;
+
+            // Debit-note fallback: some schemas link item rows via reference invoice number.
+            // If no real line item found, try ref-based lookup across same candidate tables.
+            const purVtLowerProbe = String(purchase.v_type || '').toLowerCase();
+            const billNoUpperProbe = String(purchase.vch_no || '').toUpperCase();
+            const isDebitNoteProbe = (purVtLowerProbe.includes('debit') && purVtLowerProbe.includes('note'))
+                || purVtLowerProbe.includes('purchase return')
+                || purVtLowerProbe.includes('purchases return')
+                || /^PRR/.test(billNoUpperProbe)
+                || /^DN/.test(billNoUpperProbe)
+                || /^DRN/.test(billNoUpperProbe)
+                || /debit\s*note|purchase\s*return|purchases\s*return/i.test(String(purchase.narration || ''));
+            const refNo = String(purchase.ref_no || '').trim();
+            if (itemsRaw.length === 0 && isDebitNoteProbe && refNo) {
+                for (const table of possiblePurchaseTables) {
+                    if (!this.getTables().includes(table)) continue;
+                    for (const vchCol of vchCols) {
+                        if (!this.hasColumn(table, vchCol)) continue;
+                        try {
+                            const refResults = this.query(`SELECT * FROM ${table} WHERE ${vchCol} = '${refNo.replace(/'/g, "''")}'`);
+                            if (refResults.length > 0) {
+                                refResults.forEach((res, idx) => pushItemRow(table, res, `ref_${idx}`));
+                            }
+                        } catch (e) { }
+                    }
+                }
+                const refined = itemsRaw.filter(looksLikeLineItem);
+                if (refined.length > 0) itemsRaw = refined;
             }
 
             // Robust Status Determination for Purchase
@@ -2745,15 +2784,26 @@ const BookKeeperImport = {
                 cgst, sgst, igst,
                 billNo: purchase.vch_no || '',
                 supplierBillNo: purchase.ref_no || '',
+                referenceNo: purchase.ref_no || '',
+                purchaseInvoiceRef: purchase.ref_no || '',
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper'
             };
 
             const purVtLower = String(purchase.v_type || '').toLowerCase();
-            if ((purVtLower.includes('debit') && purVtLower.includes('note')) || pTotalAmt < 0) {
+            const billNoUpper = String(purchase.vch_no || '').toUpperCase();
+            const isBkDebitNote = (purVtLower.includes('debit') && purVtLower.includes('note'))
+                || purVtLower.includes('purchase return')
+                || purVtLower.includes('purchases return')
+                || /^PRR/.test(billNoUpper)
+                || /^DN/.test(billNoUpper)
+                || /^DRN/.test(billNoUpper)
+                || /debit\s*note|purchase\s*return|purchases\s*return/i.test(String(purchase.narration || ''));
+            if (isBkDebitNote || pTotalAmt < 0) {
                 expense.type = 'debit-note';
                 expense.isDebitNote = true;
                 expense.v_type = purchase.v_type || '';
+                expense.status = 'posted';
             }
             if (pTotalAmt < 0) expense.amount = Math.abs(pTotalAmt);
 
@@ -2825,10 +2875,127 @@ const BookKeeperImport = {
             });
         }
 
+        this._applyDebitNoteItemsFromReferencedPurchase(existingExpenses);
+
         await DataManager.saveData(DataManager.KEYS.EXPENSES, existingExpenses);
         await DataManager.saveData('inventoryTransactions', existingTxns || []);
 
         return { imported, updated, total: purchaseVouchers.length };
+    },
+
+    /**
+     * Debit notes imported with a single "General Purchase" line: copy real line items from the referenced purchase bill.
+     */
+    _billRefVariants(raw) {
+        const t = String(raw ?? '').trim();
+        if (!t || t === '-') return [];
+        const out = new Set([t]);
+        const stripped = t.replace(/^0+/, '') || t;
+        if (stripped !== t) out.add(stripped);
+        const n = parseInt(t, 10);
+        if (!isNaN(n)) out.add(String(n));
+        return [...out];
+    },
+
+    _isImportedDebitNoteExpense(e) {
+        if (!e) return false;
+        if (e.isDebitNote === true) return true;
+        const t = String(e.type || e.v_type || '').toLowerCase();
+        const billNo = String(e.billNo || e.bookkeeperVchNo || e.id || '').toUpperCase();
+        return t === 'debit-note' || (t.includes('debit') && t.includes('note')) || /^PRR/.test(billNo) || /^DN/.test(billNo) || /^DRN/.test(billNo);
+    },
+
+    _debitNoteHasSyntheticSingleLine(e) {
+        const items = e.items || [];
+        if (items.length === 0) return true;
+        if (items.length > 1) return false;
+        const it = items[0];
+        const n = String(it.name || '').toLowerCase();
+        const d = String(it.description || '').toLowerCase();
+        if (n.includes('general purchase') || d.includes('expense entry')) return true;
+        const hsn = String(it.hsn || it.hsn_code || '').trim();
+        const taxMicro =
+            (parseFloat(it.cgst) || 0) + (parseFloat(it.sgst) || 0) + (parseFloat(it.igst) || 0) +
+            (parseFloat(it.cgstAmount) || 0) + (parseFloat(it.sgstAmount) || 0) + (parseFloat(it.igstAmount) || 0);
+        const qty = parseFloat(it.quantity) || 0;
+        if (!hsn && taxMicro < 0.01 && qty <= 1.001) {
+            const lineAmt = parseFloat(it.amount) || parseFloat(it.rate) || 0;
+            const docAmt = Math.abs(parseFloat(e.amount) || 0);
+            if (docAmt > 0 && Math.abs(lineAmt - docAmt) < Math.max(1, docAmt * 0.02)) return true;
+        }
+        return false;
+    },
+
+    _findBasePurchaseForDebitNoteImport(dn, expenses) {
+        const refSet = new Set();
+        for (const r of [dn.purchaseInvoiceRef, dn.referenceNo, dn.refNo]) {
+            this._billRefVariants(r).forEach(x => refSet.add(x));
+        }
+        if (refSet.size === 0) return null;
+        const vendorWant = String(dn.vendor || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
+        const pool = expenses.filter(x =>
+            x &&
+            x !== dn &&
+            !this._isImportedDebitNoteExpense(x) &&
+            String(x.category || '').toLowerCase().includes('purchase')
+        );
+        const matches = (e) => {
+            const keys = [e.billNo, e.id, e.supplierBillNo, e.vch_no, e.invoiceNo, e.bookkeeperVchNo];
+            for (const k of keys) {
+                if (k == null || k === '') continue;
+                for (const v of this._billRefVariants(k)) {
+                    if (refSet.has(v)) return true;
+                }
+            }
+            return false;
+        };
+        let anyHit = null;
+        let vendorHit = null;
+        for (const e of pool) {
+            if (!matches(e)) continue;
+            if (!anyHit) anyHit = e;
+            const v = String(e.vendor || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
+            if (vendorWant && v === vendorWant) {
+                vendorHit = e;
+                break;
+            }
+        }
+        return vendorHit || anyHit;
+    },
+
+    _applyDebitNoteItemsFromReferencedPurchase(expenses) {
+        if (!Array.isArray(expenses)) return;
+        for (let i = 0; i < expenses.length; i++) {
+            const e = expenses[i];
+            if (!this._isImportedDebitNoteExpense(e)) continue;
+            if (!String(e.category || '').toLowerCase().includes('purchase')) continue;
+            if (!this._debitNoteHasSyntheticSingleLine(e)) continue;
+            const base = this._findBasePurchaseForDebitNoteImport(e, expenses);
+            if (!base || !base.items || base.items.length === 0) continue;
+            e.items = JSON.parse(JSON.stringify(base.items));
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI._pickDebitNoteLinesMatchingTotal) {
+                const dnAmt = Math.abs(parseFloat(e.total ?? e.amount ?? e.vch_amt ?? 0) || 0);
+                e.items = InvoicesUI._pickDebitNoteLinesMatchingTotal(e.items, dnAmt);
+            }
+            let taxable = 0;
+            let cgst = 0;
+            let sgst = 0;
+            let igst = 0;
+            for (const it of e.items) {
+                taxable += parseFloat(it.amount) || 0;
+                cgst += parseFloat(it.cgst) || parseFloat(it.cgstAmount) || 0;
+                sgst += parseFloat(it.sgst) || parseFloat(it.sgstAmount) || 0;
+                igst += parseFloat(it.igst) || parseFloat(it.igstAmount) || 0;
+            }
+            e.subtotal = Math.round(taxable * 100) / 100;
+            e.cgst = cgst;
+            e.sgst = sgst;
+            e.igst = igst;
+            if (!e.gst || typeof e.gst !== 'object') e.gst = { cgst: 0, sgst: 0, igst: 0 };
+            e.gst.cgst = cgst;
+            e.gst.sgst = sgst;
+            e.gst.igst = igst;
+        }
     },
 
     /**
@@ -3756,9 +3923,9 @@ const BookKeeperImport = {
                 }
             }
 
-            // 3. Fix random IDs if voucherNo available
-            if (v.id && v.id.toString().startsWith('VCH-17') && v.voucherNo) {
-                v.id = v.voucherNo;
+            // 3. Stable unique id for Book Keeper rows (vch_no repeats; must not be used as primary id)
+            if (v.bookkeeperId && String(v.bookkeeperId).startsWith('BK-') && v.id !== v.bookkeeperId) {
+                v.id = v.bookkeeperId;
                 changed = true;
             }
 

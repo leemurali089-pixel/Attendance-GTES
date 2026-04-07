@@ -4,6 +4,15 @@
  */
 
 const InvoiceManager = {
+    _isCreditNoteDoc(inv) {
+        if (!inv) return false;
+        const t = String(inv.type || '').toLowerCase();
+        if (t.includes('credit') && t.includes('note')) return true;
+        if (t.includes('sales') && t.includes('return')) return true;
+        if (inv.isCreditNote === true) return true;
+        const bk = String(inv.bookkeeperVchType || inv.v_type || '').toLowerCase();
+        return bk.includes('credit note') || bk.includes('sales return');
+    },
     async init() {
         await DataManager.init();
         console.log('InvoiceManager initialized');
@@ -266,7 +275,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 11; // BK import: credit-note type preserved; merge by bk id only; CN party column
+        const logicVersion = 12; // Alloc map: CN/DN offsets against referenced base bills (balance / pending)
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
@@ -284,7 +293,8 @@ const InvoiceManager = {
 
         const result = invoices.map(inv => {
             const invTotal = parseFloat(inv.total ?? inv.amount ?? 0) || 0;
-            const balance = VoucherManager.getDocumentBalance(
+            const isCreditNote = this._isCreditNoteDoc(inv);
+            let balance = VoucherManager.getDocumentBalance(
                 inv.id,
                 invTotal,
                 allocationsMap,
@@ -292,11 +302,21 @@ const InvoiceManager = {
                 inv,
                 { allowLooseFallback: false }
             );
+            const importedStatus = String(inv.status || '').toLowerCase();
+            // If allocations are absent but imported status is authoritative, honor it.
+            if (!isCreditNote && balance >= (invTotal - 0.05)) {
+                if (importedStatus === 'paid') {
+                    balance = 0;
+                } else if (importedStatus === 'partial') {
+                    // Keep non-zero to retain partial bucket even without granular allocations.
+                    balance = Math.max(0.01, invTotal * 0.5);
+                }
+            }
             return {
                 ...inv,
                 balance: balance,
-                isPaid: balance <= 0.05,
-                isPartial: balance > 0.05 && balance < (invTotal - 0.05)
+                isPaid: isCreditNote ? true : balance <= 0.05,
+                isPartial: isCreditNote ? false : (balance > 0.05 && balance < (invTotal - 0.05))
             };
         });
 
