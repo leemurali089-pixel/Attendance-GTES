@@ -14,6 +14,7 @@ const SyncManager = {
 
     // UI Elements
     statusIndicators: [], // Array to hold both main and landing indicators
+    _auditModalInstance: null,
 
     init() {
         // Initialize audit log from local storage if needed, or start fresh
@@ -81,7 +82,11 @@ const SyncManager = {
     },
 
     createAuditModal() {
-        if (document.getElementById('syncStatusModal')) return;
+        const existing = document.getElementById('syncStatusModal');
+        if (existing) {
+            this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(existing);
+            return;
+        }
 
         const modalDiv = document.createElement('div');
         modalDiv.className = 'modal fade';
@@ -131,6 +136,12 @@ const SyncManager = {
             </div>
         `;
         document.body.appendChild(modalDiv);
+        this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(modalDiv);
+
+        // Defensive cleanup: avoid stuck grey overlay if backdrop gets orphaned.
+        modalDiv.addEventListener('hidden.bs.modal', () => {
+            this._cleanupModalArtifacts();
+        });
     },
 
     attachListeners() {
@@ -269,8 +280,31 @@ const SyncManager = {
         if (!modalEl) return;
 
         this.updateAuditModalUI();
-        const modal = new bootstrap.Modal(modalEl);
-        modal.show();
+        this._auditModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+        this._auditModalInstance.show();
+    },
+
+    closeAuditModal() {
+        const modalEl = document.getElementById('syncStatusModal');
+        if (!modalEl) {
+            this._cleanupModalArtifacts();
+            return;
+        }
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.hide();
+        // Backup cleanup in case Bootstrap hidden event is skipped/interrupted.
+        setTimeout(() => this._cleanupModalArtifacts(), 120);
+    },
+
+    _cleanupModalArtifacts() {
+        const modalEl = document.getElementById('syncStatusModal');
+        const isOpen = !!(modalEl && modalEl.classList.contains('show'));
+        if (isOpen) return;
+
+        document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
+        document.body.style.removeProperty('overflow');
     },
 
     updateAuditModalUI() {
@@ -336,7 +370,7 @@ const SyncManager = {
                                 <h6 class="mb-0 small fw-bold"><i class="bi bi-database me-1 text-info"></i>Book Keeper Backup</h6>
                                 <div class="text-muted" style="font-size: 0.7rem;">No sync performed yet</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync(); bootstrap.Modal.getInstance(document.getElementById('syncStatusModal'))?.hide();">
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" style="font-size: 0.7rem;" onclick="App.startBookKeeperSync(); SyncManager.closeAuditModal();">
                                 <i class="bi bi-arrow-repeat"></i> Sync Now
                             </button>
                         </div>

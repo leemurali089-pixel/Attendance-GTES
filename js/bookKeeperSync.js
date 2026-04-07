@@ -61,6 +61,7 @@ const BookKeeperSync = {
     },
 
     intervalId: null,
+    _importInProgress: false,
 
     init() {
         console.log('Initializing BookKeeper Sync Service...');
@@ -237,7 +238,13 @@ const BookKeeperSync = {
         try {
             const result = await window.electronAPI.selectBookKeeperDb();
             
-            if (result.canceled) return;
+            if (result.canceled) {
+                if (typeof SyncManager !== 'undefined') {
+                    SyncManager.clearSyncProgress?.();
+                    SyncManager.updateStatus('synced', 'Book Keeper sync cancelled');
+                }
+                return;
+            }
 
             if (!result.success || !result.path) {
                 if (window.App && App.showNotification) App.showNotification('Error selecting file: ' + (result.error || 'Unknown'), 'error');
@@ -321,7 +328,13 @@ const BookKeeperSync = {
 
             throw new Error('No supported file selection mechanism found in this browser.');
         } catch (e) {
-            if (e && e.name === 'AbortError') return;
+            if (e && e.name === 'AbortError') {
+                if (typeof SyncManager !== 'undefined') {
+                    SyncManager.clearSyncProgress?.();
+                    SyncManager.updateStatus('synced', 'Book Keeper sync cancelled');
+                }
+                return;
+            }
             console.error('[Sync] Web file picker error:', e);
             if (window.App && App.showNotification) {
                 App.showNotification('Failed to open backup file picker.', 'error');
@@ -336,7 +349,8 @@ const BookKeeperSync = {
      * @param {string} sourceLabel - Label for the sync status audit (e.g. filename)
      */
     async _runImportFromFile(fileOrBuffer, sourceLabel = 'BookKeeper Backup') {
-        if (typeof SyncManager !== 'undefined' && SyncManager.status === 'syncing') return;
+        if (this._importInProgress) return;
+        this._importInProgress = true;
         
         if (typeof SyncManager !== 'undefined') {
             SyncManager.updateStatus('syncing', 'Syncing with Book Keeper...');
@@ -418,6 +432,7 @@ const BookKeeperSync = {
                 App.showNotification('Book Keeper sync failed: ' + e.message, 'error');
             }
         } finally {
+            this._importInProgress = false;
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.suppressConflictPrompts = false;
                 if (typeof SyncManager.clearSyncProgress === 'function' && SyncManager.status !== 'syncing') {

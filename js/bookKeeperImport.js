@@ -3053,16 +3053,17 @@ const BookKeeperImport = {
 
     async clearAllData() {
         App.showNotification('Sweeping all BookKeeper Service & Inventory Data...', 'info');
+        const noMerge = { skipPreSaveMerge: true };
 
         // 1. Invoices
         const invoices = DataManager.getData('invoices') || [];
         const cleanInvoices = invoices.filter(i => i.source !== 'bookkeeper' && i.source !== 'seed' && !i.bookkeeperId);
-        await DataManager.saveData('invoices', cleanInvoices);
+        await DataManager.saveData('invoices', cleanInvoices, noMerge);
 
         // 2. Vouchers (Transactions)
         const vouchers = DataManager.getData('vouchers') || [];
         const cleanVouchers = vouchers.filter(v => v.source !== 'bookkeeper' && v.source !== 'seed');
-        await DataManager.saveData('vouchers', cleanVouchers);
+        await DataManager.saveData('vouchers', cleanVouchers, noMerge);
 
         // 3. Inventory (Robust Cleanup for all import variants)
         const inventory = DataManager.getData('inventory') || [];
@@ -3082,25 +3083,52 @@ const BookKeeperImport = {
             }
             return true;
         });
-        await DataManager.saveData('inventory', cleanInventory);
+        await DataManager.saveData('inventory', cleanInventory, noMerge);
 
         // 3b. Services Collection (NEW - Clear dedicated services collection)
-        await DataManager.saveData('gtes_services', []);
+        await DataManager.saveData('gtes_services', [], noMerge);
 
         // 4. Inventory Txns (Remove if linked to BK)
         const txn = DataManager.getData('inventoryTransactions') || [];
         const cleanTxn = txn.filter(t => !t.refId?.toString().includes('BK-') && t.source !== 'bookkeeper' && t.source !== 'seed');
-        await DataManager.saveData('inventoryTransactions', cleanTxn);
+        await DataManager.saveData('inventoryTransactions', cleanTxn, noMerge);
 
         // 5. Customers
         const customers = DataManager.getData('customers') || [];
         const cleanCustomers = customers.filter(c => c.source !== 'bookkeeper' && c.source !== 'seed');
-        await DataManager.saveData('customers', cleanCustomers);
+        await DataManager.saveData('customers', cleanCustomers, noMerge);
 
         // 6. Expenses
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
         const cleanExpenses = expenses.filter(e => !e.bookkeeperId && e.source !== 'bookkeeper' && e.source !== 'seed');
-        await DataManager.saveData(DataManager.KEYS.EXPENSES, cleanExpenses);
+        await DataManager.saveData(DataManager.KEYS.EXPENSES, cleanExpenses, noMerge);
+
+        // 7. Additional BK generated collections
+        await DataManager.saveData('challans', [], noMerge);
+        await DataManager.saveData(DataManager.KEYS.TAX_SCHEMES, [], noMerge);
+        await DataManager.saveData(DataManager.KEYS.WAREHOUSES, [], noMerge);
+        await DataManager.saveData(DataManager.KEYS.SERVICES, [], noMerge);
+        await DataManager.saveData(DataManager.KEYS.ESTIMATES, [], noMerge);
+        await DataManager.saveData(DataManager.KEYS.PURCHASE_ORDERS, [], noMerge);
+        await DataManager.saveData('gtes_debug_import_schema', null, noMerge);
+
+        // 8. Stop BK auto rehydrate/watcher so cleared data does not return.
+        try {
+            if (window.BookKeeperSync) {
+                window.BookKeeperSync.stopWatcher?.();
+                window.BookKeeperSync.config = {
+                    ...window.BookKeeperSync.config,
+                    backupPath: null,
+                    lastModified: 0,
+                    lastSyncDetails: null
+                };
+                window.BookKeeperSync.saveConfig?.();
+            } else {
+                localStorage.removeItem('bk_sync_config');
+            }
+        } catch (e) {
+            console.warn('[BK Reset] Could not fully reset bk_sync_config:', e);
+        }
 
         App.showNotification('All BookKeeper data cleared successfully.', 'success');
         setTimeout(() => location.reload(), 1500);
