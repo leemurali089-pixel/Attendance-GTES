@@ -1,4 +1,4 @@
-const CACHE_NAME = 'primelogic-v12';
+const CACHE_NAME = 'primelogic-v13';
 const ASSETS = [
     'index.html',
     'manifest.json',
@@ -26,6 +26,15 @@ self.addEventListener('install', (event) => {
                 return cache.addAll(ASSETS);
             })
             .catch(err => console.log('Service Worker caching skipped:', err))
+    );
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys().then((keys) =>
+            Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+        ).then(() => self.clients.claim())
     );
 });
 
