@@ -207,8 +207,9 @@ ipcMain.handle('load-data', async (event, key) => {
         // Optimization: For huge files (> 5MB), just return success and let the renderer know it's too big
         // Or return raw string to avoid serialization costs of large objects
         if (data.length > 5 * 1024 * 1024) {
-             console.log(`Large file detected (${key}.json), returning raw string to renderer.`);
-             return { success: true, isRaw: true, data: data, lastModified: stats.mtimeMs };
+            // Avoid spamming the terminal; DevTools → Verbose still shows debug.
+            console.debug(`[Electron] Large file (${key}.json, ${(data.length / 1024 / 1024).toFixed(2)} MB) — raw string to renderer (parse happens in renderer).`);
+            return { success: true, isRaw: true, data: data, lastModified: stats.mtimeMs };
         }
 
         let parsedData = null;

@@ -471,6 +471,12 @@ const SyncManager = {
     handleRemoteChange(filename) {
         this.logSyncEvent('warning', `Remote changes detected in ${filename}`);
         this.updateStatus('changes', `Changes detected in ${filename}`);
+        if (typeof filename === 'string' && window.DataManager && typeof DataManager.invalidateDataCache === 'function') {
+            const base = filename.replace(/\.json$/i, '').replace(/^.*[/\\]/, '');
+            if (base) {
+                DataManager.invalidateDataCache(base);
+            }
+        }
         App.showNotification(`Remote changes detected in ${filename}`, 'info');
     },
 
@@ -484,8 +490,8 @@ const SyncManager = {
         this.logSyncEvent('info', 'Manual sync started');
 
         try {
-            // Reload all data
-            await DataManager.init();
+            DataManager.invalidateDataCache();
+            await DataManager.reloadAllDataAfterCacheClear();
 
             // Refresh current view
             const currentView = App.currentView;

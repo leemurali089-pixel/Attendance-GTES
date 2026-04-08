@@ -15,7 +15,7 @@ const App = {
         }
     },
 
-    hideLoader(delay = 500) {
+    hideLoader(delay = 180) {
         const loader = document.getElementById('globalLoader');
         if (loader) {
             setTimeout(() => {

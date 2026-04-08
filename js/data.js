@@ -123,6 +123,10 @@ const DataManager = {
     // Device ID for tracking changes (used for sync and audit)
     _deviceId: null,
     _cache: {}, // Memory cache for synchronous access when localStorage fails quota
+    /** Keys that have completed a full `loadData` this session — avoids re-fetching Firebase on every getAttendance/getEmployees call */
+    _trustedCacheKeys: new Set(),
+    /** `getAttendanceByMonth(year, month)` results; cleared when attendance is saved or cache invalidated */
+    _attendanceByMonthCache: new Map(),
     _db: null,  // IndexedDB instance
 
     /**
@@ -213,6 +217,80 @@ const DataManager = {
     },
 
     // Initialize data storage
+    /** Core + background keys used by init prefetch and sync reload */
+    getDataLoadKeyGroups() {
+        return {
+            core: [
+                this.KEYS.ADMIN_PASSWORD,
+                this.KEYS.SETTINGS,
+                'gtes_users'
+            ],
+            background: [
+                this.KEYS.EMPLOYEES,
+                this.KEYS.ATTENDANCE,
+                this.KEYS.HOLIDAYS,
+                this.KEYS.ADVANCES,
+                this.KEYS.BONUS_PAYOUTS,
+                this.KEYS.EMAIL_LOGS,
+                this.KEYS.EXPENSES,
+                this.KEYS.EXPENSE_CATEGORIES,
+                this.KEYS.ESTIMATES,
+                this.KEYS.PURCHASE_ORDERS,
+                this.KEYS.RECURRING_INVOICES,
+                this.KEYS.RECYCLE_BIN,
+                'gtes_tasks',
+                'customers',
+                'invoices',
+                'vouchers',
+                'inventory',
+                'gtes_services',
+                'inventoryTransactions',
+                'challans',
+                'gtes_inventory_items',
+                'gtes_expenses'
+            ]
+        };
+    },
+
+    _clearAttendanceDerivedCaches() {
+        if (this._attendanceByMonthCache && this._attendanceByMonthCache.size) {
+            this._attendanceByMonthCache.clear();
+        }
+    },
+
+    invalidateDataCache(key) {
+        if (key === undefined || key === null) {
+            this._cache = {};
+            this._trustedCacheKeys.clear();
+            this._clearAttendanceDerivedCaches();
+            return;
+        }
+        delete this._cache[key];
+        this._trustedCacheKeys.delete(key);
+        if (key === this.KEYS.ATTENDANCE) {
+            this._clearAttendanceDerivedCaches();
+        }
+    },
+
+    /** After invalidateDataCache(): pull fresh data from storage/cloud (used by Sync Now). */
+    async reloadAllDataAfterCacheClear() {
+        const { core, background } = this.getDataLoadKeyGroups();
+        const load = async (k) => {
+            try {
+                await this.loadData(k, { forceRefresh: true });
+            } catch (err) {
+                console.error(`[DataManager] Reload failed for '${k}':`, err);
+            }
+        };
+        await Promise.all(core.map(load));
+        const batchSize = 4;
+        for (let i = 0; i < background.length; i += batchSize) {
+            const chunk = background.slice(i, i + batchSize);
+            await Promise.all(chunk.map(load));
+            await new Promise((r) => setTimeout(r, 0));
+        }
+    },
+
     async init() {
         if (this._initPromise) return this._initPromise;
 
@@ -222,38 +300,7 @@ const DataManager = {
 
             console.log(fileStorageEnabled ? 'Using Firebase cloud storage' : 'Using localStorage fallback');
 
-            // Essential Keys for Login and Branding
-            const coreKeys = [
-            this.KEYS.ADMIN_PASSWORD,
-            this.KEYS.SETTINGS,
-            'gtes_users'
-        ];
-
-        // All other data keys to pre-warm cache
-        const dataKeys = [
-            this.KEYS.EMPLOYEES,
-            this.KEYS.ATTENDANCE,
-            this.KEYS.HOLIDAYS,
-            this.KEYS.ADVANCES,
-            this.KEYS.BONUS_PAYOUTS,
-            this.KEYS.EMAIL_LOGS,
-            this.KEYS.EXPENSES,
-            this.KEYS.EXPENSE_CATEGORIES,
-            this.KEYS.ESTIMATES,
-            this.KEYS.PURCHASE_ORDERS,
-            this.KEYS.RECURRING_INVOICES,
-            this.KEYS.RECYCLE_BIN,
-            'gtes_tasks', 
-            'customers', 
-            'invoices', 
-            'vouchers', 
-            'inventory', 
-            'gtes_services', 
-            'inventoryTransactions',
-            'challans',
-            'gtes_inventory_items',
-            'gtes_expenses'
-        ];
+            const { core: coreKeys, background: dataKeys } = this.getDataLoadKeyGroups();
 
         // Synchronous First Phase: Essential for UI, Branding, and Auth
         console.log("[DataManager]: Loading core system modules...");
@@ -285,14 +332,15 @@ const DataManager = {
         // This is deferred so the Login/Dashboard can appear immediately.
         setTimeout(async () => {
             console.log("[DataManager]: Prefetching transaction modules in background...");
-            
-            // Process in a throttled loop to avoid UI jank during large JSON parses
-            for (const key of dataKeys) {
-                try {
-                    await this.loadData(key);
-                } catch (err) {
-                    console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
-                }
+            const prefetchBatch = 4;
+            for (let i = 0; i < dataKeys.length; i += prefetchBatch) {
+                const chunk = dataKeys.slice(i, i + prefetchBatch);
+                await Promise.all(chunk.map((key) =>
+                    this.loadData(key).catch((err) => {
+                        console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
+                    })
+                ));
+                await new Promise((r) => setTimeout(r, 0));
             }
             console.log("[DataManager]: Background data prefetch complete.");
 
@@ -435,6 +483,10 @@ const DataManager = {
     async saveData(key, data, options = {}) {
         // Update memory cache for synchronous access
         this._cache[key] = data;
+        this._trustedCacheKeys.add(key);
+        if (key === this.KEYS.ATTENDANCE) {
+            this._clearAttendanceDerivedCaches();
+        }
 
         // Try local storage cache
         try {
@@ -471,7 +523,11 @@ const DataManager = {
         return await FileStorage.saveData(key, payload);
     },
 
-    async loadData(key) {
+    async loadData(key, options = {}) {
+        const forceRefresh = options.forceRefresh === true;
+        if (!forceRefresh && this._trustedCacheKeys.has(key)) {
+            return this._cache[key];
+        }
 
         let localParsed = null;
         try {
@@ -535,7 +591,8 @@ const DataManager = {
         if (data !== null && data !== undefined) {
             // Update memory cache for synchronous getData calls
             this._cache[key] = data;
-            
+            this._trustedCacheKeys.add(key);
+
             try {
                 localStorage.setItem(key, JSON.stringify(data));
             } catch (e) {
@@ -572,6 +629,10 @@ const DataManager = {
     // Synchronous saveData wrapper for delivery modules  
     saveDataSync(key, value) {
         this._cache[key] = value; // Always update memory cache for instant access
+        this._trustedCacheKeys.add(key);
+        if (key === this.KEYS.ATTENDANCE) {
+            this._clearAttendanceDerivedCaches();
+        }
         try {
             localStorage.setItem(key, JSON.stringify(value));
             // Also trigger async save for file storage
@@ -1181,11 +1242,21 @@ const DataManager = {
     },
 
     async getAttendanceByMonth(year, month) {
+        const cacheKey = `${year}_${month}`;
+        if (this._attendanceByMonthCache.has(cacheKey)) {
+            return this._attendanceByMonthCache.get(cacheKey);
+        }
         const attendance = await this.getAttendance();
-        return attendance.filter(record => {
+        const out = [];
+        for (let i = 0; i < attendance.length; i++) {
+            const record = attendance[i];
             const recordDate = new Date(record.date);
-            return recordDate.getFullYear() === year && recordDate.getMonth() === month;
-        });
+            if (recordDate.getFullYear() === year && recordDate.getMonth() === month) {
+                out.push(record);
+            }
+        }
+        this._attendanceByMonthCache.set(cacheKey, out);
+        return out;
     },
 
     async getAttendanceByEmployee(employeeName, startDate, endDate) {
