@@ -1,209 +1,216 @@
 [
   {
-    "id": "adv_1763620804012_930suypyx",
+    "amount": 20000,
     "date": "2025-06-14",
     "employee": "Praveen",
-    "amount": 20000
+    "id": "adv_1763620804012_930suypyx"
   },
   {
-    "id": "adv_1763848976809_sl12mij5l",
+    "amount": 2500,
     "date": "2025-04-09",
     "employee": "Praveen",
-    "amount": 2500
+    "id": "adv_1763848976809_sl12mij5l"
   },
   {
-    "id": "adv_1763849018073_z82s4dfpt",
+    "amount": 500,
     "date": "2025-04-10",
     "employee": "Raja",
-    "amount": 500
+    "id": "adv_1763849018073_z82s4dfpt"
   },
   {
-    "id": "adv_1763849037089_ws1smgz6g",
+    "amount": 6000,
     "date": "2025-04-12",
     "employee": "Ajay",
-    "amount": 6000
+    "id": "adv_1763849037089_ws1smgz6g"
   },
   {
-    "id": "adv_1763849069769_whfs6x6vc",
+    "amount": 2000,
     "date": "2025-04-25",
     "employee": "Raja",
-    "amount": 2000
+    "id": "adv_1763849069769_whfs6x6vc"
   },
   {
-    "id": "adv_1763849099785_u3i45mhwd",
+    "amount": 3000,
     "date": "2025-04-25",
     "employee": "Victor",
-    "amount": 3000
+    "id": "adv_1763849099785_u3i45mhwd"
   },
   {
-    "id": "adv_1763849763065_il1io0l49",
+    "amount": 27000,
     "date": "2025-05-05",
     "employee": "Victor",
-    "amount": 27000
+    "id": "adv_1763849763065_il1io0l49"
   },
   {
-    "id": "adv_1763849785945_ranuw92vn",
+    "amount": 1000,
     "date": "2025-05-09",
     "employee": "Ajay",
-    "amount": 1000
+    "id": "adv_1763849785945_ranuw92vn"
   },
   {
-    "id": "adv_1763849805224_5uicsmy4i",
+    "amount": 1000,
     "date": "2025-05-09",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763849805224_5uicsmy4i"
   },
   {
-    "id": "adv_1763849818657_9exbjs7y5",
+    "amount": 1500,
     "date": "2025-05-14",
     "employee": "Victor",
-    "amount": 1500
+    "id": "adv_1763849818657_9exbjs7y5"
   },
   {
-    "id": "adv_1763849842913_whi17ab0v",
+    "amount": 1500,
     "date": "2025-05-17",
     "employee": "Praveen",
-    "amount": 1500
+    "id": "adv_1763849842913_whi17ab0v"
   },
   {
-    "id": "adv_1763849858793_vtohq9hpo",
+    "amount": 500,
     "date": "2025-05-23",
     "employee": "Praveen",
-    "amount": 500
+    "id": "adv_1763849858793_vtohq9hpo"
   },
   {
-    "id": "adv_1763850011193_ayg1tuzrs",
+    "amount": 4000,
     "date": "2025-05-24",
     "employee": "Praveen",
-    "amount": 4000
+    "id": "adv_1763850011193_ayg1tuzrs"
   },
   {
-    "id": "adv_1763850054705_ncbmj5gky",
+    "amount": 500,
     "date": "2025-06-06",
     "employee": "Praveen",
-    "amount": 500
+    "id": "adv_1763850054705_ncbmj5gky"
   },
   {
-    "id": "adv_1763924165890_x3rxj7jc5",
+    "amount": 1000,
     "date": "2025-06-16",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763924165890_x3rxj7jc5"
   },
   {
-    "id": "adv_1763924211994_at095y7lx",
+    "amount": 4500,
     "date": "2025-06-18",
     "employee": "Raja",
-    "amount": 4500
+    "id": "adv_1763924211994_at095y7lx"
   },
   {
-    "id": "adv_1763924293521_gf0vvrfwv",
+    "amount": 3100,
     "date": "2025-06-27",
     "employee": "Praveen",
-    "amount": 3100,
+    "id": "adv_1763924293521_gf0vvrfwv",
     "reason": ""
   },
   {
-    "id": "adv_1763925420177_4axi975nb",
+    "amount": 1000,
     "date": "2025-07-11",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763925420177_4axi975nb"
   },
   {
-    "id": "adv_1763925432152_uwnju4nad",
+    "amount": 1000,
     "date": "2025-07-12",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763925432152_uwnju4nad"
   },
   {
-    "id": "adv_1763925443912_qfx2xwi7e",
+    "amount": 1000,
     "date": "2025-07-18",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763925443912_qfx2xwi7e"
   },
   {
-    "id": "adv_1763925475825_sesfryu7h",
+    "amount": 300,
     "date": "2025-07-31",
     "employee": "Praveen",
-    "amount": 300
+    "id": "adv_1763925475825_sesfryu7h"
   },
   {
-    "id": "adv_1763927366663_n1rgryh81",
+    "amount": 300,
     "date": "2025-08-31",
     "employee": "Praveen",
-    "amount": 300
+    "id": "adv_1763927366663_n1rgryh81"
   },
   {
-    "id": "adv_1763929514458_mz8waaf07",
+    "amount": 1000,
     "date": "2025-09-13",
     "employee": "Praveen",
-    "amount": 1000
+    "id": "adv_1763929514458_mz8waaf07"
   },
   {
-    "id": "adv_1763929579488_4s4385w7g",
+    "amount": 500,
     "date": "2025-09-27",
     "employee": "Praveen",
-    "amount": 500
+    "id": "adv_1763929579488_4s4385w7g"
   },
   {
-    "id": "adv_1763929593265_n0nmhv8a9",
+    "amount": 300,
     "date": "2025-10-31",
     "employee": "Praveen",
-    "amount": 300
+    "id": "adv_1763929593265_n0nmhv8a9"
   },
   {
-    "id": "adv_1763929613674_m12uov28j",
+    "amount": 2000,
     "date": "2025-10-18",
     "employee": "Praveen",
-    "amount": 2000
+    "id": "adv_1763929613674_m12uov28j"
   },
   {
-    "id": "adv_1763929835423_py1zj32fc",
-    "date": "2025-10-18",
-    "employee": "Praveen",
     "amount": 1750,
+    "date": "2025-10-18",
+    "employee": "Praveen",
+    "id": "adv_1763929835423_py1zj32fc",
     "reason": "For Diwali Crackers"
   },
   {
-    "id": "adv_1763929870943_pr6dhza5f",
+    "amount": 1000,
     "date": "2025-11-12",
     "employee": "Praveen",
-    "amount": 1000,
+    "id": "adv_1763929870943_pr6dhza5f",
     "reason": "Advance Before going to Home"
   },
   {
-    "id": "adv_waveoff_1763938845744_sgam56upe",
+    "amount": -28266.667,
     "date": "2025-11-24",
     "employee": "Victor",
-    "amount": -28266.667,
+    "id": "adv_waveoff_1763938845744_sgam56upe",
     "reason": "Can't be retrieved",
     "type": "waveoff"
   },
   {
-    "id": "adv_1767623432611_blc3mq7pg",
+    "amount": 1000,
     "date": "2025-12-28",
     "employee": "Praveen",
-    "amount": 1000,
+    "id": "adv_1767623432611_blc3mq7pg",
     "reason": "For going to home "
   },
   {
-    "id": "adv_1767623471551_0jojyvzh4",
+    "amount": 500,
     "date": "2026-01-05",
     "employee": "Mayakannan S",
-    "amount": 500,
+    "id": "adv_1767623471551_0jojyvzh4",
     "reason": ""
   },
   {
-    "id": "adv_1767623552777_v13yf6aht",
+    "amount": 2000,
     "date": "2025-12-11",
     "employee": "Mayakannan S",
-    "amount": 2000,
+    "id": "adv_1767623552777_v13yf6aht",
     "reason": ""
   },
   {
-    "id": "adv_1767623585224_90qgecs0r",
+    "amount": 2000,
     "date": "2025-12-30",
     "employee": "Mayakannan S",
-    "amount": 2000,
+    "id": "adv_1767623585224_90qgecs0r",
     "reason": ""
+  },
+  {
+    "id": "adv_1775637128667_tug6s6qdp",
+    "date": "2026-04-06",
+    "employee": "Raja Babu",
+    "amount": 1500,
+    "reason": "For mobile service "
   }
 ]

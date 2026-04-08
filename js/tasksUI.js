@@ -3,6 +3,32 @@
  */
 
 const TasksUI = {
+    async _getTaskVisibilityContext() {
+        const currentUser = await UserManager.getCurrentUser();
+        const isAdmin = !!(currentUser && currentUser.role === UserManager.ROLES.ADMIN);
+        return { currentUser, isAdmin };
+    },
+
+    _filterVisibleTasks(tasks, ctx) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        if (ctx?.isAdmin) return list;
+        const uname = String(ctx?.currentUser?.username || '').trim().toLowerCase();
+        if (!uname) return [];
+        return list.filter((t) => String(t?.assignedTo || '').trim().toLowerCase() === uname);
+    },
+
+    _getActiveAssignableUsers(users, currentUser, preserveUsername = '') {
+        const all = Array.isArray(users) ? users : [];
+        const active = all.filter((u) => u && u.isActive !== false);
+        const preserve = String(preserveUsername || '').trim();
+        if (preserve && !active.some((u) => u.username === preserve)) {
+            const hit = all.find((u) => u && u.username === preserve);
+            if (hit) active.push(hit);
+        }
+        // Stable ordering: active users first, "me" appears with suffix in UI.
+        return active.sort((a, b) => String(a.fullName || a.username).localeCompare(String(b.fullName || b.username)));
+    },
+
     async init() {
         console.log('TasksUI initialized');
     },
@@ -21,9 +47,11 @@ const TasksUI = {
         if (!container) return;
 
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+        const ctx = await this._getTaskVisibilityContext();
+        const visibleTasks = this._filterVisibleTasks(tasks, ctx);
         
         // Filter tasks based on current selection
-        let filteredTasks = [...tasks];
+        let filteredTasks = [...visibleTasks];
         if (this.currentFilter === 'pending') {
             filteredTasks = filteredTasks.filter(t => t.status === 'open');
         } else if (this.currentFilter === 'completed') {
@@ -161,6 +189,7 @@ const TasksUI = {
     async showCreateModal(defaults = {}) {
         const users = await UserManager.getUsers();
         const currentUser = await UserManager.getCurrentUser();
+        const assignableUsers = this._getActiveAssignableUsers(users, currentUser, defaults.assignedTo || '');
         
         // Create modal element if it doesn't exist
         let modalEl = document.getElementById('taskCreateModal');
@@ -226,7 +255,7 @@ const TasksUI = {
                                 <div class="input-group">
                                     <span class="input-group-text bg-dark border-secondary text-white-50"><i class="bi bi-person-badge"></i></span>
                                     <select id="taskAssignedTo" class="form-select bg-dark border-secondary text-white">
-                                        ${users.map(u => `<option value="${u.username}" ${currentUser && u.username === currentUser.username ? 'selected' : ''}>${u.fullName || u.username} ${currentUser && u.username === currentUser.username ? '(Me)' : ''}</option>`).join('')}
+                                        ${assignableUsers.map(u => `<option value="${u.username}" ${(defaults.assignedTo ? u.username === defaults.assignedTo : (currentUser && u.username === currentUser.username)) ? 'selected' : ''}>${u.username} ${currentUser && u.username === currentUser.username ? '(Me)' : ''}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
@@ -526,8 +555,12 @@ const TasksUI = {
         const taskType = document.getElementById('taskType').value;
 
         const users = await UserManager.getUsers();
-        const assignedUser = users.find(u => u.username === assignedTo);
-        const assignedToName = assignedUser ? (assignedUser.fullName || assignedUser.username) : assignedTo;
+        const assignedUser = users.find(u => u.username === assignedTo && u.isActive !== false);
+        if (!assignedUser) {
+            App.showNotification('Please assign task to an active user', 'warning');
+            return;
+        }
+        const assignedToName = assignedUser ? assignedUser.username : assignedTo;
 
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         
@@ -596,9 +629,17 @@ const TasksUI = {
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         const task = tasks.find(t => t.id === taskId);
         if (!task) return;
+        const ctx = await this._getTaskVisibilityContext();
+        if (!ctx.isAdmin) {
+            const uname = String(ctx.currentUser?.username || '').trim().toLowerCase();
+            if (!uname || String(task.assignedTo || '').trim().toLowerCase() !== uname) {
+                App.showNotification('You can only view tasks assigned to you', 'warning');
+                return;
+            }
+        }
 
         const customer = task.partyId ? CustomerManager.getCustomer(task.partyId) : null;
-        const users = await UserManager.getUsers();
+        const users = this._getActiveAssignableUsers(await UserManager.getUsers(), ctx.currentUser, task.assignedTo || '');
         const isOverdue = this.isOverdue(task);
 
         let modalEl = document.getElementById('taskDetailModal');
@@ -715,7 +756,7 @@ const TasksUI = {
                                                 </div>
                                                 <div class="col-6">
                                                      <select id="taskDetailAssignedTo" class="form-select form-select-sm bg-dark border-secondary text-white" onchange="TasksUI.updateTaskField('${task.id}', 'assignedTo', this.value)">
-                                                        ${users.map(u => `<option value="${u.username}" ${task.assignedTo === u.username ? 'selected' : ''}>${u.fullName || u.username}</option>`).join('')}
+                                                        ${users.map(u => `<option value="${u.username}" ${task.assignedTo === u.username ? 'selected' : ''}>${u.username}</option>`).join('')}
                                                     </select>
                                                 </div>
                                             </div>
@@ -770,14 +811,26 @@ const TasksUI = {
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         const index = tasks.findIndex(t => t.id === taskId);
         if (index !== -1) {
+            const ctx = await this._getTaskVisibilityContext();
+            if (!ctx.isAdmin) {
+                const uname = String(ctx.currentUser?.username || '').trim().toLowerCase();
+                if (!uname || String(tasks[index].assignedTo || '').trim().toLowerCase() !== uname) {
+                    App.showNotification('You can only update tasks assigned to you', 'warning');
+                    return;
+                }
+            }
             const oldValue = tasks[index][field];
             if (oldValue === value) return;
 
             tasks[index][field] = value;
             if (field === 'assignedTo') {
                 const users = await UserManager.getUsers();
-                const assignedUser = users.find(u => u.username === value);
-                tasks[index].assignedToName = assignedUser ? (assignedUser.fullName || assignedUser.username) : value;
+                const assignedUser = users.find(u => u.username === value && u.isActive !== false);
+                if (!assignedUser) {
+                    App.showNotification('Task can only be assigned to an active user', 'warning');
+                    return;
+                }
+                tasks[index].assignedToName = assignedUser ? assignedUser.username : value;
                 this.addHistory(tasks[index], 'Reassigned', `Task assigned to ${tasks[index].assignedToName}`);
             } else {
                 this.addHistory(tasks[index], 'Field Updated', `${field} changed from ${oldValue} to ${value}`);
@@ -964,6 +1017,14 @@ const TasksUI = {
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         const index = tasks.findIndex(t => t.id === taskId);
         if (index !== -1) {
+            const ctx = await this._getTaskVisibilityContext();
+            if (!ctx.isAdmin) {
+                const uname = String(ctx.currentUser?.username || '').trim().toLowerCase();
+                if (!uname || String(tasks[index].assignedTo || '').trim().toLowerCase() !== uname) {
+                    App.showNotification('You can only update tasks assigned to you', 'warning');
+                    return;
+                }
+            }
             const newStatus = forceComplete !== null 
                 ? (forceComplete ? 'completed' : 'open')
                 : (tasks[index].status === 'open' ? 'completed' : 'open');
@@ -990,6 +1051,14 @@ const TasksUI = {
         
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         const taskToDelete = tasks.find(t => t.id === taskId);
+        const ctx = await this._getTaskVisibilityContext();
+        if (taskToDelete && !ctx.isAdmin) {
+            const uname = String(ctx.currentUser?.username || '').trim().toLowerCase();
+            if (!uname || String(taskToDelete.assignedTo || '').trim().toLowerCase() !== uname) {
+                App.showNotification('You can only delete tasks assigned to you', 'warning');
+                return;
+            }
+        }
         
         if (taskToDelete) {
             // Add to Recycle Bin

@@ -2,6 +2,27 @@
  * Admin Module - Centralized Administration
  */
 const AdminModule = {
+    userModal: null,
+    _resetModalState() {
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    },
+
+    _ensureUserModal() {
+        const modalEl = document.getElementById('userModal');
+        if (!modalEl) return null;
+        if (modalEl.parentElement !== document.body) {
+            document.body.appendChild(modalEl);
+        }
+        if (!this.userModal) {
+            this.userModal = new bootstrap.Modal(modalEl, { backdrop: true, keyboard: true, focus: true });
+            modalEl.addEventListener('hidden.bs.modal', () => this._resetModalState());
+        }
+        return this.userModal;
+    },
+
     async load() {
         const view = document.getElementById('adminView');
         if (!view) return;
@@ -299,6 +320,8 @@ const AdminModule = {
             ${this.getUserModalHTML()}
         `;
 
+        this.userModal = null;
+        this._ensureUserModal();
         await this.loadUsers();
     },
 
@@ -513,7 +536,8 @@ const AdminModule = {
         if (hint) hint.style.display = 'none'; // Password required for new users
         const passField = document.getElementById('userPassword');
         if (passField) passField.placeholder = 'Enter password (required)';
-        new bootstrap.Modal(document.getElementById('userModal')).show();
+        this._resetModalState();
+        this._ensureUserModal()?.show();
     },
 
     async editUser(id) {
@@ -538,7 +562,8 @@ const AdminModule = {
             cb.checked = permissions.includes(cb.value);
         });
 
-        new bootstrap.Modal(document.getElementById('userModal')).show();
+        this._resetModalState();
+        this._ensureUserModal()?.show();
     },
 
     async saveUser() {
@@ -576,12 +601,7 @@ const AdminModule = {
             }
 
             // Close modal safely
-            const modalEl = document.getElementById('userModal');
-            if (modalEl) {
-                let inst = bootstrap.Modal.getInstance(modalEl);
-                if (!inst) inst = new bootstrap.Modal(modalEl);
-                inst.hide();
-            }
+            this._ensureUserModal()?.hide();
 
             await this.loadUsers();
             App.showNotification('User saved successfully!', 'success');
@@ -598,7 +618,7 @@ const AdminModule = {
         try {
             await UserManager.deleteUser(id);
             AuditManager.log('USER_DELETE', `Deleted user ID ${id}`);
-            this.loadUsers();
+            await this.loadUsers();
             App.showNotification('User deleted', 'success');
         } catch (error) {
             alert(error.message);

@@ -397,7 +397,8 @@ const VouchersUI = {
                         // Plain Voucher: Explicitly marked as hasGst === false
                         return v.hasGst === false;
                     }).map(v => {
-            const searchStr = `${v.id} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
+            const vchLabel = String(v.displayVoucherNo || v.voucherNo || '').trim() || v.id;
+            const searchStr = `${v.id} ${v.displayVoucherNo || ''} ${v.voucherNo || ''} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
             const typeStr = (v.type || 'general').toLowerCase();
             const linkStr = this._voucherHasLinkedDocs(v) ? 'linked' : 'unlinked';
@@ -405,11 +406,19 @@ const VouchersUI = {
             return `
                         <tr data-search="${searchStr}" data-year="${yearStr}" data-type="${typeStr}" data-link="${linkStr}">
                             <td>${v.date}</td>
-                            <td class="fw-bold text-info">${v.id}</td>
+                            <td class="fw-bold text-info">${vchLabel}${vchLabel !== v.id ? `<br><small class="text-muted">${v.id}</small>` : ''}</td>
                             <td><span class="badge bg-${v.type === 'receipt' ? 'success' : (v.type === 'payment' ? 'danger' : 'warning')} text-capitalize">${v.type || 'General'}</span></td>
                             <td>
                                 ${v.customerName || v.customerId || 'N/A'}
-                                ${v.linkedInvoiceId ? `<br><small class="text-muted"><i class="bi bi-link-45deg"></i> Inv: ${v.linkedInvoiceId}</small>` : ''}
+                                ${(() => {
+                const lid = v.linkedInvoiceId != null ? String(v.linkedInvoiceId).trim() : '';
+                const bad = !lid || lid === '-1';
+                const a0 = !bad ? null : (v.allocations && v.allocations[0]);
+                const fromAlloc = a0 && (a0.invoiceNo || a0.billNo || a0.no);
+                const ref = !bad ? lid : (fromAlloc ? String(fromAlloc).trim() : '');
+                if (!ref || ref === '-1') return '';
+                return `<br><small class="text-muted"><i class="bi bi-link-45deg"></i> Inv: ${ref}</small>`;
+            })()}
                             </td>
                             <td class="text-end">₹${(typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay
                                 ? VoucherManager.resolveSettlementDisplay(v).totalSettlement

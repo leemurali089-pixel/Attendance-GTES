@@ -2,6 +2,13 @@
 const AdvancesModule = {
     editingAdvance: null,
 
+    _escAttr(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;');
+    },
+
     async load() {
         await this.renderAdvanceList();
     },
@@ -10,8 +17,17 @@ const AdvancesModule = {
         const view = document.getElementById('advancesView');
         if (!view) return;
 
+        if (this.modal) {
+            try {
+                this.modal.hide();
+                this.modal.dispose();
+            } catch (e) { /* stale instance after DOM rebuild */ }
+            this.modal = null;
+        }
+
         const advances = await DataManager.getAdvances();
-        const employees = await DataManager.getEmployees();
+        const employeesRaw = await DataManager.getEmployees();
+        const employees = (Array.isArray(employeesRaw) ? employeesRaw : []).filter((e) => e && String(e.name || '').trim());
         advances.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         const totalAmount = advances.reduce((sum, adv) => sum + parseFloat(adv.amount || 0), 0);
@@ -186,7 +202,6 @@ const AdvancesModule = {
                                     <label for="advanceEmployee" class="form-label">Employee *</label>
                                     <select class="form-select" id="advanceEmployee" required>
                                         <option value="">Select Employee</option>
-                                        ${employees.map(emp => `<option value="${emp.name}">${emp.name}</option>`).join('')}
                                     </select>
                                 </div>
                                 <div class="mb-3">
@@ -229,7 +244,55 @@ const AdvancesModule = {
         // Initialize modal
         const modalElement = document.getElementById('advanceFormModal');
         if (modalElement) {
-            this.modal = new bootstrap.Modal(modalElement);
+            // Keep modal under <body> to avoid stacking-context issues where backdrop blocks inputs.
+            if (modalElement.parentElement !== document.body) {
+                document.body.appendChild(modalElement);
+            }
+            this.modal = new bootstrap.Modal(modalElement, { backdrop: true, keyboard: true, focus: true });
+            modalElement.addEventListener('hidden.bs.modal', () => {
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('overflow');
+                document.body.style.removeProperty('padding-right');
+            });
+        }
+
+        const dateInput = document.getElementById('advanceDate');
+        if (dateInput) {
+            dateInput.addEventListener('change', async () => {
+                await this.populateAdvanceEmployeesByDate(dateInput.value || DataManager.formatDate(new Date()));
+            });
+        }
+    },
+
+    _ensureAdvanceModal() {
+        const el = document.getElementById('advanceFormModal');
+        if (!el) return null;
+        if (el.parentElement !== document.body) {
+            document.body.appendChild(el);
+        }
+        if (!this.modal) {
+            this.modal = new bootstrap.Modal(el, { backdrop: true, keyboard: true, focus: true });
+        }
+        return this.modal;
+    },
+
+    async populateAdvanceEmployeesByDate(targetDate, selectedEmployee = '') {
+        const sel = document.getElementById('advanceEmployee');
+        if (!sel) return;
+        const activeRaw = await DataManager.getEmployeesActiveOnDate(targetDate || DataManager.formatDate(new Date()));
+        const activeEmployees = Array.isArray(activeRaw) ? activeRaw : [];
+        const options = activeEmployees
+            .filter((e) => e && String(e.name || '').trim())
+            .map((e) => {
+                const n = String(e.name).trim();
+                const esc = this._escAttr(n);
+                return `<option value="${esc}">${esc}</option>`;
+            })
+            .join('');
+        sel.innerHTML = `<option value="">Select Employee</option>${options}`;
+        if (selectedEmployee) {
+            sel.value = selectedEmployee;
         }
     },
 
@@ -237,6 +300,10 @@ const AdvancesModule = {
         this.editingAdvance = advanceId;
         const form = document.getElementById('advanceForm');
         const title = document.getElementById('advanceFormTitle');
+        if (!form || !title) {
+            App.showNotification('Advances screen is still loading. Wait a moment and try again.', 'warning');
+            return;
+        }
 
         if (advanceId) {
             const advances = await DataManager.getAdvances();
@@ -244,7 +311,7 @@ const AdvancesModule = {
             if (advance) {
                 document.getElementById('advanceId').value = advance.id;
                 document.getElementById('advanceDate').value = DataManager.formatDate(advance.date);
-                document.getElementById('advanceEmployee').value = advance.employee;
+                await this.populateAdvanceEmployeesByDate(DataManager.formatDate(advance.date), advance.employee);
                 document.getElementById('advanceAmount').value = advance.amount;
                 document.getElementById('advanceReason').value = advance.reason || '';
                 title.textContent = 'Edit Advance';
@@ -252,12 +319,22 @@ const AdvancesModule = {
         } else {
             form.reset();
             document.getElementById('advanceId').value = '';
-            document.getElementById('advanceDate').value = DataManager.formatDate(new Date());
+            const today = DataManager.formatDate(new Date());
+            document.getElementById('advanceDate').value = today;
+            await this.populateAdvanceEmployeesByDate(today);
             title.textContent = 'Add Advance';
         }
 
-        if (this.modal) {
-            this.modal.show();
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+
+        const m = this._ensureAdvanceModal();
+        if (m) {
+            m.show();
+        } else {
+            App.showNotification('Could not open advance form. Open Payroll → Advances and try Add Advance again.', 'error');
         }
     },
 
@@ -285,36 +362,44 @@ const AdvancesModule = {
             return;
         }
 
-        const advances = await DataManager.getAdvances();
+        try {
+            let advances = await DataManager.getAdvances();
+            if (!Array.isArray(advances)) advances = [];
 
-        if (advanceId) {
-            // Update existing
-            const index = advances.findIndex(a => a.id === advanceId);
-            if (index !== -1) {
-                advances[index] = {
-                    ...advances[index],
+            if (advanceId) {
+                const index = advances.findIndex(a => a.id === advanceId);
+                if (index !== -1) {
+                    advances[index] = {
+                        ...advances[index],
+                        date,
+                        employee,
+                        amount,
+                        reason
+                    };
+                }
+            } else {
+                advances.push({
+                    id: 'adv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                     date,
                     employee,
                     amount,
                     reason
-                };
+                });
             }
-        } else {
-            // Add new
-            const newAdvance = {
-                id: 'adv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                date,
-                employee,
-                amount,
-                reason
-            };
-            advances.push(newAdvance);
-        }
 
-        await DataManager.saveAdvances(advances);
-        this.modal.hide();
-        await this.renderAdvanceList();
-        App.showNotification('Advance saved successfully', 'success');
+            const saved = await DataManager.saveAdvances(advances);
+            if (saved === false) {
+                App.showNotification('Save was cancelled (e.g. sync conflict). Confirm overwrite if a dialog appears, then try again.', 'error');
+                return;
+            }
+
+            this.modal?.hide();
+            await this.renderAdvanceList();
+            App.showNotification('Advance saved successfully', 'success');
+        } catch (err) {
+            console.error('[AdvancesModule] saveAdvance', err);
+            App.showNotification('Failed to save advance. See console for details.', 'error');
+        }
     },
 
     editAdvance(advanceId) {
@@ -542,9 +627,14 @@ const AdvancesModule = {
             return;
         }
 
-        const advances = await DataManager.getAdvances();
+        let advances = await DataManager.getAdvances();
+        if (!Array.isArray(advances)) advances = [];
         const filtered = advances.filter(a => a.id !== advanceId);
-        await DataManager.saveAdvances(filtered);
+        const saved = await DataManager.saveAdvances(filtered);
+        if (saved === false) {
+            App.showNotification('Delete could not be saved (e.g. sync conflict). Try again.', 'error');
+            return;
+        }
         await this.renderAdvanceList();
         App.showNotification('Advance deleted successfully', 'success');
     },
@@ -629,7 +719,8 @@ const AdvancesModule = {
         await Promise.all(employees.map(async emp => {
             const remaining = await DataManager.getRemainingAdvanceBalance(emp.name, today.getFullYear(), today.getMonth());
             if (remaining > 0) {
-                options += `<option value="${emp.name}">${emp.name} (₹${remaining.toLocaleString('en-IN', { minimumFractionDigits: 2 })} pending)</option>`;
+                const esc = this._escAttr(emp.name);
+                options += `<option value="${esc}">${esc} (₹${remaining.toLocaleString('en-IN', { minimumFractionDigits: 2 })} pending)</option>`;
             }
         }));
 
@@ -701,11 +792,15 @@ const AdvancesModule = {
         };
 
         advances.push(waveOffEntry);
-        await DataManager.saveAdvances(advances);
+        const saved = await DataManager.saveAdvances(advances);
+        if (saved === false) {
+            App.showNotification('Save was cancelled (e.g. sync conflict). Try again.', 'error');
+            return;
+        }
 
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('waveOffModal'));
-        modal.hide();
+        modal?.hide();
 
         // Reload the view
         await this.renderAdvanceList();

@@ -35,8 +35,9 @@ const FileStorage = {
             if (!window.electronAPI) {
                 console.warn("Cloud DB not ready. Saving to localStorage.");
                 localStorage.setItem(key, JSON.stringify(data));
+                return true; // Data was persisted; callers must not treat this as failure
             }
-            return localSuccess; // Return local status if cloud isn't ready
+            return localSuccess; // Electron file write only — reflect actual file result
         }
 
         try {

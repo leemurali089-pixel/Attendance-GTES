@@ -1,13 +1,28 @@
 [
   {
-    "id": "1764094981663",
-    "username": "GTES67",
-    "password": "72345675a2559b416af8a7f8ff9f0380:ed0d4a1bb615c101dcaf7815c979f2a30555aaeb561c1b51824ecb1593072f3f8ca417e1d7bc28e5db735c02947fc1075b628134d41a86e58820dd9b8194d24d",
-    "webPassword": "admin123",
-    "role": "admin",
+    "createdAt": "2026-04-04T11:07:26.566Z",
     "fullName": "Administrator",
-    "createdAt": "2025-11-25T18:23:01.661Z",
+    "id": "1775300846566",
     "isActive": true,
+    "password": "75a4a220ca91ba6c1af235ef636d58af:ab56b29c94e6dc049fdc285d99e06df4580e810ac250bfb61585e0802e33b7256ff0c85cf61e6c6d4a81078ac3fa8e92011924834d39ef7e6866966ca11f17ca",
+    "permissions": [
+      "MANAGE_EMPLOYEES",
+      "MANAGE_ATTENDANCE",
+      "MANAGE_ADVANCES",
+      "MANAGE_HOLIDAYS",
+      "VIEW_REPORTS",
+      "VIEW_DASHBOARD"
+    ],
+    "role": "user",
+    "username": "Ganesh",
+    "webPassword": "admin123"
+  },
+  {
+    "createdAt": "2025-11-25T18:23:01.661Z",
+    "fullName": "Administrator",
+    "id": "1764094981663",
+    "isActive": true,
+    "password": "72345675a2559b416af8a7f8ff9f0380:ed0d4a1bb615c101dcaf7815c979f2a30555aaeb561c1b51824ecb1593072f3f8ca417e1d7bc28e5db735c02947fc1075b628134d41a86e58820dd9b8194d24d",
     "permissions": [
       "view_dashboard",
       "VIEW_DASHBOARD",
@@ -19,6 +34,9 @@
       "MANAGE_USERS",
       "MANAGE_HOLIDAYS",
       "MANAGE_ADVANCES"
-    ]
+    ],
+    "role": "admin",
+    "username": "GTES67",
+    "webPassword": "admin123"
   }
 ]

@@ -5,6 +5,8 @@
  */
 
 const BookKeeperImport = {
+    /** Bump with index.html ?v= when changing import/display logic (helps verify Electron loaded this file). */
+    BUILD_VERSION: '3.1',
     db: null,
     importStats: {},
 
@@ -182,6 +184,145 @@ const BookKeeperImport = {
         parts.push(`NULLIF(CAST(${a}.vch_no AS TEXT), '0')`);
         parts.push(`NULLIF(TRIM(CAST(${a}.vch_no AS TEXT)), '')`);
         return `COALESCE(${parts.join(', ')}, '')`;
+    },
+
+    /**
+     * Printed / company voucher number from a raw Book Keeper vouchers row (for list UI).
+     * Receipts: bill_no → ref_no → vch_no (same idea as buildDisplayVchNoBare).
+     * Payments: bill_no → vch_no → ref_no fallback (same idea as buildCompanyVchNoBare + ref fallback).
+     */
+    getBookKeeperRowDisplayVchNo(row, tableName, isReceipt) {
+        if (!row) return '';
+        const trim = (x) => {
+            if (x == null || x === undefined) return '';
+            const s = String(x).trim();
+            if (s === '' || s === '0') return '';
+            return s;
+        };
+        if (this.hasColumn(tableName, 'bill_no')) {
+            const b = trim(row.bill_no);
+            if (b) return b;
+        }
+        if (isReceipt && this.hasColumn(tableName, 'ref_no')) {
+            const r = trim(row.ref_no);
+            if (r) return r;
+        }
+        const vn = trim(row.vch_no);
+        if (vn) return vn;
+        if (!isReceipt && this.hasColumn(tableName, 'ref_no')) {
+            const r = trim(row.ref_no);
+            if (r) return r;
+        }
+        return '';
+    },
+
+    /** Strip leading zeros for comparing voucher / ref numbers */
+    _sameVoucherRef(a, b) {
+        const x = String(a ?? '').trim();
+        const y = String(b ?? '').trim();
+        if (!x || !y) return false;
+        if (x === y) return true;
+        const xa = x.replace(/^0+/, '') || x;
+        const ya = y.replace(/^0+/, '') || y;
+        return xa === ya;
+    },
+
+    lookupVoucherCompanyVchNoByVid(vid) {
+        if (vid == null || vid === '') return '';
+        const esc = String(vid).replace(/'/g, "''");
+        const n = parseInt(String(vid), 10);
+        const idClause = !isNaN(n) && String(n) === String(vid).trim()
+            ? `(v.v_id = ${n} OR CAST(v.v_id AS TEXT) = '${esc}')`
+            : `CAST(v.v_id AS TEXT) = '${esc}'`;
+        try {
+            const rows = this.query(`SELECT ${this.buildCompanyVchNoAliased('vouchers', 'v')} as vn FROM vouchers v WHERE ${idClause} LIMIT 1`);
+            if (rows.length && rows[0].vn != null && String(rows[0].vn).trim() !== '') return String(rows[0].vn).trim();
+        } catch (e) { /* ignore */ }
+        return '';
+    },
+
+    /**
+     * bill_receipt_payment: parent bill v_id (b_v_id) linked from child voucher (payment / receipt / return).
+     */
+    lookupBillLinkedParentVchNoForChildVId(childVId) {
+        if (!this.db || childVId == null || childVId === '') return '';
+        if (!this.getTables().includes('bill_receipt_payment')) return '';
+        const cols = this.getColumns('bill_receipt_payment');
+        const billCol = cols.includes('b_v_id') ? 'b_v_id' : (cols.includes('bill_id') ? 'bill_id' : '');
+        const childCol = cols.includes('v_id') ? 'v_id' : (cols.includes('r_p_v_id') ? 'r_p_v_id' : '');
+        if (!billCol || !childCol) return '';
+        const esc = String(childVId).replace(/'/g, "''");
+        const n = parseInt(String(childVId), 10);
+        const numOr = !isNaN(n) ? ` OR ${childCol} = ${n}` : '';
+        let rows = [];
+        try {
+            rows = this.query(`SELECT DISTINCT CAST(${billCol} AS TEXT) as bid FROM bill_receipt_payment WHERE ${childCol} = '${esc}'${numOr} LIMIT 8`);
+        } catch (e) {
+            return '';
+        }
+        for (const r of rows) {
+            if (!r || r.bid == null || String(r.bid).trim() === '') continue;
+            const vn = this.lookupVoucherCompanyVchNoByVid(r.bid);
+            if (vn) return vn;
+        }
+        return '';
+    },
+
+    resolveImportedCreditNoteSalesRef(sale, displayInvNo, refPrimary, refSecondary, payRefField) {
+        const inv = String(displayInvNo || '').trim();
+        const vt = String(sale.v_type || '').toLowerCase();
+        const isCn = (vt.includes('credit') && vt.includes('note'))
+            || vt.includes('sales return') || vt.includes('sales-return')
+            || /^.*\/CR\d+$/i.test(inv)
+            || /^CR[-/]/i.test(inv);
+        if (!isCn) return '';
+
+        const sameAsDoc = (x) => {
+            if (!x || x === '-') return true;
+            return this._sameVoucherRef(x, inv);
+        };
+
+        for (const x of [refSecondary, refPrimary, payRefField].map(s => String(s || '').trim())) {
+            if (x && !sameAsDoc(x)) return x;
+        }
+
+        const fromAlloc = this.lookupBillLinkedParentVchNoForChildVId(sale.v_id);
+        if (fromAlloc && !sameAsDoc(fromAlloc)) return fromAlloc;
+
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.parseSalesInvoiceRefFromNarration) {
+            const p = String(VoucherManager.parseSalesInvoiceRefFromNarration(sale.narration) || '').trim();
+            if (p && !sameAsDoc(p)) return p;
+        }
+        return '';
+    },
+
+    resolveImportedDebitNotePurchaseRef(purchase, displayBillNo, refPrimary, refSecondary, payRefField) {
+        const bill = String(displayBillNo || '').trim();
+        const vt = String(purchase.v_type || '').toLowerCase();
+        const billU = String(purchase.vch_no || '').toUpperCase();
+        const isDn = (vt.includes('debit') && vt.includes('note'))
+            || vt.includes('purchase return') || vt.includes('purchases return')
+            || /^PRR/.test(billU) || /^DN/.test(billU) || /^DRN/.test(billU)
+            || /debit\s*note|purchase\s*return|purchases\s*return/i.test(String(purchase.narration || ''));
+        if (!isDn) return '';
+
+        const sameAsDoc = (x) => {
+            if (!x || x === '-') return true;
+            return this._sameVoucherRef(x, bill);
+        };
+
+        for (const x of [refSecondary, payRefField, refPrimary].map(s => String(s || '').trim())) {
+            if (x && !sameAsDoc(x)) return x;
+        }
+
+        const fromAlloc = this.lookupBillLinkedParentVchNoForChildVId(purchase.v_id);
+        if (fromAlloc && !sameAsDoc(fromAlloc)) return fromAlloc;
+
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.parsePurchaseInvoiceRefFromNarration) {
+            const p = String(VoucherManager.parsePurchaseInvoiceRefFromNarration(purchase.narration) || '').trim();
+            if (p && !sameAsDoc(p)) return p;
+        }
+        return '';
     },
 
     /**
@@ -700,12 +841,16 @@ const BookKeeperImport = {
     async importWarehouses() {
         try {
             const warehouses = this.query('SELECT * FROM warehouse');
-            const gtesWarehouses = warehouses.map(w => ({
-                id: `WH-${w.warehouse_id || Date.now()}`,
-                name: w.warehouse_name,
-                location: w.location || '',
-                source: 'bookkeeper'
-            }));
+            const gtesWarehouses = warehouses.map((w, idx) => {
+                const rawName = w.warehouse_name ?? w.name ?? w.w_name ?? w.wh_name ?? w.description ?? w.warehouse ?? '';
+                const name = String(rawName || '').trim() || `Warehouse ${String(w.warehouse_id ?? w.id ?? w.rowid ?? idx + 1)}`;
+                return {
+                    id: `WH-${w.warehouse_id ?? w.id ?? w.rowid ?? Date.now()}-${idx}`,
+                    name,
+                    location: String(w.location ?? w.address ?? w.place ?? '').trim(),
+                    source: 'bookkeeper'
+                };
+            });
 
             if (gtesWarehouses.length > 0) {
                 DataManager.saveData('warehouses', gtesWarehouses);
@@ -1312,20 +1457,19 @@ const BookKeeperImport = {
         `);
 
         const existingVouchers = DataManager.getData('vouchers') || [];
-        const existingIds = new Set(existingVouchers.map(v => v.bookkeeperId));
+        const existingByBkId = new Map();
+        existingVouchers.forEach((ev, i) => {
+            if (ev && ev.bookkeeperId) existingByBkId.set(ev.bookkeeperId, i);
+        });
         const customers = CustomerManager.getAllCustomers();
         const cachedExpenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
         const cachedInvoices = DataManager.getData('invoices') || [];
 
         let imported = 0;
-        let skipped = 0;
+        let updated = 0;
 
         for (const v of vouchers) {
             const bkId = `BK-${v.v_id}`;
-            if (existingIds.has(bkId)) {
-                skipped++;
-                continue;
-            }
 
             const vt = String(v.v_type || '').toLowerCase();
             const isReceipt = vt.includes('receipt');
@@ -1488,10 +1632,16 @@ const BookKeeperImport = {
             const tdsImported = pickVoucherAmt(['tds', 'tds_amount', 'tax_deducted', 'tax_deduction', 't_d_s', 'tds_amt', 'tax_deduct', 'tdsamt']);
             const discountImported = pickVoucherAmt(['discount', 'disc', 'disc_amt', 'less', 'discount_amount', 'cash_discount', 'bill_discount', 'v_discount', 'less_amount', 'disc_amount']);
 
+            const displayVch = this.getBookKeeperRowDisplayVchNo(v, tableName, isReceipt);
+            const internalVch = String(v.vch_no != null ? v.vch_no : '').trim();
+
+            const nowIso = new Date().toISOString();
             const voucher = {
                 // Never use vch_no as id — numbers repeat across years/series; sync merge dedupes by id and drops rows.
                 id: bkId,
                 bookkeeperId: bkId,
+                bookkeeperVchNo: internalVch,
+                displayVoucherNo: displayVch || '',
                 date: this.formatDate(v.date),
                 customerId: customerId,
                 partyId: customerPartyId || (customerId ? CustomerManager.resolvePartyId({ customerId, customerName: bkCustomerName }) : ''),
@@ -1503,19 +1653,34 @@ const BookKeeperImport = {
                 paymentMode: pMode, // Use detected mode
                 mode: pMode,        // Backward compatibility
                 narration: v.narration || '',
-                voucherNo: v.vch_no || '',
+                voucherNo: displayVch || internalVch || '',
                 // Capture reference/invoice link
                 linkedInvoiceId: linkedInvoices[0] || '',
                 linkedInvoices: linkedInvoices,
                 allocations: allocations,
                 referenceId: v.cheque_no || v.payment_ref_no || '',
-                createdAt: new Date().toISOString(),
+                createdAt: nowIso,
                 source: 'bookkeeper'
             };
 
-            existingVouchers.push(voucher);
-            existingIds.add(bkId);
-            imported++;
+            const existingIdx = existingByBkId.get(bkId);
+            if (existingIdx !== undefined) {
+                const prev = existingVouchers[existingIdx] || {};
+                existingVouchers[existingIdx] = {
+                    ...prev,
+                    ...voucher,
+                    id: bkId,
+                    bookkeeperId: bkId,
+                    createdAt: prev.createdAt || voucher.createdAt,
+                    updatedAt: nowIso,
+                    source: 'bookkeeper'
+                };
+                updated++;
+            } else {
+                existingVouchers.push(voucher);
+                existingByBkId.set(bkId, existingVouchers.length - 1);
+                imported++;
+            }
         }
 
         // Fix existing records if they were imported with "Bank" or "Cash"
@@ -1528,7 +1693,8 @@ const BookKeeperImport = {
 
         DataManager.saveDataSync('vouchers', existingVouchers);
 
-        return { imported, skipped, total: vouchers.length };
+        console.log(`[Import] Vouchers: ${imported} new, ${updated} updated from Book Keeper (${vouchers.length} rows in backup).`);
+        return { imported, updated, skipped: 0, total: vouchers.length };
     },
 
     /**
@@ -1625,9 +1791,14 @@ const BookKeeperImport = {
 
         const vchNoField = `${this.buildCompanyVchNoAliased(voucherTable, 'v')} as vch_no`;
         const hasVRefNo = this.hasColumn(voucherTable, 'ref_no');
-        const saleRefSelect = hasVRefNo
-            ? `, COALESCE(NULLIF(TRIM(CAST(v.ref_no AS TEXT)), ''), '') as bk_sale_ref_no`
-            : `, '' as bk_sale_ref_no`;
+        const hasSaleReferenceNo = this.hasColumn(voucherTable, 'reference_no');
+        const hasSalePaymentRef = this.hasColumn(voucherTable, 'payment_reference');
+        const saleAuxSelect = [
+            hasVRefNo ? `TRIM(CAST(v.ref_no AS TEXT)) as bk_raw_ref_no` : `'' as bk_raw_ref_no`,
+            hasSaleReferenceNo ? `TRIM(CAST(v.reference_no AS TEXT)) as bk_raw_reference_no` : `'' as bk_raw_reference_no`,
+            hasSalePaymentRef ? `TRIM(CAST(v.payment_reference AS TEXT)) as bk_raw_payment_ref` : `'' as bk_raw_payment_ref`
+        ].join(', ');
+        const saleRefSelect = `, ${saleAuxSelect}`;
 
         // Party detection:
         // - Normal sales: debit is usually the party.
@@ -1742,7 +1913,10 @@ const BookKeeperImport = {
         for (const sale of salesVouchers) {
             const bkId = `BK-INV-${sale.v_id}`;
             const invNo = (sale.vch_no || '').trim();
-            const saleRefRaw = (sale.bk_sale_ref_no != null ? String(sale.bk_sale_ref_no) : '').trim();
+            const refPrimary = String(sale.bk_raw_ref_no || '').trim();
+            const refSecondary = String(sale.bk_raw_reference_no || '').trim();
+            const payRefField = String(sale.bk_raw_payment_ref || '').trim();
+            const saleRefRaw = refPrimary || refSecondary || payRefField;
 
             // Mapping for Customer
             let customerId = '';
@@ -2093,8 +2267,9 @@ const BookKeeperImport = {
                 roundOff: parseFloat(sale.round_off) || 0,
                 status: status,
                 narration: sale.narration || '',
-                poNumber: saleRefRaw || undefined,
-                referenceNo: saleRefRaw || undefined,
+                // Firebase / RTDB reject undefined — use '' when no ref (falsy saleRefRaw must not become undefined)
+                poNumber: saleRefRaw ? saleRefRaw : '',
+                referenceNo: saleRefRaw ? saleRefRaw : '',
                 billType: 'gst',
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper',
@@ -2113,6 +2288,17 @@ const BookKeeperImport = {
                 invoice.status = 'posted';
             }
             invoice.isCreditNote = Boolean(isBkCreditNote || totalAmt < 0);
+
+            if (invoice.isCreditNote) {
+                const linkedSr = this.resolveImportedCreditNoteSalesRef(sale, invNo, refPrimary, refSecondary, payRefField);
+                if (linkedSr) {
+                    invoice.salesInvoiceRef = linkedSr;
+                    invoice.referenceNo = linkedSr;
+                } else if (String(invoice.referenceNo || '').trim() && this._sameVoucherRef(invoice.referenceNo, invNo)) {
+                    delete invoice.referenceNo;
+                }
+                if (invoice.poNumber && this._sameVoucherRef(invoice.poNumber, invNo)) delete invoice.poNumber;
+            }
 
             // Calculate Subtotal and GST
             invoice.subtotal = invoice.items.reduce((sum, item) => sum + item.amount, 0);
@@ -2205,7 +2391,10 @@ const BookKeeperImport = {
 
             if (invoice.isCreditNote && typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef) {
                 const rr = String(VoucherManager.resolveCreditNoteSalesRef(invoice) || '').trim();
-                if (rr && !String(invoice.referenceNo || '').trim()) invoice.referenceNo = rr;
+                if (rr) {
+                    if (!String(invoice.referenceNo || '').trim()) invoice.referenceNo = rr;
+                    if (!String(invoice.salesInvoiceRef || '').trim()) invoice.salesInvoiceRef = rr;
+                }
             }
 
             const partyKey = (n) => String(n || '').toLowerCase().replace(/[,\s]+/g, ' ').trim();
@@ -2289,8 +2478,14 @@ const BookKeeperImport = {
         const accSelect = accountDetailCols.length > 0 ? `, ${accountDetailCols.join(', ')}` : '';
 
         const hasRefNo = this.hasColumn('vouchers', 'ref_no');
+        const hasPurReferenceNo = this.hasColumn('vouchers', 'reference_no');
+        const hasPurPaymentRef = this.hasColumn('vouchers', 'payment_reference');
         const vchNoField = `${this.buildCompanyVchNoAliased('vouchers', 'v')} as vch_no`;
-        const refNoField = hasRefNo ? "COALESCE(v.ref_no, '') as ref_no" : "'' as ref_no";
+        const refNoField = hasRefNo ? "COALESCE(TRIM(CAST(v.ref_no AS TEXT)), '') as ref_no" : "'' as ref_no";
+        const purAuxRefSelect = [
+            hasPurReferenceNo ? `TRIM(CAST(v.reference_no AS TEXT)) as bk_raw_reference_no` : `'' as bk_raw_reference_no`,
+            hasPurPaymentRef ? `TRIM(CAST(v.payment_reference AS TEXT)) as bk_raw_payment_ref` : `'' as bk_raw_payment_ref`
+        ].join(', ');
 
         // 1. Detect Line Item Table globally
         // User has 'sales' and 'purchases' tables, but also potentially 'po_so_item' or 'bill_receipt_payment'
@@ -2384,6 +2579,7 @@ const BookKeeperImport = {
             SELECT DISTINCT v.v_id, ${vendorExpr} as vendor_name, v.date, ${amtFieldPurchase} as amount, v.narration, ${vchNoField},
                    CAST(v.vch_no AS TEXT) as bk_internal_vch,
                    ${refNoField},
+                   ${purAuxRefSelect},
                    COALESCE(${balanceField}, 0) as balance_amount,
                    COALESCE(${paidField}, 0) as total_paid,
                    COALESCE(${roundedOffField}, 0) as round_off,
@@ -2411,9 +2607,21 @@ const BookKeeperImport = {
         for (const purchase of purchaseVouchers) {
             const bkId = `BK-PUR-${purchase.v_id}`;
             const billNo = (purchase.vch_no || '').trim();
-
-            console.log('Vouchers Columns:', this.getColumns('vouchers'));
-            console.log('Account Detail Columns:', this.getColumns('account_detail'));
+            const refPrimary = String(purchase.ref_no || '').trim();
+            const refSecondary = String(purchase.bk_raw_reference_no || '').trim();
+            const payRefField = String(purchase.bk_raw_payment_ref || '').trim();
+            const purVtLowerEarly = String(purchase.v_type || '').toLowerCase();
+            const billNoUpperEarly = String(purchase.vch_no || '').toUpperCase();
+            const isBkDebitNote = (purVtLowerEarly.includes('debit') && purVtLowerEarly.includes('note'))
+                || purVtLowerEarly.includes('purchase return')
+                || purVtLowerEarly.includes('purchases return')
+                || /^PRR/.test(billNoUpperEarly)
+                || /^DN/.test(billNoUpperEarly)
+                || /^DRN/.test(billNoUpperEarly)
+                || /debit\s*note|purchase\s*return|purchases\s*return/i.test(String(purchase.narration || ''));
+            const linkedPur = isBkDebitNote
+                ? this.resolveImportedDebitNotePurchaseRef(purchase, billNo, refPrimary, refSecondary, payRefField)
+                : '';
 
             // HYPER-ROBUST ITEM RECOVERY FOR PURCHASES
             let itemsRaw = [];
@@ -2762,6 +2970,14 @@ const BookKeeperImport = {
                 ? CustomerManager.resolvePartyId({ customerName: cleanVendor, accountType: 'supplier' })
                 : '';
 
+            const supplierBillNoVal = isBkDebitNote
+                ? (billNo || refPrimary || '')
+                : (refPrimary || billNo || '');
+            const purchaseRefVal = isBkDebitNote ? (linkedPur || '') : refPrimary;
+            const referenceNoVal = isBkDebitNote
+                ? (linkedPur || refSecondary || refPrimary || '')
+                : (refPrimary || refSecondary || payRefField || '');
+
             const expense = {
                 id: purchase.vch_no || `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 bookkeeperId: bkId,
@@ -2782,23 +2998,14 @@ const BookKeeperImport = {
                 otherCharges: parseFloat(purchase.v_other_charges || 0),
                 gst: { cgst, sgst, igst },
                 cgst, sgst, igst,
-                billNo: purchase.vch_no || '',
-                supplierBillNo: purchase.ref_no || '',
-                referenceNo: purchase.ref_no || '',
-                purchaseInvoiceRef: purchase.ref_no || '',
+                billNo: billNo || purchase.vch_no || '',
+                supplierBillNo: supplierBillNoVal,
+                referenceNo: referenceNoVal,
+                purchaseInvoiceRef: purchaseRefVal,
                 createdAt: new Date().toISOString(),
                 source: 'bookkeeper'
             };
 
-            const purVtLower = String(purchase.v_type || '').toLowerCase();
-            const billNoUpper = String(purchase.vch_no || '').toUpperCase();
-            const isBkDebitNote = (purVtLower.includes('debit') && purVtLower.includes('note'))
-                || purVtLower.includes('purchase return')
-                || purVtLower.includes('purchases return')
-                || /^PRR/.test(billNoUpper)
-                || /^DN/.test(billNoUpper)
-                || /^DRN/.test(billNoUpper)
-                || /debit\s*note|purchase\s*return|purchases\s*return/i.test(String(purchase.narration || ''));
             if (isBkDebitNote || pTotalAmt < 0) {
                 expense.type = 'debit-note';
                 expense.isDebitNote = true;
@@ -3665,11 +3872,15 @@ const BookKeeperImport = {
     },
 
     /**
-     * Get summary of import
+     * Summary of the last runFullImport (uses this.importStats).
+     * Note: a separate full import report for the analytics modal is buildImportModalSummary(stats).
      */
     getSummary() {
         const stats = this.importStats;
         const sections = [];
+        if (!stats) {
+            return { sections: [], totalImported: 0, duration: 0 };
+        }
 
         if (stats.company) {
             sections.push({
@@ -3702,6 +3913,7 @@ const BookKeeperImport = {
                 name: 'Vouchers',
                 status: 'success',
                 imported: stats.vouchers.imported,
+                updated: stats.vouchers.updated || 0,
                 skipped: stats.vouchers.skipped
             });
         }
@@ -3751,7 +3963,7 @@ const BookKeeperImport = {
             });
         }
 
-        stats.errors.forEach(err => {
+        (stats.errors || []).forEach(err => {
             sections.push({
                 name: err.section,
                 status: 'error',
@@ -3761,7 +3973,7 @@ const BookKeeperImport = {
 
         return {
             sections,
-            totalImported: sections.reduce((sum, s) => sum + (s.imported || 0), 0),
+            totalImported: sections.reduce((sum, s) => sum + (s.imported || 0) + (s.updated || 0), 0),
             duration: stats.duration,
         };
     },
@@ -4012,15 +4224,26 @@ const BookKeeperImport = {
     },
 
     /**
-     * Generate Summary Data for UI
+     * Full import report for the manual import results UI (analytics modal).
      */
-    getSummary(stats) {
+    buildImportModalSummary(stats) {
+        if (!stats) {
+            return {
+                totalImported: 0,
+                duration: 0,
+                sections: [],
+                foundTables: [],
+                debugColumns: {}
+            };
+        }
         let totalImported = 0;
         if (stats.company) totalImported++;
         if (stats.customers) totalImported += (stats.customers.imported || 0);
         if (stats.inventory) totalImported += (stats.inventory.imported || 0);
         if (stats.services) totalImported += (stats.services.imported || 0);
-        if (stats.vouchers) totalImported += (stats.vouchers.imported || 0);
+        if (stats.vouchers) {
+            totalImported += (stats.vouchers.imported || 0) + (stats.vouchers.updated || 0);
+        }
         if (stats.sales) totalImported += (stats.sales.imported || 0);
         if (stats.purchases) totalImported += (stats.purchases.imported || 0);
         if (stats.taxSchemes) totalImported += (stats.taxSchemes.imported || 0);
@@ -4032,7 +4255,12 @@ const BookKeeperImport = {
             { name: 'Company', status: stats.company ? 'success' : 'skipped', imported: stats.company ? 1 : 0 },
             { name: 'Customers', status: stats.customers ? 'success' : 'skipped', imported: stats.customers ? stats.customers.imported : 0 },
             { name: 'Inventory', status: stats.inventory ? 'success' : 'skipped', imported: stats.inventory ? stats.inventory.imported : 0 },
-            { name: 'Vouchers', status: stats.vouchers ? 'success' : 'skipped', imported: stats.vouchers ? stats.vouchers.imported : 0 },
+            {
+                name: 'Vouchers',
+                status: stats.vouchers ? 'success' : 'skipped',
+                imported: stats.vouchers ? stats.vouchers.imported : 0,
+                updated: stats.vouchers ? (stats.vouchers.updated || 0) : 0
+            },
             { name: 'Estimates', status: stats.estimates ? 'success' : 'skipped', imported: stats.estimates ? stats.estimates.imported : 0 },
             { name: 'Challans', status: stats.challans ? 'success' : 'skipped', imported: stats.challans ? stats.challans.imported : 0 },
             { name: 'Sales/Invoices', status: stats.sales ? 'success' : 'skipped', imported: stats.sales ? stats.sales.imported : 0 },
@@ -4052,3 +4280,4 @@ const BookKeeperImport = {
 
 // Expose to window
 window.BookKeeperImport = BookKeeperImport;
+console.log('[BookKeeperImport] loaded build', BookKeeperImport.BUILD_VERSION);

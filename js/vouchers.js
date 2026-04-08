@@ -703,9 +703,11 @@ const VoucherManager = {
         if (!s) return '';
         const clean = (raw) => String(raw || '').replace(/[,;.]+$/g, '').trim();
         const patterns = [
+            /sales\s+invoice\s+ref\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /original\s+(?:tax\s+)?invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /original\s+invoice\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
-            /against\s+invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /against\s+(?:sales\s+)?invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /sales\s+invoice\s*(?:no\.?|number)?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /bill\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i
         ];
@@ -724,8 +726,10 @@ const VoucherManager = {
         if (!s) return '';
         const clean = (raw) => String(raw || '').replace(/[,;.]+$/g, '').trim();
         const patterns = [
+            /purchase\s+invoice\s+ref\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /purchase\s*invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /supplier\s*invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
+            /against\s+(?:purchase\s+|p\/?\s*)?(?:bill|invoice)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /against\s+(?:bill|invoice)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i,
             /invoice\s*no\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\/\-\.]*)/i
         ];

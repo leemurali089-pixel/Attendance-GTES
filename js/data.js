@@ -1231,11 +1231,18 @@ const DataManager = {
     // Advance Operations
     async getAdvances() {
         const data = await this.loadData(this.KEYS.ADVANCES);
-        return data || [];
+        if (Array.isArray(data)) return data;
+        // Legacy / corrupt payloads (e.g. object map) would break .sort/.push in the UI
+        if (data != null && typeof data === 'object') {
+            const vals = Object.values(data);
+            if (vals.length && vals.every((x) => x && typeof x === 'object')) return vals;
+        }
+        return [];
     },
 
     async saveAdvances(advances) {
-        await this.saveData(this.KEYS.ADVANCES, advances);
+        const list = Array.isArray(advances) ? advances : [];
+        return await this.saveData(this.KEYS.ADVANCES, list);
     },
 
     async getAdvancesByEmployee(employeeName, year, month) {

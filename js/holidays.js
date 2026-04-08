@@ -1,6 +1,12 @@
 // Holiday Management Module (CRUD)
 const HolidaysModule = {
     editingHoliday: null,
+    _resetModalState() {
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    },
 
     async load() {
         await this.renderHolidayList();
@@ -99,7 +105,11 @@ const HolidaysModule = {
         // Initialize modal
         const modalElement = document.getElementById('holidayFormModal');
         if (modalElement) {
-            this.modal = new bootstrap.Modal(modalElement);
+            if (modalElement.parentElement !== document.body) {
+                document.body.appendChild(modalElement);
+            }
+            this.modal = new bootstrap.Modal(modalElement, { backdrop: true, keyboard: true, focus: true });
+            modalElement.addEventListener('hidden.bs.modal', () => this._resetModalState());
         }
     },
 
@@ -123,6 +133,7 @@ const HolidaysModule = {
             title.textContent = 'Add Holiday';
         }
 
+        this._resetModalState();
         if (this.modal) {
             this.modal.show();
         }
@@ -183,8 +194,12 @@ const HolidaysModule = {
             holidays.push(newHoliday);
         }
 
-        await DataManager.saveHolidays(holidays);
-        this.modal.hide();
+        const saved = await DataManager.saveHolidays(holidays);
+        if (saved === false) {
+            App.showNotification('Save was cancelled (e.g. sync conflict). Try again.', 'error');
+            return;
+        }
+        this.modal?.hide();
         await this.renderHolidayList();
         App.showNotification('Holiday saved successfully', 'success');
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs').promises;
@@ -99,6 +99,13 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+    if (!app.isPackaged) {
+        try {
+            session.defaultSession.setCacheEnabled(false);
+        } catch (e) {
+            console.warn('Dev cache disable skipped:', e && e.message);
+        }
+    }
     await ensureDataFolder();
     createWindow();
 

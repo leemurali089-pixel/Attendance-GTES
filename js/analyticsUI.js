@@ -2049,7 +2049,7 @@ const AnalyticsUI = {
 
             // Run the import
             const stats = await BookKeeperImport.runFullImport(file, options);
-            const summary = BookKeeperImport.getSummary(stats);
+            const summary = BookKeeperImport.buildImportModalSummary(stats);
 
             // Display results
             resultsContainer.innerHTML = `
@@ -2070,6 +2070,7 @@ const AnalyticsUI = {
                             <div>
                                 ${section.imported !== undefined ? `
                                     <span class="badge bg-success">${section.imported} imported</span>
+                                    ${section.updated > 0 ? `<span class="badge bg-info">${section.updated} updated</span>` : ''}
                                     ${section.skipped > 0 ? `<span class="badge bg-secondary">${section.skipped} skipped</span>` : ''}
                                 ` : ''}
                             </div>

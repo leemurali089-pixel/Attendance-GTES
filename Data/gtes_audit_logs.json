@@ -1,10 +1,17 @@
 [
   {
+    "id": "1775638364993",
+    "timestamp": "2026-04-08T08:52:44.993Z",
+    "user": "GTES67",
+    "action": "USER_UPDATE",
+    "details": "Updated user Ganesh"
+  },
+  {
+    "action": "BACKUP_IMPORT",
+    "details": "Imported full backup from backup_full_2026-04-04T12-09-56-654Z.json",
     "id": "1775554923269",
     "timestamp": "2026-04-07T09:42:03.269Z",
-    "user": "GTES67",
-    "action": "BACKUP_IMPORT",
-    "details": "Imported full backup from backup_full_2026-04-04T12-09-56-654Z.json"
+    "user": "GTES67"
   },
   {
     "action": "BACKUP_IMPORT",

@@ -1,6 +1,7 @@
 // Bonus Management Module
 const BonusModule = {
     currentYear: new Date().getFullYear(),
+    currentBonusList: null,
 
     // Initialize the module
     async load() {
@@ -18,31 +19,74 @@ const BonusModule = {
      * @param {number} payYear - Payout Year (e.g., 2025)
      * @returns {Promise<Object>} - Calculation details
      */
-    async calculateBonusForEmployee(employee, payMonth, payYear) {
+    _getBonusWindowMonths(payMonth, payYear) {
+        const months = [];
+        const startMonth = payMonth;
+        const startYear = payYear - 1;
+        for (let i = 0; i < 12; i++) {
+            const month = (startMonth + i) % 12;
+            const year = startYear + Math.floor((startMonth + i) / 12);
+            months.push({ year, month, key: `${year}-${String(month).padStart(2, '0')}` });
+        }
+        return months;
+    },
+
+    async _buildAttendanceIndexForBonus(windowMonths, employeeNames) {
+        const keySet = new Set((windowMonths || []).map(w => w.key));
+        const wantedEmployees = employeeNames instanceof Set ? employeeNames : new Set(employeeNames || []);
+        const allAttendance = await DataManager.getAttendance();
+        const index = new Map(); // monthKey -> Map(employeeName -> records[])
+
+        for (const rec of allAttendance || []) {
+            const dt = new Date(rec?.date || 0);
+            if (!Number.isFinite(dt.getTime())) continue;
+            const k = `${dt.getFullYear()}-${String(dt.getMonth()).padStart(2, '0')}`;
+            if (!keySet.has(k)) continue;
+            const emp = String(rec?.employee || '').trim();
+            if (!emp) continue;
+            if (wantedEmployees.size && !wantedEmployees.has(emp)) continue;
+
+            let byEmp = index.get(k);
+            if (!byEmp) {
+                byEmp = new Map();
+                index.set(k, byEmp);
+            }
+            let rows = byEmp.get(emp);
+            if (!rows) {
+                rows = [];
+                byEmp.set(emp, rows);
+            }
+            rows.push(rec);
+        }
+
+        return index;
+    },
+
+    async calculateBonusForEmployee(employee, payMonth, payYear, attendanceIndex = null, windowMonths = null) {
         let totalEarnedBasic = 0;
         let monthDetails = [];
 
-        // Start from the same month in the previous year
-        let startMonth = payMonth;
-        let startYear = payYear - 1;
+        const winMonths = Array.isArray(windowMonths) && windowMonths.length
+            ? windowMonths
+            : this._getBonusWindowMonths(payMonth, payYear);
 
-        // Iterate through 12 months
-        for (let i = 0; i < 12; i++) {
-            let currentMonth = (startMonth + i) % 12;
-            let currentYear = startYear + Math.floor((startMonth + i) / 12);
+        for (const w of winMonths) {
+            let empAttendance = [];
+            if (attendanceIndex && attendanceIndex.get) {
+                const byEmp = attendanceIndex.get(w.key);
+                empAttendance = byEmp?.get(employee.name) || [];
+            } else {
+                const attendance = await DataManager.getAttendanceByMonth(w.year, w.month);
+                empAttendance = attendance.filter(a => a.employee === employee.name);
+            }
 
-            // Get attendance for this month
-            const attendance = await DataManager.getAttendanceByMonth(currentYear, currentMonth);
-            const empAttendance = attendance.filter(a => a.employee === employee.name);
-
-            // Calculate Earned Basic for this month
-            const earnedBasic = await this._calculateMonthlyEarnedBasic(employee, currentYear, currentMonth, empAttendance);
+            const earnedBasic = this._calculateMonthlyEarnedBasic(employee, w.year, w.month, empAttendance);
 
             if (earnedBasic > 0) {
                 totalEarnedBasic += earnedBasic;
                 monthDetails.push({
-                    month: currentMonth,
-                    year: currentYear,
+                    month: w.month,
+                    year: w.year,
                     earned: earnedBasic
                 });
             }
@@ -68,7 +112,7 @@ const BonusModule = {
      * Helper to calculate earned basic salary for a month
      * Replicates logic from SalaryModule but focuses only on Basic Salary
      */
-    async _calculateMonthlyEarnedBasic(employee, year, month, attendanceRecords) {
+    _calculateMonthlyEarnedBasic(employee, year, month, attendanceRecords) {
         const daysInMonth = DataManager.getDaysInMonth(year, month);
 
         // Get base salary (handle salary revisions if possible, but for now use current base)
@@ -123,12 +167,17 @@ const BonusModule = {
     /**
      * Generate bonus payout list for a payout month/year
      */
-    async generateBonusList(payMonth, payYear) {
+    async generateBonusList(payMonth, payYear, onProgress = null) {
         const employees = await DataManager.getEmployees();
+        const employeeNames = new Set((employees || []).map(e => String(e?.name || '').trim()).filter(Boolean));
+        const windowMonths = this._getBonusWindowMonths(payMonth, payYear);
+        const attendanceIndex = await this._buildAttendanceIndexForBonus(windowMonths, employeeNames);
         const bonusList = [];
 
-        for (const emp of employees) {
-            const calculation = await this.calculateBonusForEmployee(emp, payMonth, payYear);
+        for (let i = 0; i < employees.length; i++) {
+            const emp = employees[i];
+            if (!emp || !emp.name) continue;
+            const calculation = await this.calculateBonusForEmployee(emp, payMonth, payYear, attendanceIndex, windowMonths);
             if (calculation.calculatedBonus > 0) {
                 bonusList.push({
                     ...calculation,
@@ -136,6 +185,12 @@ const BonusModule = {
                     status: 'Pending', // Pending, Paid
                     remarks: ''
                 });
+            }
+            if (typeof onProgress === 'function' && (i === 0 || (i + 1) % 10 === 0 || i === employees.length - 1)) {
+                onProgress(i + 1, employees.length);
+            }
+            if ((i + 1) % 25 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
 
@@ -171,7 +226,10 @@ const BonusModule = {
         resultsArea.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"></div><p>Calculating bonuses...</p></div>';
 
         try {
-            const bonusList = await this.generateBonusList(payMonth, payYear);
+            const progress = (done, total) => {
+                resultsArea.innerHTML = `<div class="text-center"><div class="spinner-border text-primary" role="status"></div><p>Calculating bonuses... ${done}/${total}</p></div>`;
+            };
+            const bonusList = await this.generateBonusList(payMonth, payYear, progress);
 
             if (bonusList.length === 0) {
                 resultsArea.innerHTML = '<div class="alert alert-warning">No eligible employees found for bonus in this period.</div>';

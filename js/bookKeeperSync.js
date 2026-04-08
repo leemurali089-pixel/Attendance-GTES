@@ -11,6 +11,25 @@ const BookKeeperSync = {
     },
 
     /**
+     * Records touched in a full import (aligned with BookKeeperImport.buildImportModalSummary totals).
+     * Used after runFullImport so we never call BookKeeperImport.getSummary() here — duplicate method names
+     * in older bookKeeperImport builds could make getSummary the wrong overload and throw.
+     */
+    countImportTouches(stats) {
+        if (!stats) return 0;
+        let n = 0;
+        if (stats.company) n++;
+        if (stats.customers) n += stats.customers.imported || 0;
+        if (stats.inventory) n += stats.inventory.imported || 0;
+        if (stats.services) n += stats.services.imported || 0;
+        if (stats.vouchers) n += (stats.vouchers.imported || 0) + (stats.vouchers.updated || 0);
+        if (stats.sales) n += stats.sales.imported || 0;
+        if (stats.purchases) n += stats.purchases.imported || 0;
+        if (stats.taxSchemes) n += stats.taxSchemes.imported || 0;
+        return n;
+    },
+
+    /**
      * Verify imported data integrity
      * Checks if key collections are populated and have valid links
      */
@@ -386,29 +405,37 @@ const BookKeeperSync = {
                 SyncManager.setSyncProgress(99, 'Finalizing sync');
             }
 
-            // 4. Update sync metadata
+            // 4. Update sync metadata (runFullImport returns importStats, not getSummary sections)
+            const vStats = stats.vouchers;
+            const voucherCount = vStats
+                ? (vStats.imported || 0) + (vStats.updated || 0)
+                : 0;
+            const custStats = stats.customers;
+            const invStats = stats.inventory;
             this.config.lastSyncDetails = {
                 time: new Date().getTime(),
                 counts: {
-                    vouchers: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Vouchers')?.imported || 0) : 0,
-                    customers: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Customers')?.imported || 0) : 0,
-                    inventory: stats.totalImported > 0 ? (stats.sections.find(s => s.name === 'Inventory')?.imported || 0) : 0
+                    vouchers: voucherCount,
+                    customers: custStats ? (custStats.imported || 0) : 0,
+                    inventory: invStats ? (invStats.imported || 0) : 0
                 },
                 path: sourceLabel
             };
             this.saveConfig();
+
+            const totalTouched = this.countImportTouches(stats);
 
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.updateStatus(isVerified ? 'synced' : 'warning', isVerified ? 'Synced with Book Keeper' : 'Synced with Data Warnings');
                 if (typeof SyncManager.clearSyncProgress === 'function') {
                     SyncManager.clearSyncProgress();
                 }
-                SyncManager.logSyncEvent(isVerified ? 'success' : 'warning', `Book Keeper import complete (${stats.totalImported} records).`);
+                SyncManager.logSyncEvent(isVerified ? 'success' : 'warning', `Book Keeper import complete (${totalTouched} records).`);
             }
 
             // 5. Update UI
             if (typeof App !== 'undefined' && App.showNotification) {
-                App.showNotification(`Book Keeper sync complete: ${stats.totalImported} records imported.`, 'success');
+                App.showNotification(`Book Keeper sync complete: ${totalTouched} records imported or updated.`, 'success');
             }
 
             // Refresh dashboards if currently visible
@@ -417,6 +444,8 @@ const BookKeeperSync = {
                     AccountingUI.renderDashboard();
                 } else if (App.currentView === 'invoices' && typeof InvoicesUI !== 'undefined') {
                     await InvoicesUI.load?.();
+                } else if (App.currentView === 'vouchers' && typeof VouchersUI !== 'undefined') {
+                    await VouchersUI.load?.();
                 }
             }
         } catch (e) {

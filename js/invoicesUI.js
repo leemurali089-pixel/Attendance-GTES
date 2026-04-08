@@ -16,6 +16,8 @@ const InvoicesUI = {
     },
 
     currentStatusFilter: 'all',
+    /** Sales list: filter by whether receipt vouchers allocate to this bill (explains bill vs ledger gaps). */
+    currentVoucherLinkFilter: 'all',
     searchTimeout: null,
 
     async init() {
@@ -65,6 +67,40 @@ const InvoicesUI = {
             } catch (e) { }
         }
         return null;
+    },
+
+    _partyLedgerCacheKey(inv) {
+        const pid = String(inv?.partyId || '').trim();
+        if (pid) return `p:${pid}`;
+        const cid = String(inv?.customerId || '').trim();
+        if (cid) return `c:${cid}`;
+        return `n:${String(inv?.customerName || '').trim()}`;
+    },
+
+    /** Max receipt allocation recorded against this invoice (by id / invoice no / BK refs). */
+    _receiptAllocatedForInvoice(inv, allocMap) {
+        if (!inv || !allocMap || typeof allocMap.get !== 'function') return 0;
+        let maxA = 0;
+        for (const k of [inv.id, inv.invoiceNo, inv.bookkeeperVchNo, inv.bookkeeperId]) {
+            if (k == null || k === '') continue;
+            const v = allocMap.get(String(k).trim()) || 0;
+            if (v > maxA) maxA = v;
+        }
+        return maxA;
+    },
+
+    _invoiceMatchesVoucherLinkFilter(inv, filter, allocMap) {
+        if (filter === 'all' || !filter) return true;
+        const alloc = this._receiptAllocatedForInvoice(inv, allocMap);
+        const bal = parseFloat(inv.balance) || 0;
+        if (filter === 'linked') return alloc > 0.05;
+        if (filter === 'unlinked') return alloc <= 0.05 && bal > 0.05;
+        return true;
+    },
+
+    setVoucherLinkFilter(val) {
+        this.currentVoucherLinkFilter = val;
+        this.updateTable();
     },
 
     load(params = {}) {
@@ -218,6 +254,22 @@ const InvoicesUI = {
                                 </div>
                             </div>
                         </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-12">
+                                <label class="form-label small text-white-50 mb-1">Receipt link (per bill)</label>
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <div class="btn-group" role="group">
+                                        <input type="radio" class="btn-check" name="voucherLinkFilter" id="vlinkAll" value="all" ${this.currentVoucherLinkFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setVoucherLinkFilter('all')">
+                                        <label class="btn btn-outline-secondary btn-sm" for="vlinkAll">All</label>
+                                        <input type="radio" class="btn-check" name="voucherLinkFilter" id="vlinkLinked" value="linked" ${this.currentVoucherLinkFilter === 'linked' ? 'checked' : ''} onchange="InvoicesUI.setVoucherLinkFilter('linked')">
+                                        <label class="btn btn-outline-info btn-sm" for="vlinkLinked">Linked</label>
+                                        <input type="radio" class="btn-check" name="voucherLinkFilter" id="vlinkUnlinked" value="unlinked" ${this.currentVoucherLinkFilter === 'unlinked' ? 'checked' : ''} onchange="InvoicesUI.setVoucherLinkFilter('unlinked')">
+                                        <label class="btn btn-outline-warning btn-sm" for="vlinkUnlinked">Not linked</label>
+                                    </div>
+                                    <span class="text-white-50 small">Ledger due uses Account Ledger closing for the period above; Balance is this bill’s open amount from receipt allocations.</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="input-group">
                             <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
                             <input type="text" class="form-control bg-dark text-light border-secondary" id="invoiceSearch" 
@@ -268,6 +320,11 @@ const InvoicesUI = {
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
+        const linkFilter = this.currentVoucherLinkFilter || 'all';
+        const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
+        const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
+            ? VoucherManager.getVoucherAllocationsMap(null, 'receipt')
+            : new Map();
 
         const invYm = (d) => {
             if (!d) return '';
@@ -287,8 +344,9 @@ const InvoicesUI = {
                                (inv.invoiceNo || '').toLowerCase().includes(query) || 
                                (inv.customerName || '').toLowerCase().includes(query) ||
                                (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
+            const linkMatch = this._invoiceMatchesVoucherLinkFilter(inv, linkFilter, allocMap);
 
-            return yearMatch && monthMatch && customerMatch && statusMatch && searchMatch;
+            return yearMatch && monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
         });
 
         const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
@@ -299,7 +357,6 @@ const InvoicesUI = {
         const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
         if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
-            const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
             const partyMap = new Map();
             filteredAll.forEach(inv => {
                 const key = (inv.partyId || inv.customerId || inv.customerName || '').toString().trim();
@@ -347,6 +404,18 @@ const InvoicesUI = {
         // Sort by date desc
         forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+        const ledgerCache = new Map();
+        const getLedgerDueForInv = (inv) => {
+            if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
+            const k = this._partyLedgerCacheKey(inv);
+            if (ledgerCache.has(k)) return ledgerCache.get(k);
+            const party = { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName };
+            const l = this._resolveLedgerForParty(party, 'customer', range);
+            const bal = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
+            ledgerCache.set(k, bal);
+            return bal;
+        };
+
         const salesReturnDocs = invoices.filter(x => {
             const t = String(x?.type || '').toLowerCase();
             const bk = String(x?.bookkeeperVchType || x?.v_type || '').toLowerCase();
@@ -376,6 +445,7 @@ const InvoicesUI = {
                         <th>Customer</th>
                         <th class="text-end">Total Amount</th>
                         <th class="text-end">Balance</th>
+                        <th class="text-end" title="Customer ledger closing (same period as filters)">Ledger due</th>
                         <th class="text-center">Status</th>
                         <th class="text-end">Actions</th>
                     </tr>
@@ -392,6 +462,10 @@ const InvoicesUI = {
             const creditAdjBadge = hasCreditAdjustment(inv)
                 ? '<span class="badge bg-secondary-subtle text-secondary border border-secondary ms-2">Credit Note</span>'
                 : '';
+            const ld = getLedgerDueForInv(inv);
+            const ledgerCell = ld == null
+                ? '<td class="text-end text-muted">—</td>'
+                : `<td class="text-end fw-bold text-warning" title="Same as Account Ledger closing for this customer and period">₹${ld.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`;
                     
             return `
                         <tr>
@@ -405,6 +479,7 @@ const InvoicesUI = {
                             <td>${inv.customerName}</td>
                             <td class="text-end">₹${(parseFloat(inv.total ?? inv.amount ?? 0) || 0).toFixed(2)}</td>
                             <td class="text-end fw-bold ${inv.balance > 0 ? 'text-danger' : 'text-success'}">₹${(parseFloat(inv.balance) || 0).toFixed(2)}</td>
+                            ${ledgerCell}
                             <td class="text-center">${statusBadge}</td>
                             <td class="text-end">
                                 <div class="btn-group">
@@ -2383,11 +2458,22 @@ const InvoicesUI = {
         let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
         invoices = invoices.filter(inv => inv.type === typeFilter);
         const yearFilter = document.getElementById('filterYear')?.value;
+        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
+        const linkFilter = this.currentVoucherLinkFilter || 'all';
+        const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
+            ? VoucherManager.getVoucherAllocationsMap(null, 'receipt')
+            : new Map();
+        const invYm = (d) => {
+            if (!d) return '';
+            const s = String(d);
+            return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
+        };
         return invoices.filter(inv => {
             const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
+            const monthMatch = !calMonth || invYm(inv.date) === calMonth;
             const customerMatch = !customerFilter || inv.customerName === customerFilter;
             const statusMatch = statusFilter === 'all' ||
                              (statusFilter === 'paid' && inv.isPaid) ||
@@ -2397,7 +2483,8 @@ const InvoicesUI = {
                                (inv.invoiceNo || '').toLowerCase().includes(query) ||
                                (inv.customerName || '').toLowerCase().includes(query) ||
                                (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
-            return yearMatch && customerMatch && statusMatch && searchMatch;
+            const linkMatch = this._invoiceMatchesVoucherLinkFilter(inv, linkFilter, allocMap);
+            return yearMatch && monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
         });
     },
 
@@ -2662,34 +2749,76 @@ const InvoicesUI = {
             (inv.balance || 0) > 0.05 && !this._isCreditNoteSalesDoc(inv)
         );
         const isGST = this.currentMode === 'gst';
+        const yearFilter = document.getElementById('filterYear')?.value;
+        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
+        const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
         const title = mode === 'parties'
             ? (isGST ? 'Outstanding by customer (GST)' : 'Outstanding by customer (Plain)')
             : (isGST ? 'Pending bills (GST)' : 'Pending bills (Plain)');
         let body = '';
         const dcBadge = (inv) => (typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(inv))
             ? ' <span class="badge bg-secondary">DC</span>' : '';
+        const fmt = (n) => (parseFloat(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         if (mode === 'parties') {
-            const map = new Map();
-            lines.forEach(inv => {
-                const key = inv.customerName || inv.customerId || 'Unknown';
-                map.set(key, (map.get(key) || 0) + (inv.balance || 0));
+            const partySeen = new Map();
+            for (const inv of lines) {
+                const key = this._partyLedgerCacheKey(inv);
+                if (!partySeen.has(key)) {
+                    partySeen.set(key, {
+                        displayName: inv.customerName || inv.customerId || 'Unknown',
+                        party: { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName },
+                        billSum: 0
+                    });
+                }
+                partySeen.get(key).billSum += (inv.balance || 0);
+            }
+            const rows = [...partySeen.values()].map((entry) => {
+                let ledgerDue = null;
+                if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+                    const l = this._resolveLedgerForParty(entry.party, 'customer', range);
+                    ledgerDue = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
+                }
+                return { ...entry, ledgerDue };
+            }).filter((r) => (r.ledgerDue != null && r.ledgerDue > 0.05) || r.billSum > 0.05);
+            rows.sort((a, b) => {
+                const la = a.ledgerDue != null ? a.ledgerDue : a.billSum;
+                const lb = b.ledgerDue != null ? b.ledgerDue : b.billSum;
+                return lb - la;
             });
-            const rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
             body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
-                <thead><tr><th>Customer</th><th class="text-end">Total pending</th></tr></thead>
-                <tbody>${rows.map(([name, amt]) => `<tr><td>${this.escapePdfHtml(name)}</td><td class="text-end text-danger fw-bold">₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>`).join('')}</tbody>
-            </table></div>`;
+                <thead><tr><th>Customer</th><th class="text-end" title="Account Ledger closing">Ledger due</th><th class="text-end" title="Sum of open bill balances (linked allocations)">On bills</th></tr></thead>
+                <tbody>${rows.map((r) => `<tr><td>${this.escapePdfHtml(r.displayName)}</td>
+                    <td class="text-end text-warning fw-bold">${r.ledgerDue != null ? `₹${fmt(r.ledgerDue)}` : '—'}</td>
+                    <td class="text-end text-danger fw-bold">₹${fmt(r.billSum)}</td></tr>`).join('')}</tbody>
+            </table></div>
+            <p class="text-white-50 small mt-2 mb-0">Ledger due matches <strong>Accounting → Account Ledger</strong> for the selected financial year or month. On bills is the total still open on individual invoices in this list.</p>`;
             if (rows.length === 0) body = '<p class="text-muted mb-0">No outstanding balances for the current filters.</p>';
         } else {
             const sorted = [...lines].sort((a, b) => new Date(b.date) - new Date(a.date));
+            const ledgerCache = new Map();
+            const ledgerFor = (inv) => {
+                if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
+                const k = this._partyLedgerCacheKey(inv);
+                if (ledgerCache.has(k)) return ledgerCache.get(k);
+                const party = { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName };
+                const l = this._resolveLedgerForParty(party, 'customer', range);
+                const bal = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
+                ledgerCache.set(k, bal);
+                return bal;
+            };
             body = `<div class="table-responsive" style="max-height: 70vh;"><table class="table table-dark table-sm align-middle mb-0">
-                <thead><tr><th>Date</th><th>Invoice #</th><th>Customer</th><th class="text-end">Balance</th></tr></thead>
-                <tbody>${sorted.map(inv => `<tr>
+                <thead><tr><th>Date</th><th>Invoice #</th><th>Customer</th><th class="text-end">Balance</th><th class="text-end">Ledger due</th></tr></thead>
+                <tbody>${sorted.map(inv => {
+                const ld = ledgerFor(inv);
+                const ldCell = ld == null ? '<td class="text-end text-muted">—</td>' : `<td class="text-end text-warning fw-bold">₹${fmt(ld)}</td>`;
+                return `<tr>
                     <td>${DataManager.formatDateDisplay(inv.date)}</td>
                     <td><span class="text-info">${this.escapePdfHtml(inv.invoiceNo || inv.id)}</span>${dcBadge(inv)}</td>
                     <td>${this.escapePdfHtml(inv.customerName || '')}</td>
-                    <td class="text-end text-danger fw-bold">₹${(inv.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>`).join('')}</tbody>
+                    <td class="text-end text-danger fw-bold">₹${fmt(inv.balance || 0)}</td>
+                    ${ldCell}
+                </tr>`;
+            }).join('')}</tbody>
             </table></div>`;
             if (lines.length === 0) body = '<p class="text-muted mb-0">No pending bills for the current filters.</p>';
         }
