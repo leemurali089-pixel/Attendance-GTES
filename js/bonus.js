@@ -122,7 +122,6 @@ const BonusModule = {
 
         // Calculate paid days
         let present = 0, paidLeave = 0, holidays = 0, hWorking = 0, halfDays = 0;
-        let extraPaidDays = 0;
 
         attendanceRecords.forEach(record => {
             switch (record.status) {
@@ -131,10 +130,6 @@ const BonusModule = {
                 case 'Holiday': holidays++; break;
                 case 'H-Working':
                     hWorking++;
-                    // Double pay logic: if OT is No or Yes, they get extra day pay
-                    if (record.overTime === 'No' || record.overTime === 'Yes') {
-                        extraPaidDays++;
-                    }
                     break;
                 case 'Half Day': halfDays++; break;
             }
@@ -149,8 +144,8 @@ const BonusModule = {
             paidDays = present + hWorking + (halfDays * 0.5);
             earnedBasic = paidDays * baseSalary;
         } else {
-            // Monthly: Paid for all days including leaves/holidays
-            paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5) + extraPaidDays;
+            // Monthly: H-Working = 2 paid days (same as salary / payout)
+            paidDays = present + paidLeave + holidays + (halfDays * 0.5) + 2 * hWorking;
 
             // Cap paid days at days in month (unless extra pay exceeds it, but basic usually capped)
             // Actually, for bonus, we should strictly follow earned basic.

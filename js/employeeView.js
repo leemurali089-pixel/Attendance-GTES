@@ -22,7 +22,7 @@ const EmployeeViewModule = {
         if (!this.showSensitiveData) {
             return '****';
         }
-        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 
     maskId(value) {
@@ -258,14 +258,23 @@ const EmployeeViewModule = {
 
         const daysInMonth = DataManager.getDaysInMonth(year, month);
 
+        // One record per calendar day (latest wins) — matches SalaryModule
+        const byDate = new Map();
+        attendance.forEach(record => {
+            const d = new Date(record.date);
+            const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            byDate.set(dateKey, record);
+        });
+        const deduped = Array.from(byDate.values());
+
         // Calculate stats
         let present = 0, paidLeave = 0, unpaidLeave = 0, halfDays = 0, holidays = 0, hWorking = 0;
-        let standardOtHours = 0, hWorkingOtHours = 0;
+        let standardOtHours = 0, hWorkingOtHours = 0, sOtHours = 0;
 
         // Map for quick lookup
         const attendanceMap = {};
 
-        attendance.forEach(record => {
+        deduped.forEach(record => {
             const dateStr = new Date(record.date).toISOString().split('T')[0];
             attendanceMap[dateStr] = record;
 
@@ -293,13 +302,19 @@ const EmployeeViewModule = {
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
+            const dateObj = new Date(record.date);
+            const isSunday = DataManager.isSunday(dateObj);
+            const isHoliday = DataManager.isHoliday(dateObj);
+
             if (record.status === 'H-Working' && record.overTime === 'H-Working') {
                 hWorkingOtHours += hours;
+            } else if (isSunday && !isHoliday && record.status === 'Present') {
+                sOtHours += hours;
             } else {
                 standardOtHours += hours;
             }
         });
-        const totalOtHours = standardOtHours + hWorkingOtHours;
+        const totalOtHours = standardOtHours + hWorkingOtHours + sOtHours;
 
         // Get employee data
         const employees = await DataManager.getEmployees();
@@ -319,12 +334,13 @@ const EmployeeViewModule = {
             perDaySalary = baseSalary / daysInMonth;
         }
 
-        // H-Working Pay is handled by standard daily pay + special OT hours pay
-        // Not adding extra 2x multiplier as per new requirement
-        const hWorkingDaysPay = 0; // Removed extra day's double pay mapping
+        // Extra base pay from H-Working double-day rule (one additional per-day amount per H-Working)
+        const hWorkingDaysPay = salaryType === 'monthly' ? hWorking * perDaySalary : 0;
 
-        const paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5);
-        const basePay = paidDays * perDaySalary; // Standard 1-day pay for H-Working + OT
+        const paidDays = salaryType === 'daily'
+            ? present + hWorking + (halfDays * 0.5)
+            : present + paidLeave + holidays + (halfDays * 0.5) + 2 * hWorking;
+        const basePay = paidDays * perDaySalary;
 
 
         // Calculate OT Pay
@@ -332,7 +348,7 @@ const EmployeeViewModule = {
             totalOtHours,
             baseSalary,
             salaryType,
-            { hWorkingOtHours, returnBreakdown: true, settings: settings }
+            { hWorkingOtHours, sOtHours, returnBreakdown: true, settings: settings }
         );
         const otPay = otBreakdown.totalPay;
         const standardOtPay = otBreakdown.standardPay || 0;
@@ -355,7 +371,13 @@ const EmployeeViewModule = {
         const otPerHourDisplay = `${this.formatCurrency(standardPerHour)} (Std) / ${this.formatCurrency(hWorkingPerHour)} (H-Working)`;
 
         const totalAdvance = await DataManager.getTotalAdvanceForEmployee(this.currentEmployee, year, month);
-        const finalSalary = basePay + otPay - totalAdvance;
+        const isPayoutDone = await DataManager.isSalaryPayoutDone(year, month);
+        const storedDebit = (await DataManager.getDebitedAdvance(this.currentEmployee, year, month)) || 0;
+        let debitToApply = 0;
+        if (isPayoutDone && storedDebit > 0) {
+            debitToApply = storedDebit;
+        }
+        const finalSalary = basePay + otPay - debitToApply;
 
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -449,7 +471,7 @@ const EmployeeViewModule = {
                         </tr>
                     </thead>
                     <tbody>
-                        ${attendance.map(record => {
+                        ${deduped.map(record => {
                 // Highlight H-Working
                 const rowClass = record.status === 'H-Working' ? 'table-primary' : '';
                 return `

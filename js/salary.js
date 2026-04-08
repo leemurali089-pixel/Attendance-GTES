@@ -15,7 +15,7 @@ const SalaryModule = {
         if (!this.showSensitiveData) {
             return '****';
         }
-        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 
     async toggleSensitiveData() {
@@ -335,7 +335,6 @@ const SalaryModule = {
         // Calculate attendance stats for current month
         let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeave = 0, halfDays = 0, holidays = 0, hWorking = 0;
         let standardOtHours = 0, hWorkingSpecialOtHours = 0, sOtHours = 0;
-        let extraPaidDaysFromHWorking = 0; // Track extra days for double pay
 
         empAttendance.forEach(record => {
             switch (record.status) {
@@ -409,12 +408,9 @@ const SalaryModule = {
             paidDays = present + hWorking + (halfDays * 0.5); // Present days + H-Working + half days for daily pay
             basePay = paidDays * perDaySalary;
         } else {
-            // Monthly employees: present + paid leave + holidays + H-Working + half days + extra days
-            // H-Working base pay (1 day) + extra days for double pay scenarios
+            // Monthly: match payout — each H-Working counts as 2 paid days (day worked + extra paid day)
             perDaySalary = baseSalary / context.daysInMonth;
-
-            // H-Working count is explicitly added for the base day worked (1 day pay)
-            paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5);
+            paidDays = present + paidLeave + holidays + (halfDays * 0.5) + 2 * hWorking;
             basePay = paidDays * perDaySalary;
         }
 
@@ -639,7 +635,6 @@ const SalaryModule = {
         const daysInMonth = DataManager.getDaysInMonth(this.currentYear, this.currentMonth);
         let present = 0, paidLeave = 0, holidays = 0, hWorking = 0, halfDays = 0;
         let standardOtHours = 0, hWorkingSpecialOtHours = 0, sOtHours = 0;
-        let extraPaidDays = 0;
 
         empAttendance.forEach(record => {
             switch (record.status) {
@@ -649,7 +644,6 @@ const SalaryModule = {
                 case 'Holiday': holidays++; break;
                 case 'H-Working':
                     hWorking++;
-                    if (record.overTime === 'No' || record.overTime === 'Yes') extraPaidDays++;
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
@@ -671,7 +665,7 @@ const SalaryModule = {
             paidDays = present + hWorking + (halfDays * 0.5);
             earnedBasic = paidDays * baseSalary;
         } else {
-            paidDays = present + paidLeave + holidays + hWorking + (halfDays * 0.5) + extraPaidDays;
+            paidDays = present + paidLeave + holidays + (halfDays * 0.5) + 2 * hWorking;
             earnedBasic = paidDays * (baseSalary / daysInMonth);
         }
 

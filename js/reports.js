@@ -157,7 +157,7 @@ const ReportsModule = {
     },
 
     formatCurrency(value) {
-        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 
     async startSalaryPayoutFlow(year, month) {
@@ -199,6 +199,16 @@ const ReportsModule = {
         if (!employeesData.length) {
             App.showNotification('No employees available for payout', 'warning');
             return;
+        }
+
+        const isPayoutDone = await DataManager.isSalaryPayoutDone(year, month);
+        if (!isPayoutDone) {
+            employeesData.forEach(emp => {
+                const outstanding = emp.carryForwardBefore ?? emp.outstandingBefore ?? 0;
+                emp.debitAmount = emp.suggestedDebit ?? 0;
+                emp.netSalary = Math.max((emp.salaryBeforeAdvance || 0) - emp.debitAmount, 0);
+                emp.carryForwardAfter = Math.max(outstanding - emp.debitAmount, 0);
+            });
         }
 
         this.pendingSalaryPayout = {
@@ -666,13 +676,22 @@ const ReportsModule = {
         const daysInMonth = DataManager.getDaysInMonth(year, month);
         const settings = await DataManager.getSettings();
         const baseSalaries = settings.baseSalaries || {};
+        const isPayoutDone = await DataManager.isSalaryPayoutDone(year, month);
 
         // Use Promise.all to handle async map
         return Promise.all(employees.map(async emp => {
-            const empAttendance = attendance.filter(a => a.employee === emp.name);
+            const empAttendanceRaw = attendance.filter(a => a.employee === emp.name);
+            // Match SalaryModule: one record per calendar day (latest wins)
+            const byDate = new Map();
+            empAttendanceRaw.forEach(record => {
+                const d = new Date(record.date);
+                const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                byDate.set(dateKey, record);
+            });
+            const empAttendance = Array.from(byDate.values());
 
             let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0, holidayWorking = 0;
-            let standardOtHours = 0, hWorkingOtHours = 0;
+            let standardOtHours = 0, hWorkingOtHours = 0, sOtHours = 0;
 
             empAttendance.forEach(record => {
                 switch (record.status) {
@@ -695,40 +714,34 @@ const ReportsModule = {
                         holidays++;
                         break;
                     case 'H-Working':
-                        // holidays++; // REMOVED: Do not count as regular holiday, we track as holidayWorking
                         holidayWorking++;
-                        // Double Pay Logic: Always add an extra day for working on holiday (Base + Work)
-                        // This matches salary.js logic which adds extraPaidDaysFromHWorking unconditionally
-                        if (!record.extraPaidDay) record.extraPaidDay = 0;
-                        record.extraPaidDay = 1;
                         break;
                 }
                 const hours = parseFloat(record.otHours || 0) || 0;
+                const dateObj = new Date(record.date);
+                const isSunday = DataManager.isSunday(dateObj);
+                const isHoliday = DataManager.isHoliday(dateObj);
+
                 if (record.status === 'H-Working' && record.overTime === 'H-Working') {
                     hWorkingOtHours += hours;
+                } else if (isSunday && !isHoliday && record.status === 'Present') {
+                    sOtHours += hours;
                 } else {
                     standardOtHours += hours;
                 }
             });
-            const totalOtHours = standardOtHours + hWorkingOtHours;
+            const totalOtHours = standardOtHours + hWorkingOtHours + sOtHours;
 
             const baseSalary = parseFloat(emp.baseSalary || baseSalaries[emp.name] || 0);
             const salaryType = emp.salaryType || 'monthly';
             const perDaySalary = salaryType === 'daily' ? baseSalary : (daysInMonth ? baseSalary / daysInMonth : 0);
 
-            // Calculate extra paid days from H-Working (Double Pay)
-            const extraPaidDays = empAttendance.reduce((sum, r) => sum + (r.extraPaidDay || 0), 0);
-
-            // CRITICAL: Different calculation for Daily vs Monthly employees
+            // Monthly: each H-Working = 2 paid days (same as salary grid / historical payout statement)
             let paidDays;
             if (salaryType === 'daily') {
-                // Daily employees: ONLY present + holidayWorking + half days
-                // NO paid leave, NO holidays, NO sick leave
                 paidDays = present + holidayWorking + (halfDays * 0.5);
             } else {
-                // Monthly employees: full calculation
-                // FIX: Added holidayWorking to base paid days
-                paidDays = present + paidLeave + holidays + holidayWorking + (halfDays * 0.5) + extraPaidDays;
+                paidDays = present + paidLeave + holidays + (halfDays * 0.5) + 2 * holidayWorking;
             }
 
             const basePay = paidDays * perDaySalary;
@@ -736,7 +749,7 @@ const ReportsModule = {
                 totalOtHours,
                 baseSalary,
                 salaryType,
-                { hWorkingOtHours, perDaySalary, returnBreakdown: true, settings }
+                { hWorkingOtHours, sOtHours, returnBreakdown: true, settings }
             );
             const otPay = otBreakdown.totalPay;
             const standardOtPay = otBreakdown.standardPay || 0;
@@ -750,7 +763,11 @@ const ReportsModule = {
             const outstandingBefore = remainingAfterExistingDebit + existingDebit;
             const carryForwardPrevious = Math.max(outstandingBefore - advanceThisMonth, 0);
             const maxDebit = outstandingBefore;
-            const recommendedDebit = existingDebit > 0 ? existingDebit : Math.min(outstandingBefore, salaryBeforeAdvance);
+            // Review modal default: suggest recovering up to salary or outstanding
+            const suggestedDebit = Math.min(Math.max(outstandingBefore, 0), Math.max(salaryBeforeAdvance, 0));
+            // Salary table & payout PDF: same as _generateRowHTML — only apply stored debit after payout is finalized
+            const appliedDebit = (isPayoutDone && existingDebit > 0) ? existingDebit : 0;
+            const carryForwardAfterApplied = Math.max(outstandingBefore - appliedDebit, 0);
 
             return {
                 name: emp.name,
@@ -778,11 +795,12 @@ const ReportsModule = {
                 carryForwardPrevious,
                 carryForwardBefore: outstandingBefore,
                 outstandingBefore,
-                recommendedDebit,
+                suggestedDebit,
+                recommendedDebit: suggestedDebit,
                 maxDebit,
-                debitAmount: recommendedDebit,
-                carryForwardAfter: Math.max(outstandingBefore - recommendedDebit, 0),
-                netSalary: salaryBeforeAdvance - recommendedDebit
+                debitAmount: appliedDebit,
+                carryForwardAfter: carryForwardAfterApplied,
+                netSalary: Math.max(salaryBeforeAdvance - appliedDebit, 0)
             };
         }));
     },
