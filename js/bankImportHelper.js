@@ -4,6 +4,16 @@
  */
 
 const BankImportHelper = {
+    YIELD_EVERY_ROWS: 400,
+    _yieldToUI() {
+        return new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+    },
     /**
      * Parse CSV text into array of objects or rows
      */
@@ -170,6 +180,88 @@ const BankImportHelper = {
                 originalRow: row
             };
         });
+    },
+
+    /**
+     * Async/chunked mapper for large statements to avoid UI freezing.
+     */
+    async mapToTransactionsAsync(data, mapping) {
+        const rows = Array.isArray(data) ? data : [];
+        const out = new Array(rows.length);
+        const resolvedMapping = mapping || {};
+
+        const getVal = (v) => {
+            if (typeof v === 'number') return v;
+            if (typeof v === 'string') return parseFloat(v.replace(/,/g, '')) || 0;
+            return 0;
+        };
+
+        // Fallback detection copied from sync mapper, run once only.
+        if (resolvedMapping.description === -1 && rows.length > 0) {
+            const skipCols = new Set([resolvedMapping.date, resolvedMapping.amount, resolvedMapping.credit, resolvedMapping.debit, resolvedMapping.type].filter(c => c !== -1));
+            const sampleRows = rows.slice(0, Math.min(5, rows.length));
+            let bestCol = -1;
+            let bestAvgLen = 0;
+
+            sampleRows[0].forEach((_, colIdx) => {
+                if (skipCols.has(colIdx)) return;
+                let avgLen = 0;
+                sampleRows.forEach(row => {
+                    const cell = String(row[colIdx] || '').trim();
+                    if (!isNaN(parseFloat(cell)) && isFinite(cell.replace(/,/g, ''))) return;
+                    avgLen += cell.length;
+                });
+                avgLen /= sampleRows.length;
+                if (avgLen > bestAvgLen) {
+                    bestAvgLen = avgLen;
+                    bestCol = colIdx;
+                }
+            });
+
+            if (bestCol !== -1) {
+                console.log(`BankImportHelper: Using column index ${bestCol} as description (fallback)`);
+                resolvedMapping.description = bestCol;
+            }
+        }
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            let amount = 0;
+            let type = 'unknown';
+
+            if (resolvedMapping.amount !== -1) {
+                amount = getVal(row[resolvedMapping.amount]);
+            } else if (resolvedMapping.credit !== -1 && resolvedMapping.debit !== -1) {
+                const credit = getVal(row[resolvedMapping.credit]);
+                const debit = getVal(row[resolvedMapping.debit]);
+                if (credit > 0) {
+                    amount = credit;
+                    type = 'credit';
+                } else {
+                    amount = debit;
+                    type = 'debit';
+                }
+            }
+
+            const rawDate = row[resolvedMapping.date] || '';
+            const date = this.parseDate(rawDate);
+            const description = resolvedMapping.description !== -1 ? (row[resolvedMapping.description] || '') : '';
+
+            out[i] = {
+                date: date,
+                rawDate: rawDate,
+                description: String(description).trim(),
+                amount: Math.abs(amount),
+                type: type === 'unknown' ? (amount < 0 ? 'debit' : 'credit') : type,
+                originalRow: row
+            };
+
+            if (i > 0 && i % this.YIELD_EVERY_ROWS === 0) {
+                await this._yieldToUI();
+            }
+        }
+
+        return out;
     },
 
     /**

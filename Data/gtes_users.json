@@ -1,23 +1,5 @@
 [
   {
-    "createdAt": "2026-04-04T11:07:26.566Z",
-    "fullName": "Administrator",
-    "id": "1775300846566",
-    "isActive": true,
-    "password": "75a4a220ca91ba6c1af235ef636d58af:ab56b29c94e6dc049fdc285d99e06df4580e810ac250bfb61585e0802e33b7256ff0c85cf61e6c6d4a81078ac3fa8e92011924834d39ef7e6866966ca11f17ca",
-    "permissions": [
-      "MANAGE_EMPLOYEES",
-      "MANAGE_ATTENDANCE",
-      "MANAGE_ADVANCES",
-      "MANAGE_HOLIDAYS",
-      "VIEW_REPORTS",
-      "VIEW_DASHBOARD"
-    ],
-    "role": "user",
-    "username": "Ganesh",
-    "webPassword": "admin123"
-  },
-  {
     "createdAt": "2025-11-25T18:23:01.661Z",
     "fullName": "Administrator",
     "id": "1764094981663",
@@ -38,5 +20,23 @@
     "role": "admin",
     "username": "GTES67",
     "webPassword": "admin123"
+  },
+  {
+    "id": "1776411619949",
+    "username": "Ganesh",
+    "password": "526af035cff3bc9509a716de3603a495:73b62a02bd814499913b1bb1f7c1d3e222d30335261d02bcfd3c9f0ca425bcacd614a02a395e7fac1403422ce42e7853aac680e17814725efb75f87b0580c885",
+    "webPassword": null,
+    "role": "user",
+    "fullName": "Accounts",
+    "permissions": [
+      "MANAGE_EMPLOYEES",
+      "MANAGE_ATTENDANCE",
+      "MANAGE_ADVANCES",
+      "MANAGE_HOLIDAYS",
+      "VIEW_REPORTS",
+      "VIEW_DASHBOARD"
+    ],
+    "createdAt": "2026-04-17T07:40:19.949Z",
+    "isActive": true
   }
 ]

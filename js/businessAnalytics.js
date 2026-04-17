@@ -9,6 +9,7 @@
  */
 
 const BusinessAnalytics = {
+    _outstandingCache: { at: 0, data: null },
 
     // ========================================
     // 1. ADVANCED INVENTORY / STOCK MANAGEMENT
@@ -20,19 +21,35 @@ const BusinessAnalytics = {
     getStockReport() {
         const inventory = DataManager.getData('inventory') || [];
         const transactions = DataManager.getData('inventoryTransactions') || [];
+        const txByMaterial = new Map();
+        transactions.forEach(t => {
+            const id = t?.materialId;
+            if (!id) return;
+            let rec = txByMaterial.get(id);
+            if (!rec) {
+                rec = { totalIn: 0, totalOut: 0, lastTransaction: null };
+                txByMaterial.set(id, rec);
+            }
+            const qty = parseFloat(t.quantity) || 0;
+            if (t.type === 'in') rec.totalIn += qty;
+            else if (t.type === 'out') rec.totalOut += qty;
+            if (!rec.lastTransaction) rec.lastTransaction = t;
+            else {
+                const prev = new Date(rec.lastTransaction.date).getTime();
+                const cur = new Date(t.date).getTime();
+                if (!Number.isNaN(cur) && (Number.isNaN(prev) || cur >= prev)) rec.lastTransaction = t;
+            }
+        });
 
         return inventory.map(item => {
-            const itemTxns = transactions.filter(t => t.materialId === item.id);
-            const totalIn = itemTxns.filter(t => t.type === 'in').reduce((sum, t) => sum + t.quantity, 0);
-            const totalOut = itemTxns.filter(t => t.type === 'out').reduce((sum, t) => sum + t.quantity, 0);
-
+            const rec = txByMaterial.get(item.id) || { totalIn: 0, totalOut: 0, lastTransaction: null };
             return {
                 ...item,
-                totalIn,
-                totalOut,
-                stockValue: item.currentStock * item.rate,
-                isLowStock: item.currentStock <= item.minStock,
-                lastTransaction: itemTxns.length > 0 ? itemTxns[itemTxns.length - 1] : null
+                totalIn: rec.totalIn,
+                totalOut: rec.totalOut,
+                stockValue: (parseFloat(item.currentStock) || 0) * (parseFloat(item.rate) || 0),
+                isLowStock: (parseFloat(item.currentStock) || 0) <= (parseFloat(item.minStock) || 0),
+                lastTransaction: rec.lastTransaction
             };
         });
     },
@@ -71,6 +88,7 @@ const BusinessAnalytics = {
         const inventory = DataManager.getData('inventory') || [];
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - days);
+        const inventoryById = new Map(inventory.map(m => [m.id, m]));
 
         const recentTxns = transactions.filter(t =>
             new Date(t.date) >= cutoffDate && t.type === 'out'
@@ -83,7 +101,7 @@ const BusinessAnalytics = {
 
         return Object.entries(usageMap)
             .map(([materialId, quantity]) => {
-                const material = inventory.find(m => m.id === materialId);
+                const material = inventoryById.get(materialId);
                 return {
                     materialId,
                     name: material?.name || 'Unknown',
@@ -1026,22 +1044,69 @@ const BusinessAnalytics = {
     /**
      * Get all customers with outstanding balances
      */
-    getOutstandingBalances() {
+    getOutstandingBalances(options = {}) {
+        const useExactLedger = !!options.useExactLedger;
+        const now = Date.now();
+        if (!useExactLedger && this._outstandingCache.data && (now - this._outstandingCache.at) < 15000) {
+            return this._outstandingCache.data;
+        }
+
         const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
 
-        return customers.map(customer => {
-            const ledger = this.getCustomerLedger(customer.id);
+        if (useExactLedger) {
+            return customers.map(customer => {
+                const ledger = this.getCustomerLedger(customer.id);
+                return {
+                    customerId: customer.id,
+                    customerName: customer.name,
+                    phone: customer.phone,
+                    outstandingBalance: ledger ? ledger.summary.balance : 0,
+                    lastTransaction: ledger && ledger.entries.length > 0
+                        ? ledger.entries[ledger.entries.length - 1].date
+                        : null
+                };
+            }).filter(c => c.outstandingBalance !== 0)
+                .sort((a, b) => b.outstandingBalance - a.outstandingBalance);
+        }
+
+        const customerMap = new Map(customers.map(c => [c.id, c]));
+        const invoices = (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.getInvoicesWithBalance === 'function')
+            ? (InvoiceManager.getInvoicesWithBalance() || [])
+            : (DataManager.getData('invoices') || []);
+        const agg = new Map();
+
+        invoices.forEach(inv => {
+            const key = inv.customerId || inv.customerName;
+            if (!key) return;
+            const total = parseFloat(inv.total) || 0;
+            const explicitBalance = parseFloat(inv.balance);
+            const balance = Number.isFinite(explicitBalance)
+                ? explicitBalance
+                : ((inv.status === 'paid') ? 0 : total);
+            if (!Number.isFinite(balance) || Math.abs(balance) < 0.005) return;
+
+            const prev = agg.get(key) || { outstandingBalance: 0, lastTransaction: null, customerName: '', customerId: inv.customerId || '', phone: '' };
+            prev.outstandingBalance += balance;
+            const d = inv.date || null;
+            if (d && (!prev.lastTransaction || new Date(d).getTime() > new Date(prev.lastTransaction).getTime())) prev.lastTransaction = d;
+            if (!prev.customerName) prev.customerName = inv.customerName || '';
+            agg.set(key, prev);
+        });
+
+        const rows = Array.from(agg.entries()).map(([key, val]) => {
+            const c = customerMap.get(val.customerId) || customers.find(x => x.name === (val.customerName || key));
             return {
-                customerId: customer.id,
-                customerName: customer.name,
-                phone: customer.phone,
-                outstandingBalance: ledger ? ledger.summary.balance : 0,
-                lastTransaction: ledger && ledger.entries.length > 0
-                    ? ledger.entries[ledger.entries.length - 1].date
-                    : null
+                customerId: c?.id || val.customerId || '',
+                customerName: c?.name || val.customerName || key,
+                phone: c?.phone || '',
+                outstandingBalance: val.outstandingBalance,
+                lastTransaction: val.lastTransaction
             };
-        }).filter(c => c.outstandingBalance !== 0)
+        }).filter(c => Math.abs(c.outstandingBalance) >= 0.005)
             .sort((a, b) => b.outstandingBalance - a.outstandingBalance);
+
+        this._outstandingCache = { at: now, data: rows };
+        return rows;
     },
 
     // ========================================

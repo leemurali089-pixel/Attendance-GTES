@@ -3,6 +3,12 @@
  */
 const AdminModule = {
     userModal: null,
+    _getUserModalEl() {
+        const all = Array.from(document.querySelectorAll('#userModal'));
+        if (all.length === 0) return null;
+        const shown = all.find(el => el.classList.contains('show'));
+        return shown || all[all.length - 1];
+    },
     _resetModalState() {
         document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
         document.body.classList.remove('modal-open');
@@ -11,7 +17,15 @@ const AdminModule = {
     },
 
     _ensureUserModal() {
-        const modalEl = document.getElementById('userModal');
+        const duplicates = Array.from(document.querySelectorAll('#userModal'));
+        if (duplicates.length > 1) {
+            // Keep the newest modal and remove stale clones to avoid wrong field reads.
+            duplicates.slice(0, -1).forEach(el => {
+                try { bootstrap.Modal.getInstance(el)?.dispose(); } catch (_) { }
+                el.remove();
+            });
+        }
+        const modalEl = this._getUserModalEl();
         if (!modalEl) return null;
         if (modalEl.parentElement !== document.body) {
             document.body.appendChild(modalEl);
@@ -36,6 +50,11 @@ const AdminModule = {
     async renderAdminDashboard() {
         const view = document.getElementById('adminView');
         const settings = await DataManager.getSettings() || {};
+        // Remove stale user modals left in document.body from previous admin renders.
+        document.querySelectorAll('#userModal').forEach(el => {
+            try { bootstrap.Modal.getInstance(el)?.dispose(); } catch (_) { }
+            el.remove();
+        });
 
         // Default values if not set
         const defaults = {
@@ -96,9 +115,30 @@ const AdminModule = {
 
                         <!-- Audit Logs Tab -->
                         <div class="tab-pane fade" id="audit" role="tabpanel">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5>System Activity Log</h5>
-                                <div>
+                            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                                <h5 class="mb-0">System Activity Log</h5>
+                                <div class="d-flex gap-2 flex-wrap align-items-end">
+                                    <div>
+                                        <label class="form-label small mb-1">Date</label>
+                                        <select class="form-select form-select-sm" id="auditFilterDate" onchange="AdminModule.loadAuditLogs()">
+                                            <option value="">All</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="form-label small mb-1">Month</label>
+                                        <select class="form-select form-select-sm" id="auditFilterMonth" onchange="AdminModule.loadAuditLogs()">
+                                            <option value="">All</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="form-label small mb-1">Year</label>
+                                        <select class="form-select form-select-sm" id="auditFilterYear" onchange="AdminModule.loadAuditLogs()">
+                                            <option value="">All</option>
+                                        </select>
+                                    </div>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="AdminModule.clearAuditDateFilters()">
+                                        <i class="bi bi-x-circle"></i> Clear
+                                    </button>
                                     <button class="btn btn-outline-secondary btn-sm me-2" onclick="AdminModule.loadAuditLogs()">
                                         <i class="bi bi-arrow-clockwise"></i> Refresh
                                     </button>
@@ -325,6 +365,86 @@ const AdminModule = {
         await this.loadUsers();
     },
 
+    clearAuditDateFilters() {
+        const dateEl = document.getElementById('auditFilterDate');
+        const monthEl = document.getElementById('auditFilterMonth');
+        const yearEl = document.getElementById('auditFilterYear');
+        if (dateEl) dateEl.value = '';
+        if (monthEl) monthEl.value = '';
+        if (yearEl) yearEl.value = '';
+        this.loadAuditLogs();
+    },
+
+    _populateAuditDateFilterOptions(logs) {
+        const dateEl = document.getElementById('auditFilterDate');
+        const monthEl = document.getElementById('auditFilterMonth');
+        const yearEl = document.getElementById('auditFilterYear');
+        if (!dateEl || !monthEl || !yearEl) return;
+
+        const prevDate = dateEl.value || '';
+        const prevMonth = monthEl.value || '';
+        const prevYear = yearEl.value || '';
+
+        const dateSet = new Set();
+        const monthSet = new Set();
+        const yearSet = new Set();
+
+        (Array.isArray(logs) ? logs : []).forEach((log) => {
+            const ts = new Date(log?.timestamp || '');
+            if (Number.isNaN(ts.getTime())) return;
+            const y = ts.getFullYear();
+            const m = String(ts.getMonth() + 1).padStart(2, '0');
+            const d = String(ts.getDate()).padStart(2, '0');
+            dateSet.add(`${y}-${m}-${d}`);
+            monthSet.add(`${y}-${m}`);
+            yearSet.add(String(y));
+        });
+
+        const sortedDates = Array.from(dateSet).sort((a, b) => b.localeCompare(a));
+        const sortedMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+        const sortedYears = Array.from(yearSet).sort((a, b) => Number(b) - Number(a));
+
+        const monthLabel = (ym) => {
+            if (!/^\d{4}-\d{2}$/.test(ym)) return ym;
+            const [yy, mm] = ym.split('-');
+            const date = new Date(Number(yy), Number(mm) - 1, 1);
+            return date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        };
+        const dateLabel = (ymd) => {
+            const dt = new Date(ymd);
+            if (Number.isNaN(dt.getTime())) return ymd;
+            return dt.toLocaleDateString('en-GB');
+        };
+
+        dateEl.innerHTML = `<option value="">All</option>${sortedDates.map((d) => `<option value="${d}">${dateLabel(d)}</option>`).join('')}`;
+        monthEl.innerHTML = `<option value="">All</option>${sortedMonths.map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join('')}`;
+        yearEl.innerHTML = `<option value="">All</option>${sortedYears.map((y) => `<option value="${y}">${y}</option>`).join('')}`;
+
+        dateEl.value = sortedDates.includes(prevDate) ? prevDate : '';
+        monthEl.value = sortedMonths.includes(prevMonth) ? prevMonth : '';
+        yearEl.value = sortedYears.includes(prevYear) ? prevYear : '';
+    },
+
+    _matchesAuditDateFilter(log) {
+        const dateFilter = document.getElementById('auditFilterDate')?.value || '';
+        const monthFilter = document.getElementById('auditFilterMonth')?.value || '';
+        const yearFilter = document.getElementById('auditFilterYear')?.value || '';
+        if (!dateFilter && !monthFilter && !yearFilter) return true;
+
+        const ts = new Date(log?.timestamp || '');
+        if (Number.isNaN(ts.getTime())) return false;
+        const yyyy = ts.getFullYear();
+        const mm = String(ts.getMonth() + 1).padStart(2, '0');
+        const dd = String(ts.getDate()).padStart(2, '0');
+        const logDate = `${yyyy}-${mm}-${dd}`;
+        const logMonth = `${yyyy}-${mm}`;
+
+        if (dateFilter) return logDate === dateFilter;
+        if (monthFilter) return logMonth === monthFilter;
+        if (yearFilter) return String(yyyy) === String(yearFilter);
+        return true;
+    },
+
     async loadUsers() {
         const users = await UserManager.getUsers();
         const container = document.getElementById('usersTableContainer');
@@ -363,9 +483,17 @@ const AdminModule = {
     async loadAuditLogs() {
         const logs = await AuditManager.getLogs();
         const tbody = document.getElementById('auditTableBody');
+        if (!tbody) return;
+        this._populateAuditDateFilterOptions(logs);
         tbody.innerHTML = '';
 
-        logs.forEach(log => {
+        const filteredLogs = logs.filter((log) => this._matchesAuditDateFilter(log));
+        if (filteredLogs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">No logs found for selected date/month/year.</td></tr>`;
+            return;
+        }
+
+        filteredLogs.forEach(log => {
             const date = new Date(log.timestamp).toLocaleString();
             const tr = document.createElement('tr');
 
@@ -529,12 +657,16 @@ const AdminModule = {
     },
 
     showUserModal() {
-        document.getElementById('userForm').reset();
-        document.getElementById('userId').value = '';
-        document.getElementById('userModalTitle').textContent = 'Add User';
-        const hint = document.getElementById('passwordHint');
+        const modalEl = this._getUserModalEl();
+        if (!modalEl) return;
+        modalEl.querySelector('#userForm')?.reset();
+        const idEl = modalEl.querySelector('#userId');
+        if (idEl) idEl.value = '';
+        const titleEl = modalEl.querySelector('#userModalTitle');
+        if (titleEl) titleEl.textContent = 'Add User';
+        const hint = modalEl.querySelector('#passwordHint');
         if (hint) hint.style.display = 'none'; // Password required for new users
-        const passField = document.getElementById('userPassword');
+        const passField = modalEl.querySelector('#userPassword');
         if (passField) passField.placeholder = 'Enter password (required)';
         this._resetModalState();
         this._ensureUserModal()?.show();
@@ -544,21 +676,23 @@ const AdminModule = {
         const users = await UserManager.getUsers();
         const user = users.find(u => u.id === id);
         if (!user) return;
+        const modalEl = this._getUserModalEl();
+        if (!modalEl) return;
 
-        document.getElementById('userId').value = user.id;
-        document.getElementById('userUsername').value = user.username;
-        document.getElementById('userFullName').value = user.fullName;
-        document.getElementById('userRole').value = user.role;
-        document.getElementById('userPassword').value = ''; // Don't show password
-        document.getElementById('userModalTitle').textContent = 'Edit User';
-        const hint = document.getElementById('passwordHint');
+        modalEl.querySelector('#userId').value = user.id;
+        modalEl.querySelector('#userUsername').value = user.username;
+        modalEl.querySelector('#userFullName').value = user.fullName;
+        modalEl.querySelector('#userRole').value = user.role;
+        modalEl.querySelector('#userPassword').value = ''; // Don't show password
+        modalEl.querySelector('#userModalTitle').textContent = 'Edit User';
+        const hint = modalEl.querySelector('#passwordHint');
         if (hint) hint.style.display = 'block'; // Show hint: password is optional for edits
-        const passField = document.getElementById('userPassword');
+        const passField = modalEl.querySelector('#userPassword');
         if (passField) passField.placeholder = 'Leave blank to keep existing password';
 
         // Set permissions
         const permissions = user.permissions || [];
-        document.querySelectorAll('.user-permission').forEach(cb => {
+        modalEl.querySelectorAll('.user-permission').forEach(cb => {
             cb.checked = permissions.includes(cb.value);
         });
 
@@ -567,12 +701,17 @@ const AdminModule = {
     },
 
     async saveUser() {
-        const id = document.getElementById('userId').value;
-        const username = (document.getElementById('userUsername').value || '').trim();
-        const fullName = (document.getElementById('userFullName').value || '').trim();
-        const role = document.getElementById('userRole').value || 'user';
-        const password = document.getElementById('userPassword').value;
-        const permissions = Array.from(document.querySelectorAll('.user-permission:checked')).map(cb => cb.value);
+        const modalEl = this._getUserModalEl();
+        if (!modalEl) {
+            alert('User modal is not available. Please reopen Add User.');
+            return;
+        }
+        const id = modalEl.querySelector('#userId')?.value || '';
+        const username = (modalEl.querySelector('#userUsername')?.value || '').trim();
+        const fullName = (modalEl.querySelector('#userFullName')?.value || '').trim();
+        const role = modalEl.querySelector('#userRole')?.value || 'user';
+        const password = modalEl.querySelector('#userPassword')?.value || '';
+        const permissions = Array.from(modalEl.querySelectorAll('.user-permission:checked')).map(cb => cb.value);
 
         if (!username) { alert('Username is required.'); return; }
         if (!fullName) { alert('Full Name is required.'); return; }
@@ -583,7 +722,7 @@ const AdminModule = {
         }
 
         // Disable save button to prevent double-submit
-        const saveBtn = document.querySelector('#userModal .btn-primary');
+        const saveBtn = modalEl.querySelector('.btn-primary');
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
 
         try {

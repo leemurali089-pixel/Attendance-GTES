@@ -1,1 +1,685 @@
-[]
+[
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-04-02T06:09:13.526Z",
+    "createdAt": "2026-03-23T05:06:54.165Z",
+    "followupDate": "2026-04-02",
+    "followupTime": "11:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-23T05:06:54.165Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-03-23 11:00 to 2026-03-24 11:00.",
+        "time": "2026-03-23T14:06:01.776Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-03-24 11:00 to 2026-03-25 11:00. Note: Collect the material by tomorrow",
+        "time": "2026-03-25T15:31:31.096Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-03-25 11:00 to 2026-03-26 11:00. Note: Collect the material by tomorrow",
+        "time": "2026-03-25T15:31:31.164Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Flange Purchased rest of the materials not need today",
+        "time": "2026-03-27T05:13:52.023Z",
+        "user": "admin"
+      },
+      {
+        "action": "Narration Updated",
+        "details": "Old: 1\" #300 ss304 Flange - 10 nos\n...",
+        "time": "2026-03-29T17:22:13.065Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Re-opened",
+        "details": "Returned to pending backlog",
+        "time": "2026-03-29T17:22:13.070Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-26 11:00 to 2026-03-30 11:00.",
+        "time": "2026-03-29T17:22:24.620Z",
+        "user": "admin"
+      },
+      {
+        "action": "Narration Updated",
+        "details": "Old: \nSS304 1/2\" Seam SCH-40 ->70mt...",
+        "time": "2026-03-30T07:59:08.900Z",
+        "user": "admin"
+      },
+      {
+        "action": "Narration Updated",
+        "details": "Old: SS304 1/2\" Seam SCH-40 ->70mtr...",
+        "time": "2026-04-01T06:48:56.555Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-03-30 11:00 to 2026-03-31 11:00. Note: SS304 1/2\" Seam SCH-40 ->70mtrs Purchased",
+        "time": "2026-04-01T06:49:14.436Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-31 11:00 to 2026-03-02 11:00.",
+        "time": "2026-04-01T06:49:21.599Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-02 11:00 to 2026-04-02 11:00.",
+        "time": "2026-04-01T06:52:41.215Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Material Received ",
+        "time": "2026-04-02T06:09:13.526Z",
+        "user": "admin"
+      },
+      {
+        "action": "Narration Updated",
+        "details": "Old: \nSS304 Seam SCH-120 1/2\" -> 30...",
+        "time": "2026-04-06T06:40:08.895Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774242414165",
+    "narration": "SS304 Seam SCH-120 1/2\" -> 30mtrs",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-03-23T13:58:42.260Z",
+    "createdAt": "2026-03-23T13:57:19.487Z",
+    "followupDate": "2026-03-23",
+    "followupTime": "22:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-23T13:57:19.487Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Payment Done now",
+        "time": "2026-03-23T13:58:42.260Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774274239487",
+    "narration": "Payment follow-up for RSP AIR PRODUCTS:\nBills: INV-NB-0001 (₹26,750)\nTotal balance: ₹26,750",
+    "partyId": "CUST-1774102231237-1xxu4",
+    "partyName": "RSP AIR PRODUCTS",
+    "status": "completed",
+    "type": "payment_followup"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-23T14:05:42.644Z",
+    "followupDate": "2026-04-04",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-23T14:05:42.644Z",
+        "user": "admin"
+      },
+      {
+        "action": "Narration Updated",
+        "details": "Old: Payment follow-up for CHOZHA A...",
+        "time": "2026-03-27T05:17:19.969Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-24 10:00 to 2026-03-28 10:00. Note: Will make the payment by today",
+        "time": "2026-03-27T05:17:42.687Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-28 10:00 to 2026-04-02 10:00. Note: Not Answering the call ",
+        "time": "2026-04-01T06:49:53.205Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-03 10:00. Note: Not Answering the call",
+        "time": "2026-04-02T10:11:16.726Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-03 10:00 to 2026-04-04 10:00. Note: Not Answering the call",
+        "time": "2026-04-03T08:27:06.439Z",
+        "user": "admin"
+      },
+      {
+        "time": "2026-04-10T05:45:34.661Z",
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774274742644",
+    "narration": "Payment follow-up for CHOZHA AIR PRODUCTS:\nBills: INV-NB-0003 (₹28,550)\nTotal balance: ₹18,550",
+    "partyId": "CUST-1774102231237-2x39o",
+    "partyName": "CHOZHA AIR PRODUCTS",
+    "status": "completed",
+    "type": "payment_followup",
+    "completedAt": "2026-04-10T05:45:34.661Z"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-03-25T15:28:15.000Z",
+    "createdAt": "2026-03-23T14:11:03.470Z",
+    "followupDate": "2026-03-24",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-23T14:11:03.470Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Da Cylinder Sent and Billed ",
+        "time": "2026-03-25T15:28:15.000Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774275063470",
+    "narration": "Send D/A Cylinder To King Gas",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-23T14:18:34.216Z",
+    "followupDate": "2026-03-28",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-23T14:18:34.216Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-24 10:00 to 2026-03-28 10:00. Note: Wil Try to make the payment ",
+        "time": "2026-03-27T05:23:18.801Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774275514216",
+    "narration": "Payment follow-up for THIRUCHENDURAN GASES SALES AND SERVICE PVT LTD:\nBills: 000511 (₹1,97,001), 000510 (₹13,145), 000224-A (₹40,049), 000181 (₹35,683), 00020 (₹10,384), 0338 (₹8,024)\nTotal balance: ₹2,89994",
+    "partyId": "CUST-1774101816556-90ms1",
+    "partyName": "THIRUCHENDURAN GASES SALES AND SERVICE PVT LTD",
+    "status": "open",
+    "type": "payment_followup"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-03-27T05:14:11.488Z",
+    "createdAt": "2026-03-25T15:27:49.170Z",
+    "followupDate": "2026-03-26",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-25T15:27:49.170Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Sarath Gone to Collect",
+        "time": "2026-03-27T05:14:11.488Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774452469170",
+    "narration": "Collect Valve From Devi ",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-25T15:31:02.838Z",
+    "followupDate": "2026-03-26",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-25T15:31:02.838Z",
+        "user": "admin"
+      },
+      {
+        "time": "2026-04-10T05:46:15.518Z",
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774452662838",
+    "narration": "Complete the pending bills on DC",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal",
+    "completedAt": "2026-04-10T05:46:15.518Z"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-03-26T13:54:11.536Z",
+    "createdAt": "2026-03-25T15:32:34.570Z",
+    "followupDate": "2026-03-26",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-25T15:32:34.570Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "time": "2026-03-26T13:54:00.090Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Re-opened",
+        "details": "Returned to pending backlog",
+        "time": "2026-03-26T13:54:03.360Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: Payslip sent",
+        "time": "2026-03-26T13:54:11.536Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774452754570",
+    "narration": "Send Pay Slip to Backiyaraj",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-27T05:10:48.469Z",
+    "followupDate": "2026-04-03",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-27T05:10:48.469Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-27 10:00 to 2026-03-28 10:00. Note: Not Responding To the Call",
+        "time": "2026-03-27T05:11:11.944Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-28 10:00 to 2026-04-02 10:00. Note: Not Answering the call",
+        "time": "2026-04-01T06:51:09.975Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-04-02 10:00 to 2026-04-03 10:00.",
+        "time": "2026-04-02T10:12:05.278Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774588248469",
+    "narration": "Payment follow-up for Karaikal Gases:\nBills: INV-NB-0005 (₹16,500)\nTotal balance: ₹16,500",
+    "partyId": "CUST-1774365969728",
+    "partyName": "Karaikal Gases",
+    "status": "open",
+    "type": "payment_followup"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-27T06:15:21.825Z",
+    "followupDate": "2026-04-04",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-27T06:15:21.825Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-27 10:00 to 2026-03-28 10:00.",
+        "time": "2026-03-27T06:15:37.972Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-28 10:00 to 2026-04-02 10:00. Note: Not Answering the call",
+        "time": "2026-04-01T06:52:11.455Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-03 10:00. Note: Switch Off",
+        "time": "2026-04-02T10:12:35.411Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Rescheduled from 2026-04-03 10:00 to 2026-04-04 10:00. Note: Switch Off",
+        "time": "2026-04-03T08:25:38.071Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00.",
+        "time": "2026-04-03T08:25:41.343Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00. Note: Switch Off",
+        "time": "2026-04-03T08:25:54.185Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00. Note: Switch Off",
+        "time": "2026-04-03T08:25:58.169Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774592121825",
+    "narration": "Payment follow-up for SUGGA DISTRIBUTORS:\nBills: INV-NB-0002 (Bill: ₹2,50,450, Bal: ₹20,450)\nTotal balance: ₹20,450 (Total Outstanding: ₹2,50,450)",
+    "partyId": "CUST-1774365969725-kc7z0",
+    "partyName": "SUGGA DISTRIBUTORS",
+    "status": "open",
+    "type": "payment_followup"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-29T16:42:54.468Z",
+    "followupDate": "2026-04-04",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-29T16:42:54.468Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-30 10:00 to 2026-04-02 10:00. Note: Ledger sent will make the payment by today",
+        "time": "2026-04-01T06:45:01.269Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-04 10:00. Note: Not Answering the call",
+        "time": "2026-04-03T08:28:12.342Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774802574468",
+    "narration": "Send ledger to pure gases ask for payment ",
+    "partyId": "",
+    "partyName": "",
+    "status": "open",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-29T16:43:14.435Z",
+    "followupDate": "2026-04-06",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-29T16:43:14.435Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-30 10:00 to 2026-04-02 10:00. Note: Will try to make the payment by this week",
+        "time": "2026-04-01T06:48:21.855Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-06 10:00. Note: Will make the cylinder payment by today or tomorrow and balance by next week ",
+        "time": "2026-04-03T08:33:13.423Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774802594435",
+    "narration": "Pushpavalli ask for payment ",
+    "partyId": "",
+    "partyName": "",
+    "status": "open",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-03-29T16:47:13.809Z",
+    "followupDate": "2026-04-06",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-03-29T16:47:13.809Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-30 10:00 to 2026-04-06 10:00. Note: Will try to make the payment within two days ",
+        "time": "2026-04-03T08:38:30.292Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1774802833809",
+    "narration": "Devi ask for payment ",
+    "partyId": "",
+    "partyName": "",
+    "status": "open",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-04-01T06:15:20.456Z",
+    "followupDate": "2026-04-04",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-01T06:15:20.456Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1775024120456",
+    "narration": "Follow up Lakshmi Oxygen for Co2 Valve 1 Box app 25 to 27 nos ask to return them for service or make the payment \n\nReference DC No:- 1025 Dated 09/02/2026\nPh no:- 9442110005, 866788456",
+    "partyId": "",
+    "partyName": "",
+    "status": "open",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-04-03T08:28:38.583Z",
+    "createdAt": "2026-04-01T06:53:06.803Z",
+    "followupDate": "2026-04-02",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-01T06:53:06.803Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-01 10:00 to 2026-04-02 10:00. Note: Not Answering the call",
+        "time": "2026-04-01T06:53:21.039Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "time": "2026-04-03T08:28:38.583Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1775026386803",
+    "narration": "Payment follow-up for Sri Ragavendra Industrial Gases Pvt Ltd,:\nBills: INV-NB-0004 (Bill: ₹12,700, Bal: ₹12,700)\nTotal balance: ₹12,700 (Total Outstanding: ₹12,700)",
+    "partyId": "CUST-1775023941470-cvakb",
+    "partyName": "Sri Ragavendra Industrial Gases Pvt Ltd,",
+    "status": "completed",
+    "type": "payment_followup"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-04-01T15:40:16.764Z",
+    "followupDate": "2026-04-02",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-01T15:40:16.765Z",
+        "user": "admin"
+      },
+      {
+        "time": "2026-04-10T05:46:08.666Z",
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1775058016764",
+    "narration": "Call to avon oxygen and discuss about the payment",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal",
+    "completedAt": "2026-04-10T05:46:08.666Z"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "completedAt": "2026-04-02T06:16:11.644Z",
+    "createdAt": "2026-04-01T16:52:08.457Z",
+    "followupDate": "2026-04-02",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-01T16:52:08.457Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Completed",
+        "details": "Marked as finished. Note: mail sent",
+        "time": "2026-04-02T06:16:11.644Z",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1775062328457",
+    "narration": "Advance pneumatics send mail for 2 filter",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "GTES67",
+    "assignedToName": "Administrator",
+    "createdAt": "2026-04-01T16:53:40.628Z",
+    "followupDate": "2026-04-06",
+    "followupTime": "10:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-01T16:53:40.628Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-06 10:00. Note: Will Send by Monday",
+        "time": "2026-04-02T10:19:01.497Z",
+        "user": "admin"
+      },
+      {
+        "time": "2026-04-10T05:45:40.162Z",
+        "action": "Task Completed",
+        "details": "Marked as finished",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1775062420628",
+    "narration": "2 lead seating valve 2 kelf seating valve 1” megolak ",
+    "partyId": "",
+    "partyName": "",
+    "status": "completed",
+    "type": "normal",
+    "completedAt": "2026-04-10T05:45:40.162Z"
+  }
+]

@@ -6,6 +6,16 @@
 const VouchersUI = {
     currentMode: 'gst', // 'gst', 'non-gst', 'purchase', 'credit-note', or 'debit-note'
     _voucherFilterDebounceTimer: null,
+    BANK_RENDER_CHUNK_SIZE: 250,
+    async _yieldToUI() {
+        return new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+    },
     
     async init() {
         console.log('Vouchers UI Initialized');
@@ -276,12 +286,9 @@ const VouchersUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                          <div class="row g-2 mb-3">
-                            <div class="${fyColClass}">
-                                <label class="form-label small text-muted">Financial Year</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterVoucherYear" onchange="VouchersUI.filterVouchers()">
-                                    <option value="">All Year</option>
-                                    ${yearOptions}
-                                </select>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">Month</label>
+                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterVoucherMonth" onchange="VouchersUI.filterVouchers()">
                             </div>
                             <div class="${typeColClass}">
                                 <label class="form-label small text-muted">Voucher Type</label>
@@ -400,11 +407,14 @@ const VouchersUI = {
             const vchLabel = String(v.displayVoucherNo || v.voucherNo || '').trim() || v.id;
             const searchStr = `${v.id} ${v.displayVoucherNo || ''} ${v.voucherNo || ''} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
+            const dt = new Date(v.date || '');
+            const ymd = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+            const ym = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
             const typeStr = (v.type || 'general').toLowerCase();
             const linkStr = this._voucherHasLinkedDocs(v) ? 'linked' : 'unlinked';
 
             return `
-                        <tr data-search="${searchStr}" data-year="${yearStr}" data-type="${typeStr}" data-link="${linkStr}">
+                        <tr data-search="${searchStr}" data-year="${yearStr}" data-month="${ym}" data-date="${ymd}" data-type="${typeStr}" data-link="${linkStr}">
                             <td>${v.date}</td>
                             <td class="fw-bold text-info">${vchLabel}${vchLabel !== v.id ? `<br><small class="text-muted">${v.id}</small>` : ''}</td>
                             <td><span class="badge bg-${v.type === 'receipt' ? 'success' : (v.type === 'payment' ? 'danger' : 'warning')} text-capitalize">${v.type || 'General'}</span></td>
@@ -504,8 +514,11 @@ const VouchersUI = {
                 : (inv.referenceNo || inv.refNo || inv.refInvoiceNo || inv.baseInvoiceNo || inv.originalInvoiceNo || '-');
             const search = `${inv.invoiceNo || inv.id} ${inv.customerName || ''} ${refNo}`.toLowerCase();
             const linkStr = this._creditNoteRowLinkStatus(inv);
+            const dt = new Date(inv.date || '');
+            const ymd = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+            const ym = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
             return `
-                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(inv.date)}" data-type="credit-note" data-link="${linkStr}">
+                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(inv.date)}" data-month="${ym}" data-date="${ymd}" data-type="credit-note" data-link="${linkStr}">
                             <td>${inv.date || ''}</td>
                             <td class="fw-bold text-info">${inv.invoiceNo || inv.id}</td>
                             <td>${inv.customerName || inv.customerId || 'N/A'}</td>
@@ -556,8 +569,11 @@ const VouchersUI = {
                 : (p.referenceNo || p.refNo || p.purchaseInvoiceRef || p.purchaseInvoiceNo || p.refInvoiceNo || p.baseInvoiceNo || p.originalInvoiceNo || p.supplierInvoiceNo || p.supplierBillNo || '-');
             const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
             const linkStr = this._debitNoteRowLinkStatus(p);
+            const dt = new Date(p.date || '');
+            const ymd = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+            const ym = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
             return `
-                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(p.date)}" data-type="debit-note" data-link="${linkStr}">
+                        <tr data-search="${search}" data-year="${DataManager.getFinancialYear(p.date)}" data-month="${ym}" data-date="${ymd}" data-type="debit-note" data-link="${linkStr}">
                             <td>${p.date || ''}</td>
                             <td class="fw-bold text-info">${docNo}</td>
                             <td>${p.vendor || p.vendorName || 'N/A'}</td>
@@ -577,7 +593,7 @@ const VouchersUI = {
 
     filterVouchers() {
         const query = document.getElementById('voucherSearch') ? document.getElementById('voucherSearch').value.toLowerCase() : '';
-        const yearFilter = document.getElementById('filterVoucherYear') ? document.getElementById('filterVoucherYear').value : '';
+        const monthFilter = document.getElementById('filterVoucherMonth') ? document.getElementById('filterVoucherMonth').value : '';
         const typeFilter = document.getElementById('filterVoucherType') ? document.getElementById('filterVoucherType').value : '';
         const linkFilter = document.getElementById('filterVoucherLink') ? document.getElementById('filterVoucherLink').value : '';
 
@@ -586,11 +602,11 @@ const VouchersUI = {
         requestAnimationFrame(() => {
             rows.forEach(row => {
                 const searchMatch = !query || (row.dataset.search || '').includes(query);
-                const yearMatch = !yearFilter || (row.dataset.year === yearFilter);
+                const monthMatch = !monthFilter || (row.dataset.month === monthFilter);
                 const typeMatch = !typeFilter || (row.dataset.type === typeFilter);
                 const linkMatch = !linkFilter || (row.dataset.link === linkFilter);
 
-                if (searchMatch && yearMatch && typeMatch && linkMatch) {
+                if (searchMatch && monthMatch && typeMatch && linkMatch) {
                     row.style.display = '';
                 } else {
                     row.style.display = 'none';
@@ -834,36 +850,45 @@ const VouchersUI = {
 
             const reader = new FileReader();
             reader.onload = async (event) => {
-                const data = new Uint8Array(event.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                
-                // Get raw JSON keeping headers intact
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+                try {
+                    App.showNotification('Reading bank statement...', 'info');
+                    const data = new Uint8Array(event.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    
+                    // Get raw JSON keeping headers intact
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
-                if (jsonData.length < 2) {
-                    App.showNotification('File is empty or invalid format.', 'error');
-                    return;
-                }
-
-                // Find header row (skip empty top rows)
-                let headerIdx = 0;
-                for (let i = 0; i < jsonData.length; i++) {
-                    const row = jsonData[i].filter(cell => cell !== null && cell !== '');
-                    if (row.length > 2) {
-                        headerIdx = i;
-                        break;
+                    if (jsonData.length < 2) {
+                        App.showNotification('File is empty or invalid format.', 'error');
+                        return;
                     }
+
+                    // Find header row (skip empty top rows)
+                    let headerIdx = 0;
+                    for (let i = 0; i < jsonData.length; i++) {
+                        const row = jsonData[i].filter(cell => cell !== null && cell !== '');
+                        if (row.length > 2) {
+                            headerIdx = i;
+                            break;
+                        }
+                    }
+
+                    const headers = jsonData[headerIdx].map(h => String(h || '').trim());
+                    const rows = jsonData.slice(headerIdx + 1).filter(r => r.some(c => c !== ''));
+
+                    App.showNotification(`Parsing ${rows.length} transactions...`, 'info');
+                    const mapping = BankImportHelper.detectColumns(headers);
+                    const transactions = (typeof BankImportHelper.mapToTransactionsAsync === 'function')
+                        ? await BankImportHelper.mapToTransactionsAsync(rows, mapping)
+                        : BankImportHelper.mapToTransactions(rows, mapping);
+
+                    await this.showStatementProcessingModal(transactions);
+                } catch (err) {
+                    console.error('Bank statement import failed:', err);
+                    App.showNotification('Bank statement import failed: ' + err.message, 'error');
                 }
-
-                const headers = jsonData[headerIdx].map(h => String(h || '').trim());
-                const rows = jsonData.slice(headerIdx + 1).filter(r => r.some(c => c !== ''));
-
-                const mapping = BankImportHelper.detectColumns(headers);
-                const transactions = BankImportHelper.mapToTransactions(rows, mapping);
-
-                this.showStatementProcessingModal(transactions);
             };
             
             reader.readAsArrayBuffer(file);
@@ -932,7 +957,19 @@ const VouchersUI = {
         `;
     },
 
-    showStatementProcessingModal(transactions) {
+    async _renderBankRowsChunked(tbody, transactions) {
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        const list = Array.isArray(transactions) ? transactions : [];
+        for (let i = 0; i < list.length; i += this.BANK_RENDER_CHUNK_SIZE) {
+            const chunk = list.slice(i, i + this.BANK_RENDER_CHUNK_SIZE);
+            const rowsHtml = chunk.map((tx, idx) => this.renderBankRow(tx, i + idx)).join('');
+            tbody.insertAdjacentHTML('beforeend', rowsHtml);
+            await this._yieldToUI();
+        }
+    },
+
+    async showStatementProcessingModal(transactions) {
         this.currentBankTransactions = transactions;
         
         // Remove existing to avoid duplicate IDs in DOM
@@ -942,7 +979,7 @@ const VouchersUI = {
             // Partial refresh: update only the tbody if modal already open
             const tbody = existing.querySelector('tbody');
             if (tbody) {
-                tbody.innerHTML = transactions.map((tx, index) => this.renderBankRow(tx, index)).join('');
+                await this._renderBankRowsChunked(tbody, transactions);
                 this.filterBankRows();
                 return;
             }
@@ -1054,9 +1091,7 @@ const VouchersUI = {
                                             <th class="text-center" style="background-color: #1a1d20; color: #adb5bd; border-bottom: 2px solid #343a40;">Action</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
-                                        ${transactions.map((tx, index) => this.renderBankRow(tx, index)).join('')}
-                                    </tbody>
+                                    <tbody></tbody>
                                 </table>
                             </div>
                         </div>
@@ -1085,10 +1120,11 @@ const VouchersUI = {
 
         const modalEl = document.getElementById('bankStatementModal');
 
-        const filters = this.bsFilters || { party: '', type: '', status: '' };
+        const filters = this.bsFilters || { party: '', type: '', status: '', month: '' };
         const filterBarHtml = `
             <div class="d-flex gap-2 align-items-center flex-wrap px-3 pb-2 pt-0">
                 <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRowsDebounced()" value="${filters.party}">
+                <input type="month" id="bsMonthFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()" value="${filters.month || ''}">
                 <select id="bsTypeFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
                     <option value="" ${filters.type === '' ? 'selected' : ''}>All Types</option>
                     <option value="debit" ${filters.type === 'debit' ? 'selected' : ''}>Debit (Payments)</option>
@@ -1108,6 +1144,10 @@ const VouchersUI = {
         const modalBody = modalEl.querySelector('.modal-body');
         const alertDiv = modalBody.querySelector('.alert');
         alertDiv.insertAdjacentHTML('afterend', filterBarHtml);
+        const tbody = modalEl.querySelector('tbody');
+        if (tbody) {
+            await this._renderBankRowsChunked(tbody, transactions);
+        }
         VouchersUI.filterBankRows(); // Init count
 
         const modal = new bootstrap.Modal(modalEl);
@@ -1141,9 +1181,10 @@ const VouchersUI = {
         const partyQ = partyRaw.toLowerCase();
         const typeQ = (document.getElementById('bsTypeFilter')?.value || '');
         const statusQ = (document.getElementById('bsStatusFilter')?.value || '');
+        const monthQ = (document.getElementById('bsMonthFilter')?.value || '');
         
         // Save for persistence
-        this.bsFilters = { party: partyRaw, type: typeQ, status: statusQ };
+        this.bsFilters = { party: partyRaw, type: typeQ, status: statusQ, month: monthQ };
 
         const rows = document.querySelectorAll('#bankStatementModal tbody tr');
         let visible = 0;
@@ -1159,9 +1200,14 @@ const VouchersUI = {
             const isExists = descTd?.innerText.includes('Already Exists');
             const isReady = row.classList.contains('bs-ready-row');
             const hasMatch = descTd?.querySelector('.badge.bg-primary') !== null;
+            const idx = parseInt(row.getAttribute('data-index') || '-1', 10);
+            const tx = Number.isInteger(idx) && idx >= 0 ? this.currentBankTransactions[idx] : null;
+            const txDate = tx && tx.date ? new Date(tx.date) : null;
+            const txYm = txDate && !Number.isNaN(txDate.getTime()) ? `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}` : '';
 
             const partyOk = !partyQ || desc.includes(partyQ);
             const typeOk = !typeQ || (typeQ === 'debit' && isDebit) || (typeQ === 'credit' && !isDebit);
+            const monthOk = !monthQ || txYm === monthQ;
             
             let statusOk = true;
             if (statusQ === 'imported') statusOk = isImported;
@@ -1170,7 +1216,7 @@ const VouchersUI = {
             else if (statusQ === 'pending') statusOk = !isImported && !isReady && !isExists;
             else if (statusQ === 'matched') statusOk = hasMatch;
 
-            const show = partyOk && typeOk && statusOk;
+            const show = partyOk && typeOk && monthOk && statusOk;
             row.style.display = show ? '' : 'none';
             if (show) visible++;
         });

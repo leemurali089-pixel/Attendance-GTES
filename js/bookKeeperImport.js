@@ -628,6 +628,14 @@ const BookKeeperImport = {
             .toLowerCase();
     },
 
+    _normalizePhone(phone) {
+        return String(phone || '').replace(/\D/g, '');
+    },
+
+    _normalizeGstin(gstin) {
+        return String(gstin || '').trim().toUpperCase();
+    },
+
     _normalizeKeyName(name) {
         return (name || '')
             .toString()
@@ -761,11 +769,27 @@ const BookKeeperImport = {
         `);
 
         const existingCustomers = DataManager.getData('customers') || [];
-        const existingNameToIndex = new Map(
-            existingCustomers
-                .filter(c => c && c.name)
-                .map((c, idx) => [c.name.toLowerCase(), idx])
-        );
+        const existingNameToIndex = new Map();
+        const existingGstinToIndex = new Map();
+        const existingPhoneToIndex = new Map();
+        const existingBkAccountIdToIndex = new Map();
+
+        existingCustomers.forEach((c, idx) => {
+            if (!c) return;
+            const n1 = this.normalizeName(c.name || '');
+            const n2 = this.normalizeName(c.displayName || '');
+            if (n1) existingNameToIndex.set(n1, idx);
+            if (n2) existingNameToIndex.set(n2, idx);
+
+            const gst = this._normalizeGstin(c.gstin);
+            if (gst) existingGstinToIndex.set(gst, idx);
+
+            const phone = this._normalizePhone(c.phone);
+            if (phone.length >= 7) existingPhoneToIndex.set(phone, idx);
+
+            const bkAccId = String(c.bookkeeperAccountId || '').trim();
+            if (bkAccId) existingBkAccountIdToIndex.set(bkAccId, idx);
+        });
 
         let imported = 0;
         let skipped = 0;
@@ -777,8 +801,24 @@ const BookKeeperImport = {
                 skipped++;
                 return;
             }
-            const key = customerName.toLowerCase();
-            const existingIndex = existingNameToIndex.has(key) ? existingNameToIndex.get(key) : -1;
+            const key = this.normalizeName(customerName);
+            const gstin = this._normalizeGstin(acc.tax_regn || acc.gstin || '');
+            const phoneNorm = this._normalizePhone(acc.phone || acc.mobile || '');
+            const bookkeeperAccountId = String(
+                acc.a_id ?? acc.account_id ?? acc.acc_id ?? acc.id ?? acc.accountid ?? ''
+            ).trim();
+
+            let existingIndex = -1;
+            if (bookkeeperAccountId && existingBkAccountIdToIndex.has(bookkeeperAccountId)) {
+                existingIndex = existingBkAccountIdToIndex.get(bookkeeperAccountId);
+            } else if (gstin && existingGstinToIndex.has(gstin)) {
+                existingIndex = existingGstinToIndex.get(gstin);
+            } else if (phoneNorm.length >= 7 && existingPhoneToIndex.has(phoneNorm)) {
+                existingIndex = existingPhoneToIndex.get(phoneNorm);
+            } else if (key && existingNameToIndex.has(key)) {
+                existingIndex = existingNameToIndex.get(key);
+            }
+
             const accountType = (acc.a_type && acc.a_type.includes('Creditor')) ? 'Supplier' : 'Customer';
             const openingRawValue = acc.op_bal ?? acc.opening_balance ?? acc.opening_bal ?? acc.op_balance ?? 0;
             const openingRawText = String(openingRawValue || '').toLowerCase();
@@ -802,11 +842,12 @@ const BookKeeperImport = {
                 email: acc.email_id || acc.email || '',
                 address: acc.address || '',
                 address2: acc.address2 || '',
-                gstin: acc.tax_regn || acc.gstin || '',
+                gstin: gstin || '',
                 pan: acc.tax_regn2 || acc.pan || '',
                 state: acc.state || '',
                 pincode: acc.pincode || acc.zip || '',
                 country: acc.country || 'India',
+                bookkeeperAccountId: bookkeeperAccountId || (existingCustomer?.bookkeeperAccountId || ''),
                 accountType: accountType,
                 isOtherAccount: false,
                 openingBalance: openingSigned,
@@ -826,11 +867,23 @@ const BookKeeperImport = {
             } else {
                 existingCustomers.push(customer);
                 existingNameToIndex.set(key, existingCustomers.length - 1);
+                if (gstin) existingGstinToIndex.set(gstin, existingCustomers.length - 1);
+                if (phoneNorm.length >= 7) existingPhoneToIndex.set(phoneNorm, existingCustomers.length - 1);
+                if (bookkeeperAccountId) existingBkAccountIdToIndex.set(bookkeeperAccountId, existingCustomers.length - 1);
                 imported++;
             }
+
+            // Keep maps in sync when an existing row is updated.
+            const rowIndex = existingCustomer ? existingIndex : (existingCustomers.length - 1);
+            if (key) existingNameToIndex.set(key, rowIndex);
+            const dName = this.normalizeName(acc.display_name || customerName);
+            if (dName) existingNameToIndex.set(dName, rowIndex);
+            if (gstin) existingGstinToIndex.set(gstin, rowIndex);
+            if (phoneNorm.length >= 7) existingPhoneToIndex.set(phoneNorm, rowIndex);
+            if (bookkeeperAccountId) existingBkAccountIdToIndex.set(bookkeeperAccountId, rowIndex);
         });
 
-        DataManager.saveData('customers', existingCustomers);
+        await DataManager.saveData('customers', existingCustomers);
 
         return { imported, skipped, total: accounts.length };
     },

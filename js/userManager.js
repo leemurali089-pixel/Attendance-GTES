@@ -77,7 +77,10 @@ const UserManager = {
 
     // Save users
     async saveUsers(users) {
-        await DataManager.saveData(this.STORAGE_KEY, users);
+        const ok = await DataManager.saveData(this.STORAGE_KEY, users, { skipPreSaveMerge: true });
+        if (ok === false) {
+            throw new Error('Could not save user changes due to sync conflict. Please sync and retry.');
+        }
     },
 
     // Create new user
@@ -291,7 +294,8 @@ const UserManager = {
     // Delete user
     async deleteUser(userId) {
         const users = await this.getUsers();
-        const filtered = users.filter(u => u.id !== userId);
+        const targetId = String(userId);
+        const filtered = users.filter(u => String(u?.id) !== targetId);
 
         if (filtered.length === users.length) {
             throw new Error('User not found');

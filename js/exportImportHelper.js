@@ -3,6 +3,16 @@
  * Handles Excel/CSV operations and BookKeeper format mappings
  */
 const ExportImportHelper = {
+    LARGE_IMPORT_YIELD_EVERY: 250,
+    _yieldToUI() {
+        return new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+    },
     /**
      * Open import/export modal with context
      */
@@ -216,6 +226,7 @@ const ExportImportHelper = {
 
         reader.onload = async (e) => {
             try {
+                App.showNotification('Parsing import file... please wait', 'info');
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
 
@@ -254,23 +265,30 @@ const ExportImportHelper = {
                     const headers = jsonData[headerRowIndex].map(h => String(h || '').trim());
 
                     // Convert remaining rows to objects
-                    const sheetRows = jsonData.slice(headerRowIndex + 1)
-                        .filter(row => row.some(cell => cell !== null && cell !== '')) // Skip empty rows
-                        .map(row => {
-                            const obj = {};
-                            headers.forEach((header, index) => {
-                                if (header) obj[header] = row[index] !== undefined ? row[index] : '';
-                            });
-                            return obj;
+                    const sourceRows = jsonData.slice(headerRowIndex + 1);
+                    const sheetRows = [];
+                    for (let r = 0; r < sourceRows.length; r++) {
+                        const row = sourceRows[r];
+                        if (!row || !row.some(cell => cell !== null && cell !== '')) continue;
+                        const obj = {};
+                        headers.forEach((header, index) => {
+                            if (header) obj[header] = row[index] !== undefined ? row[index] : '';
                         });
+                        sheetRows.push(obj);
+
+                        if (r > 0 && r % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                            await this._yieldToUI();
+                        }
+                    }
 
                     if (sheetRows.length > 0) {
-                        allRows = allRows.concat(sheetRows);
+                        allRows.push(...sheetRows);
                         if (!headersDetected) {
                             finalHeaders = headers;
                             headersDetected = true;
                         }
                     }
+                    await this._yieldToUI();
                 }
 
                 if (allRows.length === 0) {
@@ -301,6 +319,7 @@ const ExportImportHelper = {
                 console.log(`[Import] Saved ${finalHeaders.length} columns and ${allRows.length} raw rows for module: ${module}`);
 
                 // Proceed with processing for the application
+                App.showNotification(`Processing ${allRows.length} rows...`, 'info');
                 await this.processImport(module, allRows, schemaAction);
 
                 bootstrap.Modal.getInstance(document.getElementById('exportImportModal'))?.hide();
@@ -330,7 +349,8 @@ const ExportImportHelper = {
                 const initialCount = inventory.length;
                 let duplicates = 0;
 
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const name = row['Item Name*'] || row['Item Name'] || row['Stock Item'] ||
                         row['Material'] || row['Particulars'] || row['Product'] || row['Description'];
 
@@ -360,6 +380,9 @@ const ExportImportHelper = {
                             inventory.push(material);
                         }
                     }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
                 const importedCount = inventory.length - initialCount;
                 await DataManager.saveData(DataManager.KEYS.INVENTORY, inventory);
@@ -376,7 +399,8 @@ const ExportImportHelper = {
                 const salesGroups = {};
 
                 // Line-item grouping by Voucher No
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const voucherNo = row['Voucher No'] || row['Invoice No'] || row['Ref No'] || row['Bill No'];
                     if (!voucherNo) continue;
 
@@ -398,9 +422,14 @@ const ExportImportHelper = {
                             amount: parseFloat(row['Subtotal'] || row['Amount'] || 0)
                         });
                     }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
 
-                for (const [voucherNo, data] of Object.entries(salesGroups)) {
+                const salesEntries = Object.entries(salesGroups);
+                for (let i = 0; i < salesEntries.length; i++) {
+                    const [voucherNo, data] = salesEntries[i];
                     const row = data.header;
                     const inv = {
                         id: voucherNo,
@@ -419,6 +448,9 @@ const ExportImportHelper = {
                         existingInvoices.push(inv);
                         count++;
                     }
+                    if (i > 0 && i % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
 
                 await DataManager.saveData('invoices', existingInvoices);
@@ -430,7 +462,8 @@ const ExportImportHelper = {
                 const existingExpenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
                 const purchaseGroups = {};
 
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const purchaseNo = row['Purchase Number'] || row['Voucher No'] || row['Bill No'] ||
                         row['Invoice No'] || row['Ref No'];
                     if (!purchaseNo) continue;
@@ -455,9 +488,14 @@ const ExportImportHelper = {
                             tax: row['Tax Account Name'] || row['GST'] || ''
                         });
                     }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
 
-                for (const [purchaseNo, data] of Object.entries(purchaseGroups)) {
+                const purchaseEntries = Object.entries(purchaseGroups);
+                for (let i = 0; i < purchaseEntries.length; i++) {
+                    const [purchaseNo, data] = purchaseEntries[i];
                     const row = data.header;
                     const exp = {
                         id: purchaseNo,
@@ -475,6 +513,9 @@ const ExportImportHelper = {
                     if (exp.vendor && exp.items.length > 0) {
                         existingExpenses.push(exp);
                         count++;
+                    }
+                    if (i > 0 && i % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
                     }
                 }
 
@@ -526,7 +567,8 @@ const ExportImportHelper = {
                     existingAccounts = existingAccounts.filter(c => getCategory(c) !== targetCategory);
                 }
 
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const isOtherAccount = row['Account Type'] && !row['Address Line1'];
 
                     if (isOtherAccount) {
@@ -581,6 +623,9 @@ const ExportImportHelper = {
                             count++;
                         }
                     }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
 
                 await DataManager.saveData('customers', existingAccounts);
@@ -593,7 +638,8 @@ const ExportImportHelper = {
             case 'receipt':
             case 'payment':
                 const vouchers = schemaAction === 'create' ? [] : (DataManager.getData('vouchers') || []);
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const voucher = {
                         id: row['Voucher No'] || ('VOU_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
                         date: row['Voucher Date (YYYY-MM-DD)'] || row['Date'] || new Date().toISOString().split('T')[0],
@@ -610,6 +656,9 @@ const ExportImportHelper = {
                         vouchers.push(voucher);
                         count++;
                     }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
+                    }
                 }
                 await DataManager.saveData('vouchers', vouchers);
                 App.showNotification(`Successfully imported ${count} ${type} vouchers`, 'success');
@@ -622,7 +671,8 @@ const ExportImportHelper = {
                 let items = schemaAction === 'create' ?
                     allInv.filter(i => !i.isService) : [...allInv];
 
-                for (const row of rows) {
+                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx];
                     const name = row['Service Name*'] || row['Service Name'] || row['Name'];
                     if (name) {
                         const service = {
@@ -645,6 +695,9 @@ const ExportImportHelper = {
                             items.push(service);
                         }
                         count++;
+                    }
+                    if (rowIdx > 0 && rowIdx % this.LARGE_IMPORT_YIELD_EVERY === 0) {
+                        await this._yieldToUI();
                     }
                 }
                 await DataManager.saveData(DataManager.KEYS.INVENTORY, items);
