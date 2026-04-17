@@ -18,12 +18,14 @@ const DeliveryUI = {
     currentCustomerType: 'Customer',
     historyFilters: {
         dataType: 'all', // all, challan-dc, challan-sc, invoice-gst, invoice-non-gst
-        fy: '2025-26',
+        month: '',
         technician: 'all',
         status: 'all', // all, pending, paid (for invoices), pending-invoice (for challans)
         customerId: 'all',
         search: ''
     },
+    HISTORY_INITIAL_LIMIT: 200,
+    HISTORY_LOAD_MORE_STEP: 200,
 
     getAccountCategory(c) {
         if (!c) return 'Customer';
@@ -57,36 +59,9 @@ const DeliveryUI = {
 
     async init() {
         try {
-            console.log('DeliveryUI initializing...');
-
-            // Initialize managers
-            console.log('Initializing CustomerManager...');
             await CustomerManager.init();
-
-            console.log('Initializing InventoryManager...');
             await InventoryManager.init();
-
-            console.log('Initializing DeliveryManager...');
             await DeliveryManager.init();
-
-            // Render initial UIs
-            console.log('Rendering create form...');
-            this.renderCreateForm();
-
-            console.log('Loading customers...');
-            this.loadCustomers();
-
-            console.log('Loading inventory...');
-            this.loadInventory();
-
-            console.log('Loading history...');
-            this.loadHistory();
-
-            // Setup event listeners
-            console.log('Setting up event listeners...');
-            this.setupEventListeners();
-
-            console.log('DeliveryUI initialization complete!');
         } catch (error) {
             console.error('DeliveryUI initialization failed:', error);
             App.showNotification('Error initializing Delivery module: ' + error.message, 'error');
@@ -1780,13 +1755,6 @@ const DeliveryUI = {
             container = document.getElementById(containerId);
         }
 
-        console.log("loadHistory Diagnostics:", {
-            args: args,
-            viewArg: viewArg,
-            containerId: containerId,
-            containerExists: !!container
-        });
-
         if (!container) {
             console.error("loadHistory failed: container not found for ID", containerId);
             App.showNotification("System Error: Container " + containerId + " not found in DOM", "error");
@@ -1800,17 +1768,29 @@ const DeliveryUI = {
             this.currentHistoryContainerId = accId;
         }
 
+        const dataType = this.historyFilters.dataType;
+        const needsInvoices = ['all', 'invoice-gst', 'invoice-non-gst'].includes(dataType);
+        const needsJobCards = ['all', 'job-cards'].includes(dataType);
+        const needsVouchers = ['all', 'vouchers', 'vouchers-receipt', 'vouchers-payment'].includes(dataType);
+        const needsPurchases = ['all', 'purchases'].includes(dataType);
+
         const challans = DeliveryManager.getAllChallans();
-        const allInvoicesRaw = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
-        const dcInvoicesRaw = (typeof InvoiceManager !== 'undefined')
-            ? allInvoicesRaw.filter(inv => InvoiceManager.isDcStyleSalesInvoice(inv))
-            : [];
-        const invoices = allInvoicesRaw.filter(i => !InvoiceManager.isDcStyleSalesInvoice(i));
         const deliveryChallans = challans.filter(c => c.type === 'delivery');
-        const linkedDcInvoiceIds = new Set(deliveryChallans.map(c => c.invoiceId).filter(Boolean));
-        const dcInvoicesForHistory = dcInvoicesRaw.filter(inv => !linkedDcInvoiceIds.has(inv.id));
-        const jobCards = (typeof JobCardManager !== 'undefined') ? JobCardManager.getAllJobCards() : [];
-        const vouchers = (typeof VoucherManager !== 'undefined') ? DataManager.getData('vouchers') || [] : [];
+
+        let allInvoicesRaw = [];
+        let dcInvoicesRaw = [];
+        let invoices = [];
+        let dcInvoicesForHistory = [];
+        if (needsInvoices && typeof InvoiceManager !== 'undefined') {
+            allInvoicesRaw = InvoiceManager.getAllInvoices() || [];
+            dcInvoicesRaw = allInvoicesRaw.filter(inv => InvoiceManager.isDcStyleSalesInvoice(inv));
+            invoices = allInvoicesRaw.filter(i => !InvoiceManager.isDcStyleSalesInvoice(i));
+            const linkedDcInvoiceIds = new Set(deliveryChallans.map(c => c.invoiceId).filter(Boolean));
+            dcInvoicesForHistory = dcInvoicesRaw.filter(inv => !linkedDcInvoiceIds.has(inv.id));
+        }
+
+        const jobCards = needsJobCards && typeof JobCardManager !== 'undefined' ? (JobCardManager.getAllJobCards() || []) : [];
+        const vouchers = needsVouchers && typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []) : [];
         const customers = CustomerManager.getAllCustomers();
         
         // Optimization: Create a customer map for O(1) lookups
@@ -1829,10 +1809,9 @@ const DeliveryUI = {
 
         // 1. Gather Data based on dataType
         let data = [];
-        const dataType = this.historyFilters.dataType;
 
         if (dataType === 'all') {
-            const allExpenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
+            const allExpenses = needsPurchases && (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
             const purchases = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase')).map(p => ({ ...p, _source: 'purchase', total: p.amount }));
 
             data = [
@@ -1844,10 +1823,8 @@ const DeliveryUI = {
                 ...purchases
             ];
         } else if (dataType === 'challan-dc') {
-            data = [
-                ...deliveryChallans.map(c => ({ ...c, _source: 'challan' })),
-                ...dcInvoicesForHistory.map(i => ({ ...i, _source: 'dc-invoice' }))
-            ];
+            // Fast path: challan screen should stay responsive even with very large invoice datasets.
+            data = deliveryChallans.map(c => ({ ...c, _source: 'challan' }));
         } else if (dataType === 'challan-sc') {
             data = challans.filter(c => c.type === 'service').map(c => ({ ...c, _source: 'challan' }));
         } else if (dataType === 'invoice-gst') {
@@ -1863,51 +1840,28 @@ const DeliveryUI = {
         } else if (dataType === 'vouchers-payment') {
             data = vouchers.filter(v => (v.type || '').toLowerCase() === 'payment').map(v => ({ ...v, _source: 'voucher', total: parseFloat(v.amount) }));
         } else if (dataType === 'purchases') {
-            const allExpenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
+            const allExpenses = needsPurchases && (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
             data = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase')).map(p => ({ ...p, _source: 'purchase', total: p.amount }));
         }
 
-        // 2. Financial Year Helper - Optimized to avoid heavy Date objects if possible
-        const getFY = (dateStr) => {
-            if (!dateStr) return 'Unknown';
-            const s = String(dateStr).trim();
-            // YYYY-MM-DD
-            if (s.length >= 10 && s[4] === '-' && s[7] === '-') {
-                const y = parseInt(s.substring(0, 4), 10);
-                const m = parseInt(s.substring(5, 7), 10);
-                if (!isNaN(y) && !isNaN(m)) {
-                    const start = m >= 4 ? y : y - 1;
-                    return `${start}-${(start + 1).toString().slice(2)}`;
-                }
+        // Cache month key once per record for fast month filter checks
+        data.forEach(item => {
+            const rawDate = item.date || item.createdAt;
+            const dt = new Date(rawDate);
+            if (!Number.isNaN(dt.getTime())) {
+                const y = dt.getFullYear();
+                const m = String(dt.getMonth() + 1).padStart(2, '0');
+                item._month = `${y}-${m}`;
+                item._ts = dt.getTime();
+            } else {
+                item._month = '';
+                item._ts = 0;
             }
-            // DD/MM/YYYY or DD-MM-YYYY
-            const dm = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-            if (dm) {
-                const d = parseInt(dm[1], 10);
-                const m = parseInt(dm[2], 10);
-                const y = parseInt(dm[3], 10);
-                if (!isNaN(y) && !isNaN(m)) {
-                    const start = m >= 4 ? y : y - 1;
-                    return `${start}-${(start + 1).toString().slice(2)}`;
-                }
-            }
-            const dt = new Date(dateStr);
-            if (isNaN(dt.getTime())) return 'Unknown';
-            const m = dt.getMonth() + 1;
-            const y = dt.getFullYear();
-            const start = m >= 4 ? y : y - 1;
-            return `${start}-${(start + 1).toString().slice(2)}`;
-        };
+        });
         
-        // Cache FYs to avoid recalculating in the filter loop
-        data.forEach(item => { item._fy = getFY(item.date || item.createdAt); });
-        
-        const allFYs = [...new Set(data.map(item => item._fy))].filter(fy => fy !== 'Unknown').sort().reverse();
-
         // 3. Apply Filters
         const filtered = data.filter(item => {
-            // FY Filter
-            const matchesFY = this.historyFilters.fy === 'all' || item._fy === this.historyFilters.fy;
+            const matchesMonth = !this.historyFilters.month || item._month === this.historyFilters.month;
 
             // Technician Filter (only for challans/JC)
             let matchesTech = true;
@@ -1956,11 +1910,11 @@ const DeliveryUI = {
                 (item.customerName && item.customerName.toLowerCase().includes(searchLower)) ||
                 (item.customNumber && item.customNumber.toLowerCase().includes(searchLower));
 
-            return matchesFY && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
+            return matchesMonth && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
         });
 
         // 4. Sorting: Newest first
-        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+        filtered.sort((a, b) => (b._ts || 0) - (a._ts || 0));
 
         // 5. Render UI
         // Only render the filter skeleton if it's not already there
@@ -2002,12 +1956,10 @@ const DeliveryUI = {
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label small text-muted">Financial Year</label>
-                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
-                                    onchange="DeliveryUI.setHistoryFilter('fy', this.value)">
-                                    <option value="all">All Year</option>
-                                    ${allFYs.map(fy => `<option value="${fy}" ${this.historyFilters.fy === fy ? 'selected' : ''}>FY ${fy}</option>`).join('')}
-                                </select>
+                                <label class="form-label small text-muted">Month</label>
+                                <input type="month" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                    value="${this.historyFilters.month || ''}"
+                                    onchange="DeliveryUI.setHistoryFilter('month', this.value)">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label small text-muted">Customer</label>
@@ -2083,6 +2035,10 @@ const DeliveryUI = {
                         <div class="spinner-border spinner-border-sm text-warning" role="status"></div>
                         <span class="ms-2 small text-muted">Loading more records...</span>
                     </div>
+                    <div id="historyPaginationBar" class="d-flex justify-content-center align-items-center gap-2 py-2 d-none">
+                        <button class="btn btn-sm btn-outline-warning" id="historyLoadMoreBtn">Load More</button>
+                        <span class="small text-muted" id="historyLoadedCount"></span>
+                    </div>
                 </div>
             `;
         } else {
@@ -2094,11 +2050,26 @@ const DeliveryUI = {
 
         // Chunked Rendering Logic
         const tbody = document.getElementById('historyTableBody');
-        const chunkSize = 50;
+        const chunkSize = 25;
         let currentIndex = 0;
+        let visibleLimit = Math.min(filtered.length, this.HISTORY_INITIAL_LIMIT);
+        const loadMoreBtn = document.getElementById('historyLoadMoreBtn');
+        const paginationBar = document.getElementById('historyPaginationBar');
+        const loadedCountEl = document.getElementById('historyLoadedCount');
+
+        const updatePaginationUi = () => {
+            if (!paginationBar || !loadedCountEl) return;
+            loadedCountEl.textContent = `Showing ${Math.min(currentIndex, filtered.length)} of ${filtered.length}`;
+            if (filtered.length > visibleLimit) {
+                paginationBar.classList.remove('d-none');
+                if (loadMoreBtn) loadMoreBtn.disabled = false;
+            } else if (currentIndex >= filtered.length) {
+                paginationBar.classList.add('d-none');
+            }
+        };
 
         const renderNextChunk = () => {
-            if (currentIndex >= filtered.length) {
+            if (currentIndex >= visibleLimit) {
                 if (filtered.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-muted">No matching records found</td></tr>';
                 }
@@ -2106,6 +2077,7 @@ const DeliveryUI = {
                 if (loadingStatus) loadingStatus.classList.add('d-none');
                 const cdcBtn = document.getElementById('historyCreateDcBtn');
                 if (cdcBtn) cdcBtn.style.display = this.historyFilters.dataType === 'challan-dc' ? '' : 'none';
+                updatePaginationUi();
                 return;
             }
 
@@ -2244,9 +2216,18 @@ const DeliveryUI = {
 
             tbody.insertAdjacentHTML('beforeend', rowsHtml);
             currentIndex += chunkSize;
+            updatePaginationUi();
 
             requestAnimationFrame(renderNextChunk);
         };
+
+        if (loadMoreBtn) {
+            loadMoreBtn.onclick = () => {
+                loadMoreBtn.disabled = true;
+                visibleLimit = Math.min(filtered.length, visibleLimit + this.HISTORY_LOAD_MORE_STEP);
+                requestAnimationFrame(renderNextChunk);
+            };
+        }
 
         renderNextChunk();
     },
@@ -2343,6 +2324,11 @@ const DeliveryUI = {
 
     setHistoryFilter(key, value) {
         this.historyFilters[key] = value;
+        if (key === 'search') {
+            if (this._historySearchDebounceTimer) clearTimeout(this._historySearchDebounceTimer);
+            this._historySearchDebounceTimer = setTimeout(() => this.loadHistory(), 180);
+            return;
+        }
         this.loadHistory();
     },
 
@@ -2745,7 +2731,6 @@ const DeliveryUI = {
             return;
         }
         this.historyFilters.dataType = type === 'delivery' ? 'challan-dc' : 'challan-sc';
-        this.historyFilters.fy = 'all';
         this.historyFilters.status = 'all';
         this.historyFilters.search = '';
         const searchInput = document.getElementById('historySearchInput');
@@ -2786,7 +2771,7 @@ const DeliveryUI = {
                 break;
             case 'history':
                 document.getElementById('deliveryHistorySection')?.classList.remove('d-none');
-                this.loadHistory();
+                setTimeout(() => this.loadHistory(), 0);
                 break;
             case 'invoices':
                 document.getElementById('deliveryInvoicesSection')?.classList.remove('d-none');

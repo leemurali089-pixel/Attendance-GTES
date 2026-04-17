@@ -1,0 +1,26 @@
+{
+  "nextSlot": 1,
+  "snapshots": [
+    {
+      "slot": 3,
+      "createdAt": "2026-04-08T17:40:27.372Z",
+      "recordCount": 2874,
+      "startDate": "2025-04-01",
+      "endDate": "2026-04-08"
+    },
+    {
+      "createdAt": "2026-04-08T16:38:37.374Z",
+      "endDate": "2026-04-08",
+      "recordCount": 2874,
+      "slot": 2,
+      "startDate": "2025-04-01"
+    },
+    {
+      "createdAt": "2026-04-08T16:38:33.059Z",
+      "endDate": "2026-04-08",
+      "recordCount": 2874,
+      "slot": 1,
+      "startDate": "2025-04-01"
+    }
+  ]
+}

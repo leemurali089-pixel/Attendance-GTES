@@ -219,13 +219,6 @@ const InvoicesUI = {
                     <div class="card-body">
                         <div class="row g-2 mb-3">
                             <div class="col-md-3">
-                                <label class="form-label small text-white-50">Financial Year</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterYear" onchange="InvoicesUI.updateTable()">
-                                    <option value="">All Year</option>
-                                    ${yearOptions}
-                                </select>
-                            </div>
-                            <div class="col-md-3">
                                 <label class="form-label small text-white-50">Calendar month</label>
                                 <input type="month" class="form-control bg-dark text-white border-secondary" id="filterCalendarMonth"
                                     title="Optional — e.g. April 2024" onchange="InvoicesUI.updateTable()" />
@@ -270,10 +263,15 @@ const InvoicesUI = {
                                 </div>
                             </div>
                         </div>
-                        <div class="input-group">
-                            <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control bg-dark text-light border-secondary" id="invoiceSearch" 
-                                placeholder="Search invoices by number, customer or items..." onkeyup="InvoicesUI.debouncedFilter()">
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label small text-white-50">Search</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-secondary border-secondary text-light"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control bg-dark text-light border-secondary" id="invoiceSearch" 
+                                        placeholder="Search invoices by number, customer or items..." onkeyup="InvoicesUI.debouncedFilter()">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -315,13 +313,12 @@ const InvoicesUI = {
         const typeFilter = isGST ? 'with-bill' : 'without-bill';
         invoices = invoices.filter(inv => inv.type === typeFilter);
 
-        const yearFilter = document.getElementById('filterYear')?.value;
         const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
         const linkFilter = this.currentVoucherLinkFilter || 'all';
-        const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
+        const range = this._salesLedgerRangeFromFilters('', calMonth);
         const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
             ? VoucherManager.getVoucherAllocationsMap(null, 'receipt')
             : new Map();
@@ -331,9 +328,7 @@ const InvoicesUI = {
             const s = String(d);
             return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
         };
-
         const filteredAll = invoices.filter(inv => {
-            const yearMatch = !yearFilter || DataManager.getFinancialYear(inv.date) === yearFilter;
             const monthMatch = !calMonth || invYm(inv.date) === calMonth;
             const customerMatch = !customerFilter || inv.customerName === customerFilter;
             const statusMatch = statusFilter === 'all' || 
@@ -346,7 +341,7 @@ const InvoicesUI = {
                                (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
             const linkMatch = this._invoiceMatchesVoucherLinkFilter(inv, linkFilter, allocMap);
 
-            return yearMatch && monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
+            return monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
         });
 
         const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
@@ -356,7 +351,11 @@ const InvoicesUI = {
         let totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
         const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
-        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+        const canComputeLedgerSummary = typeof BusinessAnalytics !== 'undefined'
+            && BusinessAnalytics.getAccountLedger
+            && !query
+            && filteredAll.length <= 300;
+        if (canComputeLedgerSummary) {
             const partyMap = new Map();
             filteredAll.forEach(inv => {
                 const key = (inv.partyId || inv.customerId || inv.customerName || '').toString().trim();
@@ -404,8 +403,13 @@ const InvoicesUI = {
         // Sort by date desc
         forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+        const canComputeRowLedgerDue = typeof BusinessAnalytics !== 'undefined'
+            && BusinessAnalytics.getAccountLedger
+            && !query
+            && forTable.length <= 200;
         const ledgerCache = new Map();
         const getLedgerDueForInv = (inv) => {
+            if (!canComputeRowLedgerDue) return null;
             if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
             const k = this._partyLedgerCacheKey(inv);
             if (ledgerCache.has(k)) return ledgerCache.get(k);
@@ -1954,11 +1958,8 @@ const InvoicesUI = {
                     <div class="card-body">
                          <div class="row g-2 mb-3">
                             <div class="col-md-3">
-                                <label class="form-label small text-white-50">Financial Year</label>
-                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseYear" onchange="InvoicesUI.updatePurchasesTable()">
-                                    <option value="">All Year</option>
-                                    ${yearOptions}
-                                </select>
+                                <label class="form-label small text-white-50">Calendar Month</label>
+                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterPurchaseMonth" onchange="InvoicesUI.updatePurchasesTable()">
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label small text-white-50">Vendor</label>
@@ -1967,7 +1968,7 @@ const InvoicesUI = {
                                     ${vendorOptions}
                                 </select>
                             </div>
-                            <div class="col-md-6 text-end">
+                            <div class="col-md-3 text-end">
                                 <label class="form-label small text-white-50 d-block">Status</label>
                                 <div class="btn-group w-100" role="group">
                                     <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
@@ -2037,14 +2038,15 @@ const InvoicesUI = {
         });
 
         // Filter UI states
-        const yearFilter = document.getElementById('filterPurchaseYear')?.value;
+        const monthFilter = document.getElementById('filterPurchaseMonth')?.value || '';
         const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
         const query = document.getElementById('purchaseSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
 
         const filtered = purchases.filter(p => {
-            const yearStr = DataManager.getFinancialYear(p.date);
-            const yearMatch = !yearFilter || yearStr === yearFilter;
+            const dateObj = new Date(p.date);
+            const monthYm = Number.isNaN(dateObj.getTime()) ? '' : `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+            const monthMatch = !monthFilter || monthYm === monthFilter;
             const vendorMatch = !vendorFilter || p.vendor === vendorFilter;
             const statusMatch = statusFilter === 'all' || 
                              (statusFilter === 'paid' && p.isPaid) ||
@@ -2055,7 +2057,7 @@ const InvoicesUI = {
                                (p.vendor || '').toLowerCase().includes(query) ||
                                (p.description || '').toLowerCase().includes(query);
 
-            return yearMatch && vendorMatch && statusMatch && searchMatch;
+            return monthMatch && vendorMatch && statusMatch && searchMatch;
         });
 
         // Update Summary Cards
@@ -2063,7 +2065,7 @@ const InvoicesUI = {
         const pendingCount = filtered.filter(p => p.balance > 0.05).length;
         let outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
         if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
-            const range = this._purchaseLedgerRangeFromFilters(yearFilter);
+            const range = this._purchaseLedgerRangeFromFilters('');
             const partyMap = new Map();
             filtered.forEach(p => {
                 const key = (p.partyId || p.vendorId || p.vendor || p.customerId || '').toString().trim();

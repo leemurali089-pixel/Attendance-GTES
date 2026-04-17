@@ -1,0 +1,423 @@
+[
+  {
+    "allocations": [
+      {
+        "amount": 10000,
+        "discountAmount": 0,
+        "id": "INV-NB-0003",
+        "no": "INV-NB-0003",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 10000,
+    "createdAt": "2026-03-23T13:33:00.012Z",
+    "customerAddress": "NO:68A, Thaneer Pandal, Valzhgudi, Karaiyur Post, Nagappattinam - Dist - 610101",
+    "customerId": "CUST-1774102231237-2x39o",
+    "customerName": "CHOZHA AIR PRODUCTS",
+    "date": "2026-03-12",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "01",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0003"
+    ],
+    "partyId": "PTY-1775626338670-KKR9PBZY",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0003",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 100000,
+        "discountAmount": 0,
+        "id": "INV-NB-0002",
+        "no": "INV-NB-0002",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 100000,
+    "createdAt": "2026-03-23T13:33:38.170Z",
+    "customerAddress": "",
+    "customerId": "CUST-1774365969725-kc7z0",
+    "customerName": "SUGGA DISTRIBUTORS",
+    "date": "2026-03-04",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "02",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0002"
+    ],
+    "partyId": "PTY-1775626338670-7UVBHHC1",
+    "paymentMode": "cash",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0002",
+    "tdsAmount": 0,
+    "type": "receipt",
+    "updatedAt": "2026-03-27T04:54:56.270Z"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 70000,
+        "discountAmount": 0,
+        "id": "INV-NB-0002",
+        "no": "INV-NB-0002",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 70000,
+    "createdAt": "2026-03-23T13:37:25.667Z",
+    "customerAddress": "",
+    "customerId": "CUST-1774365969725-kc7z0",
+    "customerName": "SUGGA DISTRIBUTORS",
+    "date": "2026-03-04",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "03",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0002"
+    ],
+    "partyId": "PTY-1775626338670-7UVBHHC1",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Unkwon",
+    "tdsAmount": 0,
+    "type": "receipt",
+    "updatedAt": "2026-03-27T04:54:48.453Z"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 26750,
+        "discountAmount": 0,
+        "id": "INV-NB-0001",
+        "no": "INV-NB-0001",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 26750,
+    "createdAt": "2026-03-23T13:58:19.056Z",
+    "customerAddress": "NO:117/1B, PANAMANGALAM ROAD, SATANATHAPURAM, SIRKALI (TK), MAYILADUTHURAI - DT, Pin: 609109.",
+    "customerId": "CUST-1774102231237-1xxu4",
+    "customerName": "RSP AIR PRODUCTS",
+    "date": "2026-03-23",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "04",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0001"
+    ],
+    "partyId": "PTY-1775626338670-BR4DJFHF",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0001",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 60000,
+        "discountAmount": 0,
+        "id": "INV-NB-0002",
+        "no": "INV-NB-0002",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 60000,
+    "createdAt": "2026-03-27T04:54:24.031Z",
+    "customerAddress": "18/1/1431, SARATHA COLONY, SOUTH STREET, THIRUVIZHANDUR, MAYILADUTHURAI, Nagapattinam",
+    "customerId": "CUST-1774365969725-kc7z0",
+    "customerName": "SUGGA DISTRIBUTORS",
+    "date": "2026-03-18",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "05",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0002"
+    ],
+    "partyId": "PTY-1775626338670-7UVBHHC1",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0002",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 30000,
+        "discountAmount": 0,
+        "id": "INV-NB-0005",
+        "no": "INV-NB-0005",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 30000,
+    "createdAt": "2026-03-27T05:06:45.623Z",
+    "customerId": "CUST-1774365969728",
+    "customerName": "Karaikal Gases",
+    "date": "2026-02-27",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "06",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0005"
+    ],
+    "partyId": "PTY-1775626338669-CGSZ3O1X",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0005",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 30000,
+        "discountAmount": 0,
+        "id": "INV-NB-0005",
+        "no": "INV-NB-0005",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 30000,
+    "createdAt": "2026-03-27T05:07:08.617Z",
+    "customerId": "CUST-1774365969728",
+    "customerName": "Karaikal Gases",
+    "date": "2026-03-04",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "07",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0005"
+    ],
+    "partyId": "PTY-1775626338669-CGSZ3O1X",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0005",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 30000,
+        "discountAmount": 0,
+        "id": "INV-NB-0005",
+        "no": "INV-NB-0005",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 30000,
+    "createdAt": "2026-03-27T05:07:28.646Z",
+    "customerId": "CUST-1774365969728",
+    "customerName": "Karaikal Gases",
+    "date": "2026-03-27",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "08",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0005"
+    ],
+    "partyId": "PTY-1775626338669-CGSZ3O1X",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0005",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 10000,
+        "discountAmount": 0,
+        "id": "INV-NB-0005",
+        "no": "INV-NB-0005",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 10000,
+    "createdAt": "2026-03-27T10:22:07.705Z",
+    "customerId": "CUST-1774365969728",
+    "customerName": "Karaikal Gases",
+    "date": "2026-03-27",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "09",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0005"
+    ],
+    "partyId": "PTY-1775626338669-CGSZ3O1X",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0005",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 25200,
+        "discountAmount": 0,
+        "id": "INV-NB-0006",
+        "no": "INV-NB-0006",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 25200,
+    "createdAt": "2026-03-28T04:31:35.983Z",
+    "customerAddress": "1-6, FRIENDS NAGAR, CUDDALORE, Cuddalore",
+    "customerId": "CUST-1774365969723-vfcx6",
+    "customerName": "Grace Gases and Company,",
+    "date": "2026-03-27",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "10",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0006"
+    ],
+    "partyId": "PTY-1775626338669-WV5TMPYI",
+    "paymentMode": "upi",
+    "referenceId": "200 discount",
+    "remarks": "Payment for Inv: INV-NB-0006",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 18550,
+        "discountAmount": 0,
+        "id": "INV-NB-0003",
+        "no": "INV-NB-0003",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 18550,
+    "createdAt": "2026-04-06T15:06:23.391Z",
+    "customerAddress": "NO:68A, Thaneer Pandal, Valzhgudi, Karaiyur Post, Nagappattinam - Dist - 610101",
+    "customerId": "CUST-1775479805861-d7t3x",
+    "customerName": "CHOZHA AIR PRODUCTS",
+    "date": "2026-04-03",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "11",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0003"
+    ],
+    "partyId": "PTY-1775626338670-KKR9PBZY",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "Payment for Inv: INV-NB-0003",
+    "tdsAmount": 0,
+    "type": "receipt"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 1860,
+        "discountAmount": 0,
+        "id": "INV-NB-0004",
+        "no": "INV-NB-0004",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 1860,
+    "createdAt": "2026-04-06T15:08:42.482Z",
+    "customerAddress": "",
+    "customerId": "CUST-1775479805861-uwu3a",
+    "customerName": "Sri Ragavendra Industrial Gases Pvt Ltd,",
+    "date": "2026-04-01",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "12",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0004"
+    ],
+    "partyId": "PTY-1775626338670-O2U35PF2",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "",
+    "tdsAmount": 0,
+    "type": "receipt",
+    "updatedAt": "2026-04-06T15:11:04.837Z"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 9542,
+        "discountAmount": 0,
+        "id": "INV-NB-0004",
+        "no": "INV-NB-0004",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 9542,
+    "createdAt": "2026-04-06T15:09:36.985Z",
+    "customerAddress": "",
+    "customerId": "CUST-1775479805861-uwu3a",
+    "customerName": "Sri Ragavendra Industrial Gases Pvt Ltd,",
+    "date": "2026-04-02",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "13",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0004"
+    ],
+    "partyId": "PTY-1775626338670-O2U35PF2",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "",
+    "tdsAmount": 0,
+    "type": "receipt",
+    "updatedAt": "2026-04-06T15:11:16.168Z"
+  },
+  {
+    "allocations": [
+      {
+        "amount": 1298,
+        "discountAmount": 0,
+        "id": "INV-NB-0004",
+        "no": "INV-NB-0004",
+        "tdsAmount": 0
+      }
+    ],
+    "amount": 1298,
+    "createdAt": "2026-04-06T15:10:42.638Z",
+    "customerAddress": "",
+    "customerId": "CUST-1775479805861-uwu3a",
+    "customerName": "Sri Ragavendra Industrial Gases Pvt Ltd,",
+    "date": "2026-04-02",
+    "discountAmount": 0,
+    "hasGst": false,
+    "id": "14",
+    "isPurchase": false,
+    "linkedInvoices": [
+      "INV-NB-0004"
+    ],
+    "partyId": "PTY-1775626338670-O2U35PF2",
+    "paymentMode": "upi",
+    "referenceId": "",
+    "remarks": "",
+    "tdsAmount": 0,
+    "type": "receipt",
+    "updatedAt": "2026-04-06T15:11:27.249Z"
+  }
+]

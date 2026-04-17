@@ -1,0 +1,538 @@
+[
+  {
+    "challanId": "DC-0001",
+    "createdAt": "2026-03-23T13:09:03.714Z",
+    "customerAddress": "NO:117/1B, PANAMANGALAM ROAD, SATANATHAPURAM, SIRKALI (TK), MAYILADUTHURAI - DT, Pin: 609109.",
+    "customerId": "CUST-1774102231237-1xxu4",
+    "customerName": "RSP AIR PRODUCTS",
+    "date": "2026-03-03",
+    "dispatchDetails": {
+      "date": "2026-03-23",
+      "lrNo": "",
+      "vehicleNo": "",
+      "via": ""
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0001",
+    "invoiceNo": "INV-NB-0001",
+    "items": [
+      {
+        "amount": 18900,
+        "description": "O2 Valve",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Cylinder Valve",
+        "quantity": 30,
+        "rate": 630,
+        "unit": "nos"
+      },
+      {
+        "amount": 2000,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "O2 Valve Spindle - Regulor",
+        "quantity": 50,
+        "rate": 40,
+        "unit": "nos"
+      },
+      {
+        "amount": 2250,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "O2 Valve Spindle - Oversize",
+        "quantity": 50,
+        "rate": 45,
+        "unit": "nos"
+      },
+      {
+        "amount": 3000,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "O2 TOP SPINDLE (N)",
+        "quantity": 30,
+        "rate": 100,
+        "unit": "nos"
+      },
+      {
+        "amount": 600,
+        "description": "Cylinder Valve Top spindle Washer",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Nylon Washer for Valve",
+        "quantity": 50,
+        "rate": 12,
+        "unit": "nos"
+      }
+    ],
+    "partyId": "PTY-1775626338670-BR4DJFHF",
+    "poNumber": "1067",
+    "roundOff": 0,
+    "status": "paid",
+    "subtotal": 26750,
+    "total": 26750,
+    "type": "without-bill",
+    "updatedAt": "2026-03-23T13:09:05.178Z"
+  },
+  {
+    "challanId": "DC-0002",
+    "createdAt": "2026-03-23T13:15:55.178Z",
+    "customerAddress": "18/1/1431, SARATHA COLONY, SOUTH STREET, THIRUVIZHANDUR, MAYILADUTHURAI, Nagapattinam",
+    "customerId": "CUST-1774102231238-po7s8",
+    "customerName": "SUGGA DISTRIBUTORS",
+    "date": "2026-03-04",
+    "dispatchDetails": {
+      "date": "2026-03-04",
+      "lrNo": "",
+      "vehicleNo": "TN51P2386",
+      "via": "Own Vehicle"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0002",
+    "invoiceNo": "INV-NB-0002",
+    "items": [
+      {
+        "amount": 248500,
+        "description": "O2 Cylinder along with Valve",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "NEW EMPTY CYLINDER",
+        "quantity": 35,
+        "rate": 7100,
+        "unit": "nos"
+      },
+      {
+        "amount": 1950,
+        "description": "O2 Filling Hose",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "SS Braided Gas Hose",
+        "quantity": 1,
+        "rate": 1950,
+        "unit": "nos"
+      }
+    ],
+    "narration": "Ref DC No:- 1070, 1071,1073",
+    "partyId": "PTY-1775626338670-7UVBHHC1",
+    "poNumber": "1070, 1071,1073",
+    "roundOff": 0,
+    "status": "partial",
+    "subtotal": 250450,
+    "total": 250450,
+    "type": "without-bill",
+    "updatedAt": "2026-03-23T13:15:56.226Z"
+  },
+  {
+    "challanId": "DC-0003",
+    "createdAt": "2026-03-23T13:19:44.653Z",
+    "customerAddress": "NO:68A, Thaneer Pandal, Valzhgudi, Karaiyur Post, Nagappattinam - Dist - 610101",
+    "customerId": "CUST-1774102231237-2x39o",
+    "customerName": "CHOZHA AIR PRODUCTS",
+    "date": "2026-03-12",
+    "dispatchDetails": {
+      "date": "2026-03-23",
+      "lrNo": "4572168",
+      "vehicleNo": "",
+      "via": "MSS"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0003",
+    "invoiceNo": "INV-NB-0003",
+    "items": [
+      {
+        "amount": 11700,
+        "description": "O2 Filling Hose",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "SS Braided Gas Hose",
+        "quantity": 6,
+        "rate": 1950,
+        "unit": "nos"
+      },
+      {
+        "amount": 15750,
+        "description": "O2 Valve ",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Cylinder Valve",
+        "quantity": 25,
+        "rate": 630,
+        "unit": "nos"
+      },
+      {
+        "amount": 1100,
+        "description": "1\" Champion",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Teflon Tape",
+        "quantity": 20,
+        "rate": 55,
+        "unit": "pcs"
+      }
+    ],
+    "narration": "Ref DC No:- 1089",
+    "partyId": "PTY-1775626338670-KKR9PBZY",
+    "poNumber": "1089",
+    "roundOff": 0,
+    "status": "partial",
+    "subtotal": 28550,
+    "total": 28550,
+    "type": "without-bill",
+    "updatedAt": "2026-03-23T13:19:45.567Z"
+  },
+  {
+    "challanId": "DC-0004",
+    "createdAt": "2026-03-23T13:24:57.642Z",
+    "customerAddress": "Plot NO: 14, IDA, Athur Post, Gajulamandyam, Renigunta, Andhrapradesh - 517520.",
+    "customerId": "CUST-1774102231237-gozxj",
+    "customerName": "Sri Ragavendra Industrial Gases Pvt Ltd,",
+    "date": "2026-03-16",
+    "dispatchDetails": {
+      "date": "2026-03-16",
+      "lrNo": "4631419",
+      "vehicleNo": "",
+      "via": "MSS"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0004",
+    "invoiceNo": "INV-NB-0004",
+    "items": [
+      {
+        "amount": 9450,
+        "description": "O2 Valve ",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Cylinder Valve",
+        "quantity": 15,
+        "rate": 630,
+        "unit": "nos"
+      },
+      {
+        "amount": 3250,
+        "description": "CO2 Valve",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "Cylinder Valve",
+        "quantity": 5,
+        "rate": 650,
+        "unit": "nos"
+      }
+    ],
+    "narration": "Ref DC No:- 1099",
+    "partyId": "PTY-1775626338670-O2U35PF2",
+    "poNumber": "1099",
+    "roundOff": 0,
+    "status": "pending",
+    "subtotal": 12700,
+    "total": 12700,
+    "type": "without-bill",
+    "updatedAt": "2026-03-23T13:24:58.641Z"
+  },
+  {
+    "challanId": "DC-0005",
+    "createdAt": "2026-03-23T13:30:35.395Z",
+    "customerAddress": "",
+    "customerId": "CUST-1774365969728",
+    "customerName": "Karaikal Gases",
+    "date": "2026-02-25",
+    "dispatchDetails": {
+      "date": "2026-03-23",
+      "lrNo": "",
+      "vehicleNo": "",
+      "via": ""
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0005",
+    "invoiceNo": "INV-NB-0005",
+    "items": [
+      {
+        "amount": 106500,
+        "description": "O2 cylinders",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "NEW EMPTY CYLINDER",
+        "quantity": 15,
+        "rate": 7100,
+        "unit": "nos"
+      }
+    ],
+    "narration": "",
+    "partyId": "PTY-1775626338669-CGSZ3O1X",
+    "poNumber": "1055",
+    "roundOff": 0,
+    "status": "partial",
+    "subtotal": 106500,
+    "total": 106500,
+    "type": "without-bill",
+    "updatedAt": "2026-03-27T10:22:16.781Z"
+  },
+  {
+    "challanId": "DC-0006",
+    "createdAt": "2026-03-27T10:48:03.347Z",
+    "customerAddress": "1-6, FRIENDS NAGAR, CUDDALORE, Cuddalore",
+    "customerId": "CUST-1774365969723-vfcx6",
+    "customerName": "Grace Gases and Company,",
+    "date": "2026-03-27",
+    "dispatchDetails": {
+      "date": "2026-03-27",
+      "lrNo": "",
+      "vehicleNo": "",
+      "via": "ABT"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0006",
+    "invoiceNo": "INV-NB-0006",
+    "items": [
+      {
+        "amount": 25200,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "73110090",
+        "name": "NEW EMPTY CYLINDER",
+        "quantity": 6,
+        "rate": 4200,
+        "unit": "nos"
+      }
+    ],
+    "narration": "Sent to Mohamed Haji Ali Parangi Pettai Cylinder No:- 497993,498073,497064,498041,498046,498102.",
+    "partyId": "PTY-1775626338669-WV5TMPYI",
+    "poNumber": "1105",
+    "roundOff": 0,
+    "status": "paid",
+    "subtotal": 25200,
+    "total": 25200,
+    "type": "without-bill",
+    "updatedAt": "2026-03-27T10:50:25.026Z"
+  },
+  {
+    "challanId": "DC-0007",
+    "createdAt": "2026-03-31T08:43:57.699Z",
+    "customerAddress": "Ranipet",
+    "customerId": "CUST-1774946028523",
+    "customerName": "Sri Annamalaiyar Agency",
+    "date": "2026-03-31",
+    "dispatchDetails": {
+      "date": "2026-03-31",
+      "lrNo": "4855504",
+      "vehicleNo": "",
+      "via": "MSS"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0007",
+    "invoiceNo": "INV-NB-0007",
+    "items": [
+      {
+        "amount": 4500,
+        "description": "Adopter, Brazing & Acid Cleaning",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "CO2 Valve ",
+        "quantity": 18,
+        "rate": 250,
+        "unit": "nos"
+      },
+      {
+        "amount": 360,
+        "description": "Spindle Change & Acid Cleaning",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "O2 Valve Spindle - Oversize",
+        "quantity": 3,
+        "rate": 120,
+        "unit": "nos"
+      },
+      {
+        "amount": 110,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "CO2 TOP SPINDLE (N)",
+        "quantity": 1,
+        "rate": 110,
+        "unit": "nos"
+      },
+      {
+        "amount": 110,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "",
+        "name": "CO2 BOTTOM SS SPINDLE",
+        "quantity": 1,
+        "rate": 110,
+        "unit": "nos"
+      }
+    ],
+    "narration": "O2 Valve Defect :- 1 Nos",
+    "partyId": "PTY-1775626338669-8KY34TRE",
+    "poNumber": "1106",
+    "roundOff": 0,
+    "status": "pending",
+    "subtotal": 5080,
+    "total": 5080,
+    "type": "without-bill",
+    "updatedAt": "2026-03-31T11:39:42.037Z"
+  },
+  {
+    "challanId": "DC-0008",
+    "createdAt": "2026-04-02T10:24:30.271Z",
+    "customerAddress": "Plot No.27B, No.31, IIIrd Floor, Vinobajinagar 6th Street,, Hasthinapuram, Chennai, Kancheepuram",
+    "customerId": "CUST-1775115918353-l5lqc",
+    "customerName": "CRYOGAS SYSTEMS",
+    "date": "2026-04-02",
+    "dispatchDetails": {
+      "date": "2026-04-02",
+      "lrNo": "",
+      "vehicleNo": "",
+      "via": ""
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0008",
+    "invoiceNo": "INV-NB-0008",
+    "items": [
+      {
+        "amount": 39600,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "74111000",
+        "name": "Copper Piping",
+        "quantity": 12,
+        "rate": 3300,
+        "unit": "mtr"
+      },
+      {
+        "amount": 800,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "74071010",
+        "name": "Copper Brazing Rod",
+        "quantity": 5,
+        "rate": 160,
+        "unit": "nos"
+      },
+      {
+        "amount": 2550,
+        "description": "",
+        "gstRate": 0,
+        "hsn": "74122012",
+        "name": "Brass Sockets",
+        "quantity": 6,
+        "rate": 425,
+        "unit": "nos"
+      },
+      {
+        "amount": 200,
+        "description": "22 OD",
+        "gstRate": 0,
+        "hsn": "39269099",
+        "name": "PP CLAMP",
+        "quantity": 4,
+        "rate": 50,
+        "unit": "nos"
+      },
+      {
+        "amount": 500,
+        "description": "PP Clamp With L Angle ",
+        "gstRate": 0,
+        "hsn": "73269099",
+        "name": "MS Fabricated Clamp",
+        "quantity": 4,
+        "rate": 125,
+        "unit": "nos"
+      }
+    ],
+    "narration": "",
+    "partyId": "PTY-1775626338669-SD2C41O0",
+    "poNumber": "1072 Dated 04-03-2026, 1078 Dated 07-03-2026",
+    "roundOff": 0,
+    "status": "pending",
+    "subtotal": 43650,
+    "total": 43650,
+    "type": "without-bill",
+    "updatedAt": "2026-04-02T10:26:48.858Z"
+  },
+  {
+    "challanId": "DC-0009",
+    "createdAt": "2026-04-02T13:39:40.225Z",
+    "customerAddress": "NO: 96C/4, ATTUR MAIN ROAD, Ayothyapattinam, Salem - 636103",
+    "customerId": "CUST-1775136918461-axjst",
+    "customerName": "PUSHPAVALLI ENGG WORKS,",
+    "date": "2026-04-02",
+    "dispatchDetails": {
+      "date": "2026-04-02",
+      "lrNo": "",
+      "vehicleNo": "",
+      "via": "ABT"
+    },
+    "gst": {
+      "cgst": 0,
+      "igst": 0,
+      "sgst": 0
+    },
+    "id": "INV-NB-0009",
+    "invoiceNo": "INV-NB-0009",
+    "items": [
+      {
+        "amount": 3150,
+        "description": "O2 Valve ",
+        "gstRate": 0,
+        "hsn": "84818030",
+        "name": "Cylinder Valve",
+        "quantity": 5,
+        "rate": 630,
+        "unit": "nos"
+      },
+      {
+        "amount": 550,
+        "description": "1\" Champion",
+        "gstRate": 0,
+        "hsn": "39209999",
+        "name": "Teflon Tape",
+        "quantity": 10,
+        "rate": 55,
+        "unit": "nos"
+      }
+    ],
+    "partyId": "PTY-1775626338670-G9SDFZNK",
+    "poNumber": "03",
+    "roundOff": 0,
+    "status": "pending",
+    "subtotal": 3700,
+    "total": 3700,
+    "type": "without-bill",
+    "updatedAt": "2026-04-02T13:39:41.744Z"
+  }
+]

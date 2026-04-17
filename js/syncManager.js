@@ -471,12 +471,18 @@ const SyncManager = {
     handleRemoteChange(filename) {
         this.logSyncEvent('warning', `Remote changes detected in ${filename}`);
         this.updateStatus('changes', `Changes detected in ${filename}`);
+        let base = '';
         if (typeof filename === 'string' && window.DataManager && typeof DataManager.invalidateDataCache === 'function') {
-            const base = filename.replace(/\.json$/i, '').replace(/^.*[/\\]/, '');
+            base = filename.replace(/\.json$/i, '').replace(/^.*[/\\]/, '');
             if (base) {
                 DataManager.invalidateDataCache(base);
             }
         }
+        try {
+            window.dispatchEvent(new CustomEvent('gtes:remote-change', {
+                detail: { key: base, filename, ts: Date.now() }
+            }));
+        } catch (_) { }
         App.showNotification(`Remote changes detected in ${filename}`, 'info');
     },
 

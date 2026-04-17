@@ -54,8 +54,8 @@ const DataManager = {
         RECYCLE_BIN: 'gtes_recycle_bin'
     },
 
-    /** On load, union-merge with localStorage so cloud snapshots cannot drop newer rows (incl. gtes_users for web login). */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_employees', 'gtes_users']),
+    /** On load, union-merge local/cloud for append-heavy transactional collections only. */
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_employees']),
 
     _normalizeGtesUsersPayload(raw) {
         if (raw == null) return raw;
@@ -256,6 +256,14 @@ const DataManager = {
         if (this._attendanceByMonthCache && this._attendanceByMonthCache.size) {
             this._attendanceByMonthCache.clear();
         }
+    },
+
+    _emitDataChangedEvent(key, source = 'save') {
+        try {
+            window.dispatchEvent(new CustomEvent('gtes:data-changed', {
+                detail: { key, source, ts: Date.now() }
+            }));
+        } catch (_) { }
     },
 
     invalidateDataCache(key) {
@@ -520,7 +528,9 @@ const DataManager = {
                 console.warn(`[DataManager] Pre-save merge skipped for '${key}':`, e);
             }
         }
-        return await FileStorage.saveData(key, payload);
+        const ok = await FileStorage.saveData(key, payload);
+        this._emitDataChangedEvent(key, 'saveData');
+        return ok;
     },
 
     async loadData(key, options = {}) {
@@ -635,6 +645,7 @@ const DataManager = {
         }
         try {
             localStorage.setItem(key, JSON.stringify(value));
+            this._emitDataChangedEvent(key, 'saveDataSync');
             // Also trigger async save for file storage
             this.saveData(key, value).catch(err => console.error('Async save error:', err));
             return true;

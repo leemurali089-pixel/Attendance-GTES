@@ -3,6 +3,10 @@
  */
 
 const TasksUI = {
+    _liveSyncInitialized: false,
+    _livePollTimer: null,
+    _lastKnownTasksFingerprint: '',
+
     async _getTaskVisibilityContext() {
         const currentUser = await UserManager.getCurrentUser();
         const isAdmin = !!(currentUser && currentUser.role === UserManager.ROLES.ADMIN);
@@ -36,7 +40,85 @@ const TasksUI = {
     currentFilter: 'pending', // 'pending', 'completed', 'all'
 
     async load() {
+        this._ensureLiveSync();
+        this._startLivePolling();
         this.renderTasks();
+    },
+
+    _computeTasksFingerprint(tasks) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        if (!list.length) return '0';
+        let latestTs = 0;
+        let checksum = 0;
+        for (const task of list) {
+            const stamp = Date.parse(task?.updatedAt || task?.completedAt || task?.createdAt || 0) || 0;
+            if (stamp > latestTs) latestTs = stamp;
+            const sig = [
+                task?.id || '',
+                task?.status || '',
+                task?.assignedTo || '',
+                task?.followupDate || '',
+                task?.followupTime || '',
+                task?.narration || '',
+                Array.isArray(task?.history) ? task.history.length : 0
+            ].join('|');
+            for (let i = 0; i < sig.length; i++) checksum = (checksum + sig.charCodeAt(i)) % 1000000007;
+        }
+        return `${list.length}:${latestTs}:${checksum}`;
+    },
+
+    _markTasksFingerprintFromCache() {
+        const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+        this._lastKnownTasksFingerprint = this._computeTasksFingerprint(tasks);
+    },
+
+    async _refreshTasksFromCloud(reason = 'sync') {
+        try {
+            await DataManager.loadData(DataManager.KEYS.TASKS, { forceRefresh: true });
+            this._markTasksFingerprintFromCache();
+            if (App.currentView === 'tasks') {
+                this.renderTasks();
+            }
+        } catch (err) {
+            console.warn(`[TasksUI] Live refresh failed (${reason}):`, err);
+        }
+    },
+
+    _ensureLiveSync() {
+        if (this._liveSyncInitialized) return;
+        this._liveSyncInitialized = true;
+        this._markTasksFingerprintFromCache();
+
+        window.addEventListener('storage', (event) => {
+            if (event?.key !== DataManager.KEYS.TASKS) return;
+            this._markTasksFingerprintFromCache();
+            if (App.currentView === 'tasks') this.renderTasks();
+        });
+
+        window.addEventListener('gtes:data-changed', (event) => {
+            if (event?.detail?.key !== DataManager.KEYS.TASKS) return;
+            this._markTasksFingerprintFromCache();
+            if (App.currentView === 'tasks') this.renderTasks();
+        });
+
+        window.addEventListener('gtes:remote-change', (event) => {
+            if (event?.detail?.key !== DataManager.KEYS.TASKS) return;
+            this._refreshTasksFromCloud('remote-change');
+        });
+    },
+
+    _startLivePolling() {
+        if (this._livePollTimer) return;
+        this._livePollTimer = setInterval(async () => {
+            if (App.currentView !== 'tasks') return;
+            await DataManager.loadData(DataManager.KEYS.TASKS, { forceRefresh: true });
+            const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+            const next = this._computeTasksFingerprint(tasks);
+            if (next !== this._lastKnownTasksFingerprint) {
+                this._lastKnownTasksFingerprint = next;
+                this.renderTasks();
+            }
+        }, 8000);
     },
 
     /**
