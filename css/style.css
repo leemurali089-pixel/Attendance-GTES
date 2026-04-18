@@ -1250,17 +1250,37 @@ a:hover {
     color: #f8fafc !important;
 }
 
-/* Override Bootstrap's table-secondary to ensure text is always readable */
-.table tbody tr.table-secondary td {
+/* Override Bootstrap's table-secondary to ensure text is always readable
+   in BOTH themes. Light: dark-navy text on a pale gray tint. Dark:
+   slate-50 text on a translucent slate tint. The previous rule hard-
+   coded #1e293b (dark navy) for the first four columns regardless of
+   theme, which made the Opening balance / Period totals rows in the
+   Customer Ledger invisible in dark mode. */
+[data-theme="light"] .table tbody tr.table-secondary td,
+[data-theme="light"] .table tfoot.table-secondary td,
+[data-theme="light"] .table tr.table-secondary td {
     color: #64748b !important;
     background-color: rgba(100, 116, 139, 0.1);
 }
-
-.table tbody tr.table-secondary td:first-child,
-.table tbody tr.table-secondary td:nth-child(2),
-.table tbody tr.table-secondary td:nth-child(3),
-.table tbody tr.table-secondary td:nth-child(4) {
+[data-theme="light"] .table tbody tr.table-secondary td:first-child,
+[data-theme="light"] .table tbody tr.table-secondary td:nth-child(2),
+[data-theme="light"] .table tbody tr.table-secondary td:nth-child(3),
+[data-theme="light"] .table tbody tr.table-secondary td:nth-child(4),
+[data-theme="light"] .table tfoot.table-secondary td:first-child,
+[data-theme="light"] .table tfoot.table-secondary td:nth-child(2),
+[data-theme="light"] .table tfoot.table-secondary td:nth-child(3),
+[data-theme="light"] .table tfoot.table-secondary td:nth-child(4) {
     color: #1e293b !important;
+    font-weight: 600;
+}
+
+[data-theme="dark"] .table tbody tr.table-secondary td,
+[data-theme="dark"] .table tfoot.table-secondary td,
+[data-theme="dark"] .table tr.table-secondary td,
+[data-theme="dark"] .table.table-dark tbody tr.table-secondary td,
+[data-theme="dark"] .table.table-dark tfoot.table-secondary td {
+    color: #f1f5f9 !important;
+    background-color: rgba(148, 163, 184, 0.18) !important;
     font-weight: 600;
 }
 
