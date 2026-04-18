@@ -17,13 +17,11 @@ const UpdateChecker = {
      * In future, this could call an online API/file for version info
      */
     checkForUpdates() {
-        // For now, this is a placeholder
-        // Future: fetch('https://yourserver.com/version.json')
         return {
-            updateAvailable: false, // Set to true to test the notification modal
-            latestVersion: '1.3.3',
-            releaseNotes: '• Desktop ↔ Web Employee Sync Fix\n• Added Duplicate Save guards for Invoices & Vouchers\n• Reliable Voucher Deletion (Skip pre-save merge)\n• Edit Voucher: Restored previous invoice allocations view',
-            downloadUrl: 'https://github.com/leemurali089-pixel/Attendance-GTES/releases'
+            updateAvailable: false,
+            latestVersion: this.APP_VERSION,
+            releaseNotes: 'The desktop app checks GitHub Releases automatically on startup. Open the Admin → App Updates card to check now, download, and restart to install.',
+            downloadUrl: 'https://github.com/leemurali089-pixel/Attendance-GTES/releases/latest'
         };
     },
 
