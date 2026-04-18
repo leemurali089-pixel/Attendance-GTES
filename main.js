@@ -5,6 +5,19 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const gmailIpc = require('./gmail/gmailIpc');
 
+// Auto-update: the desktop app pulls new installers from the GitHub
+// Release configured under "build.publish" in package.json. Skipped in
+// dev (`npm start`) because there is no packaged app to replace.
+let autoUpdater = null;
+try {
+    autoUpdater = require('electron-updater').autoUpdater;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.logger = console;
+} catch (e) {
+    console.warn('[updater] electron-updater not available:', e && e.message);
+}
+
 // ... existing code ...
 
 // Password Hashing (PBKDF2)
@@ -112,9 +125,72 @@ app.whenReady().then(async () => {
 
     try { gmailIpc.init(); } catch (e) { console.error('[main] gmailIpc init error:', e.message); }
 
+    // Forward lifecycle events to the renderer so the Admin UI can show
+    // "checking / available / downloading / downloaded / error".
+    if (autoUpdater && app.isPackaged) {
+        const send = (type, payload) => {
+            try {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('updater:event', { type, ...payload });
+                }
+            } catch {}
+        };
+        autoUpdater.on('checking-for-update', () => send('checking-for-update', {}));
+        autoUpdater.on('update-available', (info) => send('update-available', { info }));
+        autoUpdater.on('update-not-available', (info) => send('update-not-available', { info }));
+        autoUpdater.on('error', (err) => send('error', { message: String(err && err.message || err) }));
+        autoUpdater.on('download-progress', (p) => send('download-progress', { progress: p }));
+        autoUpdater.on('update-downloaded', (info) => send('update-downloaded', { info }));
+
+        // First background check a few seconds after startup so splash/
+        // initial render is not blocked by network.
+        setTimeout(() => {
+            autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+                console.warn('[updater] initial check failed:', err && err.message);
+            });
+        }, 15000);
+    } else if (!app.isPackaged) {
+        console.log('[updater] skipped (dev mode / not packaged)');
+    }
+
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+});
+
+// Updater IPC surface (used by Admin UI "Check for Updates" button).
+ipcMain.handle('updater:getVersion', () => {
+    return { version: app.getVersion(), packaged: app.isPackaged };
+});
+ipcMain.handle('updater:check', async () => {
+    if (!autoUpdater) return { success: false, error: 'updater unavailable' };
+    if (!app.isPackaged) return { success: false, error: 'dev mode (run the installed app to check for updates)' };
+    try {
+        const r = await autoUpdater.checkForUpdates();
+        return { success: true, data: r && r.updateInfo ? { version: r.updateInfo.version, releaseDate: r.updateInfo.releaseDate } : null };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+});
+ipcMain.handle('updater:download', async () => {
+    if (!autoUpdater) return { success: false, error: 'updater unavailable' };
+    if (!app.isPackaged) return { success: false, error: 'dev mode' };
+    try {
+        await autoUpdater.downloadUpdate();
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+});
+ipcMain.handle('updater:install', async () => {
+    if (!autoUpdater) return { success: false, error: 'updater unavailable' };
+    if (!app.isPackaged) return { success: false, error: 'dev mode' };
+    try {
+        setImmediate(() => autoUpdater.quitAndInstall(false, true));
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
 });
 
 app.on('window-all-closed', function () {

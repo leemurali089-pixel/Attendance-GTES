@@ -29,6 +29,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Email operations
     sendEmail: (config, mailOptions) => ipcRenderer.invoke('send-email', config, mailOptions),
 
+    // App auto-update (electron-updater + GitHub Releases)
+    updater: {
+        getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+        check: () => ipcRenderer.invoke('updater:check'),
+        download: () => ipcRenderer.invoke('updater:download'),
+        install: () => ipcRenderer.invoke('updater:install'),
+        onEvent: (cb) => ipcRenderer.on('updater:event', (_evt, data) => cb(data))
+    },
+
     // Gmail API integration
     gmail: {
         // Auth

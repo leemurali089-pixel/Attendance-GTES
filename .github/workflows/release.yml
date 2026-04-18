@@ -1,0 +1,58 @@
+name: Release Desktop App
+
+# Triggers:
+#  - Push a tag like v1.3.6 / v1.4.0 to automatically build + publish.
+#  - Or run manually from the "Actions" tab (workflow_dispatch).
+#
+# What it does:
+#   1. Checks out the repo on a Windows runner.
+#   2. Installs Node + dependencies.
+#   3. Runs `npm run release` which invokes electron-builder with
+#      --publish=always. electron-builder reads "build.publish" from
+#      package.json and uploads the NSIS installer + portable exe +
+#      latest.yml to the GitHub Release that matches the tag.
+#   4. GH_TOKEN is provided by GitHub automatically; no secret to set.
+#
+# NOTE on code signing:
+#   By default this workflow produces UNSIGNED builds. The current
+#   locally-built v1.3.5 is signed with the user's signtool cert, and
+#   electron-updater will refuse to install an unsigned update on top
+#   of a signed install. To use this CI end-to-end, either:
+#     (a) Add secrets CSC_LINK (base64 of .pfx) and CSC_KEY_PASSWORD,
+#         and electron-builder will auto-sign, or
+#     (b) Keep using `npm run release` locally for signed builds and
+#         use this workflow only for unsigned preview builds.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Uncomment to enable code signing on CI (see NOTE above):
+          # CSC_LINK: ${{ secrets.CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run release

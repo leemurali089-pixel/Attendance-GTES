@@ -359,14 +359,33 @@ const AdminModule = {
                             <hr>
                             
                             <h5>Application Version</h5>
-                            <div class="d-flex align-items-center gap-3">
-                                <div>
-                                    <p class="mb-1"><strong>Current Version:</strong> <span class="badge bg-info">${UpdateChecker.getCurrentVersion()}</span></p>
-                                    <p class="text-muted small mb-0">MJS PrimeLogic - Attendance & Salary Management</p>
+                            <div class="card mb-3" id="appUpdateCard">
+                                <div class="card-body">
+                                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                        <div>
+                                            <p class="mb-1"><strong>Current Version:</strong>
+                                                <span class="badge bg-info" id="appVersionBadge">${UpdateChecker.getCurrentVersion()}</span>
+                                                <span id="appUpdateChannelBadge" class="badge bg-secondary d-none ms-1">Web</span>
+                                            </p>
+                                            <p class="text-muted small mb-0">MJS PrimeLogic - Attendance & Salary Management</p>
+                                        </div>
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <button class="btn btn-outline-success btn-sm" id="appCheckUpdateBtn">
+                                                <i class="bi bi-arrow-clockwise"></i> Check for Updates
+                                            </button>
+                                            <button class="btn btn-primary btn-sm d-none" id="appDownloadUpdateBtn">
+                                                <i class="bi bi-cloud-download"></i> Download Update
+                                            </button>
+                                            <button class="btn btn-success btn-sm d-none" id="appInstallUpdateBtn">
+                                                <i class="bi bi-box-arrow-right"></i> Restart & Install
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="appUpdateStatus" class="small text-muted">Ready.</div>
+                                    <div class="progress mt-2 d-none" id="appUpdateProgressBar" style="height: 6px;">
+                                        <div class="progress-bar" role="progressbar" style="width: 0%" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
                                 </div>
-                                <button class="btn btn-outline-success btn-sm" onclick="UpdateChecker.performUpdateCheck()">
-                                    <i class="bi bi-arrow-clockwise"></i> Check for Updates
-                                </button>
                             </div>
                         </div>
 
@@ -381,6 +400,116 @@ const AdminModule = {
         this._ensureUserModal();
         await this.loadUsers();
         this._wireGmailAdminCard();
+        this._wireAppUpdateCard();
+    },
+
+    async _wireAppUpdateCard() {
+        const statusEl = document.getElementById('appUpdateStatus');
+        const checkBtn = document.getElementById('appCheckUpdateBtn');
+        const dlBtn = document.getElementById('appDownloadUpdateBtn');
+        const installBtn = document.getElementById('appInstallUpdateBtn');
+        const versionBadge = document.getElementById('appVersionBadge');
+        const channelBadge = document.getElementById('appUpdateChannelBadge');
+        const progressWrap = document.getElementById('appUpdateProgressBar');
+        if (!statusEl || !checkBtn) return;
+
+        const setStatus = (msg, cls) => {
+            statusEl.className = 'small ' + (cls || 'text-muted');
+            statusEl.textContent = msg;
+        };
+        const show = (el, on) => { if (el) el.classList.toggle('d-none', !on); };
+
+        const api = window.electronAPI && window.electronAPI.updater;
+        if (!api) {
+            if (channelBadge) { channelBadge.classList.remove('d-none'); channelBadge.textContent = 'Web'; }
+            setStatus('Auto-updates run only in the desktop app. Download the installer from GitHub to upgrade.', 'text-muted');
+            checkBtn.onclick = () => {
+                if (typeof UpdateChecker !== 'undefined' && UpdateChecker.performUpdateCheck) {
+                    UpdateChecker.performUpdateCheck();
+                }
+            };
+            return;
+        }
+
+        try {
+            const v = await api.getVersion();
+            if (v && v.version && versionBadge) versionBadge.textContent = v.version;
+            if (v && !v.packaged) {
+                if (channelBadge) { channelBadge.classList.remove('d-none'); channelBadge.textContent = 'Dev'; }
+                setStatus('Dev mode (`npm start`). Auto-update runs only from the installed desktop build.', 'text-muted');
+                checkBtn.disabled = true;
+                return;
+            }
+        } catch {}
+
+        if (typeof api.onEvent === 'function' && !AdminModule._updaterBound) {
+            AdminModule._updaterBound = true;
+            api.onEvent((data) => {
+                if (!data || !data.type) return;
+                switch (data.type) {
+                    case 'checking-for-update':
+                        setStatus('Checking for updates…', 'text-muted');
+                        break;
+                    case 'update-available':
+                        setStatus(`Update available: v${data.info && data.info.version}. Downloading…`, 'text-primary');
+                        show(dlBtn, false);
+                        show(progressWrap, true);
+                        break;
+                    case 'update-not-available':
+                        setStatus('You are on the latest version.', 'text-success');
+                        show(progressWrap, false);
+                        break;
+                    case 'download-progress': {
+                        const p = (data.progress && data.progress.percent) || 0;
+                        const mb = (data.progress && data.progress.transferred / (1024 * 1024)) || 0;
+                        const total = (data.progress && data.progress.total / (1024 * 1024)) || 0;
+                        setStatus(`Downloading update… ${p.toFixed(0)}% (${mb.toFixed(1)} / ${total.toFixed(1)} MB)`, 'text-primary');
+                        show(progressWrap, true);
+                        const bar = progressWrap && progressWrap.querySelector('.progress-bar');
+                        if (bar) bar.style.width = p + '%';
+                        break;
+                    }
+                    case 'update-downloaded':
+                        setStatus(`Update v${data.info && data.info.version} downloaded. Restart to install.`, 'text-success');
+                        show(progressWrap, false);
+                        show(dlBtn, false);
+                        show(installBtn, true);
+                        break;
+                    case 'error':
+                        setStatus('Update error: ' + (data.message || 'unknown'), 'text-danger');
+                        show(progressWrap, false);
+                        break;
+                }
+            });
+        }
+
+        checkBtn.onclick = async () => {
+            checkBtn.disabled = true;
+            setStatus('Checking for updates…', 'text-muted');
+            try {
+                const r = await api.check();
+                if (!r || !r.success) {
+                    setStatus('Could not check: ' + ((r && r.error) || 'unknown'), 'text-warning');
+                } else if (r.data && r.data.version) {
+                    setStatus(`Found update: v${r.data.version}. Downloading in background…`, 'text-primary');
+                } else {
+                    setStatus('You are on the latest version.', 'text-success');
+                }
+            } finally {
+                checkBtn.disabled = false;
+            }
+        };
+
+        if (dlBtn) dlBtn.onclick = async () => {
+            dlBtn.disabled = true;
+            setStatus('Starting download…', 'text-primary');
+            try { await api.download(); } finally { dlBtn.disabled = false; }
+        };
+        if (installBtn) installBtn.onclick = async () => {
+            if (!confirm('Restart the app now to install the update?')) return;
+            installBtn.disabled = true;
+            await api.install();
+        };
     },
 
     async _wireGmailAdminCard() {
