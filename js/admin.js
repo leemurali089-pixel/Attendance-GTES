@@ -326,9 +326,26 @@ const AdminModule = {
 
                                 <button type="submit" class="btn btn-primary">Save Settings</button>
                             </form>
-                            
+
                             <hr>
-                            
+
+                            <div class="card mb-4" id="gmailSyncCard">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0"><i class="bi bi-google"></i> Gmail Integration</h5>
+                                    <span id="gmailStatusPill" class="badge bg-secondary">Checking…</span>
+                                </div>
+                                <div class="card-body">
+                                    <div id="gmailStatusDetail" class="small text-muted mb-2">Loading status…</div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <button class="btn btn-sm btn-primary" onclick="MailUI && MailUI.load ? App.showView('mail') : null"><i class="bi bi-envelope"></i> Open Mail</button>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="App.showView('poQueue')"><i class="bi bi-receipt"></i> PO Queue</button>
+                                        <button class="btn btn-sm btn-outline-info" onclick="App.showView('bankMail')"><i class="bi bi-bank"></i> Bank Mail</button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="gmailAdminSync"><i class="bi bi-arrow-clockwise"></i> Sync now</button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="gmailAdminSettings"><i class="bi bi-gear"></i> Settings</button>
+                                    </div>
+                                </div>
+                            </div>
+
                             <h5>Data Management</h5>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-primary" onclick="AdminModule.exportManualBackup()">
@@ -363,6 +380,52 @@ const AdminModule = {
         this.userModal = null;
         this._ensureUserModal();
         await this.loadUsers();
+        this._wireGmailAdminCard();
+    },
+
+    async _wireGmailAdminCard() {
+        try {
+            if (!window.electronAPI || !window.electronAPI.gmail) {
+                const pill = document.getElementById('gmailStatusPill');
+                const detail = document.getElementById('gmailStatusDetail');
+                if (pill) { pill.textContent = 'Unavailable (non-Electron)'; pill.className = 'badge bg-secondary'; }
+                if (detail) detail.textContent = 'Gmail integration requires the desktop app.';
+                return;
+            }
+            const refreshGmailCard = async () => {
+                const statusRes = await window.electronAPI.gmail.status();
+                const stateRes = await window.electronAPI.gmail.getState();
+                const s = (statusRes && statusRes.data) || {};
+                const stt = (stateRes && stateRes.data) || {};
+                const pill = document.getElementById('gmailStatusPill');
+                const detail = document.getElementById('gmailStatusDetail');
+                if (!pill || !detail) return;
+                if (!s.hasCredentials) {
+                    pill.textContent = 'Not configured'; pill.className = 'badge bg-warning text-dark';
+                    detail.innerHTML = 'Paste your Google Cloud OAuth <b>Desktop app</b> client ID &amp; secret (see <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>).';
+                } else if (!s.isLoggedIn) {
+                    pill.textContent = 'Disconnected'; pill.className = 'badge bg-warning text-dark';
+                    detail.textContent = 'Credentials configured. Click Settings → Connect Gmail.';
+                } else {
+                    pill.textContent = 'Connected'; pill.className = 'badge bg-success';
+                    const poRes = await window.electronAPI.gmail.queueList('po');
+                    const bankRes = await window.electronAPI.gmail.queueList('bank');
+                    const poCount = ((poRes && poRes.data) || []).filter(x => !x.linkedInvoiceId).length;
+                    const bankCount = ((bankRes && bankRes.data) || []).filter(x => !x.linkedVoucherId).length;
+                    detail.innerHTML = `Account: <b>${stt.accountEmail || '—'}</b> • Last sync: ${stt.lastSyncAt ? new Date(stt.lastSyncAt).toLocaleString() : 'never'} • Open POs: <b>${poCount}</b> • Open bank alerts: <b>${bankCount}</b>`;
+                }
+            };
+            await refreshGmailCard();
+            const syncBtn = document.getElementById('gmailAdminSync');
+            if (syncBtn) syncBtn.onclick = async () => {
+                syncBtn.disabled = true;
+                try { await window.electronAPI.gmail.syncNow(); } finally { syncBtn.disabled = false; await refreshGmailCard(); }
+            };
+            const settingsBtn = document.getElementById('gmailAdminSettings');
+            if (settingsBtn) settingsBtn.onclick = () => { App.showView('mail'); setTimeout(() => { const b = document.getElementById('mailSettingsBtn'); if (b) b.click(); }, 300); };
+        } catch (e) {
+            console.warn('Gmail admin card wiring error:', e.message);
+        }
     },
 
     clearAuditDateFilters() {

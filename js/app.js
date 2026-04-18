@@ -671,6 +671,11 @@ const App = {
                     // Filter view should be accessible to all logged-in users
                     hasPermission = true;
                     break;
+                case 'mail':
+                case 'poQueue':
+                case 'bankMail':
+                    hasPermission = true;
+                    break;
                 default:
                     hasPermission = true;
             }
@@ -895,6 +900,15 @@ const App = {
                 break;
             case 'admin':
                 await AdminModule.load();
+                break;
+            case 'mail':
+                if (window.MailUI) await MailUI.load();
+                break;
+            case 'poQueue':
+                if (window.POQueueUI) await POQueueUI.load();
+                break;
+            case 'bankMail':
+                if (window.BankMailUI) await BankMailUI.load();
                 break;
             case 'analytics':
                 if (typeof AnalyticsUI.ensureSubNav === 'function') {

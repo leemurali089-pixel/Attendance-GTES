@@ -3,6 +3,7 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
+const gmailIpc = require('./gmail/gmailIpc');
 
 // ... existing code ...
 
@@ -108,6 +109,8 @@ app.whenReady().then(async () => {
     }
     await ensureDataFolder();
     createWindow();
+
+    try { gmailIpc.init(); } catch (e) { console.error('[main] gmailIpc init error:', e.message); }
 
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();

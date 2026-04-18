@@ -1039,9 +1039,10 @@ const DataManager = {
      * @param {string} reason - Reason for revision
      * @param {string} effectiveDate - Date when revision takes effect (YYYY-MM-DD)
      * @param {Object} employeeObj - Employee object (optional, for in-transaction updates)
+     * @param {Object} meta - Extra metadata (effectiveMonth, adjustmentType, adjustmentMode, adjustmentValue)
      * @returns {Promise<boolean>} - Success status
      */
-    async addSalaryRevision(employeeName, newSalary, reason, effectiveDate, employeeObj = null) {
+    async addSalaryRevision(employeeName, newSalary, reason, effectiveDate, employeeObj = null, meta = {}) {
         // Use provided employee object or fetch from database
         let employee = employeeObj;
 
@@ -1067,9 +1068,13 @@ const DataManager = {
         const revision = {
             id: 'rev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             date: effectiveDate || new Date().toISOString().split('T')[0],
+            effectiveMonth: meta.effectiveMonth || ((effectiveDate || new Date().toISOString().split('T')[0]).slice(0, 7)),
             oldSalary: oldSalary,
             newSalary: newSalary,
             reason: reason || 'Salary revision',
+            adjustmentType: meta.adjustmentType || 'manual',
+            adjustmentMode: meta.adjustmentMode || 'amount',
+            adjustmentValue: Number(meta.adjustmentValue || (newSalary - oldSalary)),
             changedBy: this.getDeviceId(),
             changedAt: new Date().toISOString()
         };

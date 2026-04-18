@@ -182,6 +182,21 @@
                             <i class="bi bi-gift"></i> Bonus
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="mail">
+                            <i class="bi bi-envelope"></i> Mail
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="poQueue">
+                            <i class="bi bi-receipt"></i> PO Queue
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="bankMail">
+                            <i class="bi bi-bank"></i> Bank Mail
+                        </a>
+                    </li>
                 </ul>
                 <ul class="navbar-nav">
                     <li class="nav-item d-flex align-items-center">
@@ -372,6 +387,11 @@
         <div id="employeeView" class="view-section d-none"></div>
 
         <div id="adminView" class="view-section d-none"></div>
+
+        <!-- Gmail Integration Views -->
+        <div id="mailView" class="view-section d-none"></div>
+        <div id="poQueueView" class="view-section d-none"></div>
+        <div id="bankMailView" class="view-section d-none"></div>
 
         <!-- LANDING PAGE VIEW -->
         <div id="landingView" class="view-section d-none">
@@ -1642,7 +1662,7 @@
     <script src="js/fileStorage.js?v=1.2"></script>
 
     <!-- Application Scripts -->
-    <script src="js/data.js?v=1.4"></script>
+    <script src="js/data.js?v=1.5"></script>
     <script src="js/userManager.js?v=1.2"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/updateChecker.js?v=1.1"></script>
@@ -1655,7 +1675,7 @@
     <input type="file" id="bkImportFile" accept=".db,.sqlite,.sqlite3" style="display: none;">
     <script src="js/audit.js?v=1.1"></script>
     <script src="js/bankTemplates.js?v=1.1"></script>
-    <script src="js/employees.js?v=1.1"></script>
+    <script src="js/employees.js?v=1.2"></script>
     <script src="js/holidays.js?v=1.1"></script>
     <script src="js/attendance.js?v=1.1"></script>
     <script src="js/filterAttendance.js?v=1.1"></script>
@@ -1677,7 +1697,10 @@
     <script src="js/invoicesUI.js?v=2.1"></script>
     <script src="js/deliveryUI.js?v=1.1"></script>
     <script src="js/accountingUI.js?v=1.2"></script>
-    <script src="js/admin.js?v=1.1"></script>
+    <script src="js/admin.js?v=1.2"></script>
+    <script src="js/mailUI.js?v=1.1"></script>
+    <script src="js/poQueueUI.js?v=1.1"></script>
+    <script src="js/bankMailUI.js?v=1.1"></script>
     <script src="js/reports.js?v=1.2"></script>
     <script src="js/businessAnalytics.js?v=1.3"></script>
     <script src="js/analyticsUI.js?v=1.3"></script>
@@ -1685,7 +1708,7 @@
     <script src="js/exportImportHelper.js?v=1.1"></script>
     <script src="js/bookKeeperImport.js?v=3.1"></script>
     <script src="js/seedData.js?v=1.1"></script>
-    <script src="js/app.js?v=1.3"></script>
+    <script src="js/app.js?v=1.4"></script>
 
     <!-- Employee Details Modal -->
     <div class="modal fade" id="employeeDetailsModal" tabindex="-1" aria-labelledby="employeeDetailsModalLabel"

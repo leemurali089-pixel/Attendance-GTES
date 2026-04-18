@@ -41,6 +41,9 @@ const EmployeesModule = {
                         <button class="btn btn-success me-2" onclick="EmployeesModule.exportSampleFile()">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Export Sample
                         </button>
+                        <button class="btn btn-warning me-2" onclick="EmployeesModule.showBulkSalaryAdjustmentModal()">
+                            <i class="bi bi-cash-stack"></i> Bulk Salary Update
+                        </button>
                         <button class="btn btn-primary" onclick="EmployeesModule.showEmployeeForm()">
                             <i class="bi bi-plus-circle"></i> Add New Employee
                         </button>
@@ -93,6 +96,9 @@ const EmployeesModule = {
                                                     <button class="btn btn-sm btn-primary ms-1" onclick="EmployeesModule.editEmployee('${emp.id}')">
                                                         <i class="bi bi-pencil"></i> Edit
                                                     </button>
+                                                    <button class="btn btn-sm btn-secondary ms-1" onclick="EmployeesModule.showSalaryAdjustmentModal('${emp.id}')">
+                                                        <i class="bi bi-cash-coin"></i> Salary Update
+                                                    </button>
                                                     <button class="btn btn-sm btn-warning ms-1" onclick="EmployeesModule.viewSalaryHistory('${emp.name.replace(/'/g, "\\'")}')">
                                                         <i class="bi bi-clock-history"></i> Salary History
                                                     </button>
@@ -129,9 +135,14 @@ const EmployeesModule = {
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Employee Management (${activeEmployees.length} Active / ${employees.length} Total)</h5>
-                    <button class="btn btn-sm btn-primary" onclick="EmployeesModule.showEmployeeForm()">
-                        <i class="bi bi-plus-circle"></i> Add New Employee
-                    </button>
+                    <div>
+                        <button class="btn btn-sm btn-warning me-2" onclick="EmployeesModule.showBulkSalaryAdjustmentModal()">
+                            <i class="bi bi-cash-stack"></i> Bulk Salary Update
+                        </button>
+                        <button class="btn btn-sm btn-primary" onclick="EmployeesModule.showEmployeeForm()">
+                            <i class="bi bi-plus-circle"></i> Add New Employee
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -157,6 +168,9 @@ const EmployeesModule = {
                                         <td>
                                             <button class="btn btn-sm btn-primary" onclick="EmployeesModule.editEmployee('${emp.id}')">
                                                 <i class="bi bi-pencil"></i> Edit
+                                            </button>
+                                            <button class="btn btn-sm btn-secondary" onclick="EmployeesModule.showSalaryAdjustmentModal('${emp.id}')">
+                                                <i class="bi bi-cash-coin"></i> Salary Update
                                             </button>
                                             <button class="btn btn-sm btn-danger" onclick="EmployeesModule.deleteEmployee('${emp.id}')">
                                                 <i class="bi bi-trash"></i> Delete
@@ -362,6 +376,147 @@ const EmployeesModule = {
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                             <button type="button" class="btn btn-primary" onclick="EmployeesModule.saveEmployee()">Save Employee</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="salaryAdjustmentModal" class="modal fade" tabindex="-1">
+                <div class="modal-dialog modal-lg modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-cash-coin me-1"></i> Salary Correction / Hike</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="salaryAdjEmployeeId">
+                            <div class="mb-2 small text-muted">Employee: <strong id="salaryAdjEmployeeName">—</strong></div>
+                            <div class="mb-3 small text-muted">Current Salary: <strong id="salaryAdjCurrentSalary">₹0</strong></div>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="salaryAdjType" class="form-label">Update Type *</label>
+                                    <select id="salaryAdjType" class="form-select" onchange="EmployeesModule.updateSalaryAdjustmentPreview()">
+                                        <option value="hike">Hike</option>
+                                        <option value="correction">Salary Correction</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="salaryAdjMode" class="form-label">Mode *</label>
+                                    <select id="salaryAdjMode" class="form-select" onchange="EmployeesModule.updateSalaryAdjustmentPreview()">
+                                        <option value="amount">Amount (₹)</option>
+                                        <option value="percentage">Percentage (%)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="salaryAdjValue" class="form-label">Value *</label>
+                                    <input type="number" id="salaryAdjValue" class="form-control" step="0.01" min="0" placeholder="Enter value" oninput="EmployeesModule.updateSalaryAdjustmentPreview()">
+                                    <small class="form-text text-muted">For correction + amount, this is treated as the final corrected salary.</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="salaryAdjDate" class="form-label">Effective Date *</label>
+                                    <input type="date" id="salaryAdjDate" class="form-control">
+                                    <small class="form-text text-muted">Applied from this date (month is derived automatically).</small>
+                                </div>
+                                <div class="col-12">
+                                    <label for="salaryAdjReason" class="form-label">Reason / Notes</label>
+                                    <textarea id="salaryAdjReason" class="form-control" rows="2" placeholder="e.g. Annual appraisal, correction from Jan payroll"></textarea>
+                                </div>
+                            </div>
+                            <div class="alert alert-info mt-3 mb-0">
+                                <div><strong>New Salary Preview:</strong> <span id="salaryAdjPreview">₹0</span></div>
+                                <div class="small mb-0">This update is saved in Salary History with effective date and month for audit.</div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="EmployeesModule.saveSalaryAdjustment()">Apply Update</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="bulkSalaryAdjustmentModal" class="modal fade" tabindex="-1">
+                <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-cash-stack me-1"></i> Bulk Salary Correction / Hike</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-3">
+                                    <label for="bulkSalaryType" class="form-label">Update Type *</label>
+                                    <select id="bulkSalaryType" class="form-select" onchange="EmployeesModule.recalcAllBulkPreviews()">
+                                        <option value="hike">Hike</option>
+                                        <option value="correction">Salary Correction</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="bulkSalaryMode" class="form-label">Mode *</label>
+                                    <select id="bulkSalaryMode" class="form-select" onchange="EmployeesModule.recalcAllBulkPreviews()">
+                                        <option value="amount">Amount (₹)</option>
+                                        <option value="percentage">Percentage (%)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="bulkSalaryDate" class="form-label">Effective Date *</label>
+                                    <input type="date" id="bulkSalaryDate" class="form-control">
+                                    <small class="form-text text-muted">Applied to every selected employee.</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="bulkSalaryCommonValue" class="form-label">Common Value (optional)</label>
+                                    <div class="input-group">
+                                        <input type="number" id="bulkSalaryCommonValue" class="form-control" step="0.01" min="0" placeholder="Fill all rows">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="EmployeesModule.bulkSalaryApplyCommonValue()" title="Fill value into every selected row">
+                                            <i class="bi bi-arrow-down-square"></i> Fill
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label for="bulkSalaryReason" class="form-label">Common Reason / Notes *</label>
+                                    <textarea id="bulkSalaryReason" class="form-control" rows="2" placeholder="e.g. Annual appraisal FY 2026, correction as per revised CTC policy"></textarea>
+                                </div>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="EmployeesModule.bulkSalarySelectVisible(true)">
+                                        <i class="bi bi-check2-square"></i> Select All
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="EmployeesModule.bulkSalarySelectVisible(false)">
+                                        <i class="bi bi-square"></i> Select None
+                                    </button>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="search" class="form-control form-control-sm" id="bulkSalarySearch" placeholder="Search employee..." style="min-width:220px" oninput="EmployeesModule.bulkSalaryFilter()">
+                                </div>
+                            </div>
+                            <div class="table-responsive" style="max-height: 45vh; overflow-y: auto;">
+                                <table class="table table-sm table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:36px">
+                                                <input type="checkbox" class="form-check-input" id="bulkSalaryHeaderCheck" onchange="EmployeesModule.bulkSalarySelectVisible(this.checked)">
+                                            </th>
+                                            <th>Employee</th>
+                                            <th class="text-end">Current Salary</th>
+                                            <th style="width:200px">Value *</th>
+                                            <th class="text-end">New Salary</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="bulkSalaryTbody">
+                                        <tr><td colspan="5" class="text-center text-muted py-4">Loading employees...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="alert alert-info mt-3 mb-0 d-flex flex-wrap justify-content-between gap-3">
+                                <div>Selected: <strong id="bulkSalarySelectedCount">0</strong> of <strong id="bulkSalaryVisibleCount">0</strong></div>
+                                <div>Total New Payout: <strong id="bulkSalaryTotalPayout">₹0</strong></div>
+                                <div>Total Delta: <strong id="bulkSalaryTotalDelta">₹0</strong></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="EmployeesModule.saveBulkSalaryAdjustment()">
+                                <i class="bi bi-check2-circle me-1"></i> Apply Bulk Update
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -821,6 +976,609 @@ const EmployeesModule = {
         this.showEmployeeForm(employeeId);
     },
 
+    updateSalaryAdjustmentPreview() {
+        const currentText = document.getElementById('salaryAdjCurrentSalary')?.textContent || '₹0';
+        const currentSalary = Number(currentText.replace(/[^\d.]/g, '')) || 0;
+        const type = document.getElementById('salaryAdjType')?.value || 'hike';
+        const mode = document.getElementById('salaryAdjMode')?.value || 'amount';
+        const value = Number(document.getElementById('salaryAdjValue')?.value || 0);
+        let next = currentSalary;
+        if (mode === 'percentage') {
+            if (type === 'hike') next = currentSalary + (currentSalary * value / 100);
+            else next = currentSalary + (currentSalary * value / 100);
+        } else {
+            if (type === 'hike') next = currentSalary + value;
+            else next = value;
+        }
+        if (!isFinite(next) || next < 0) next = 0;
+        const preview = document.getElementById('salaryAdjPreview');
+        if (preview) preview.textContent = `₹${next.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    },
+
+    async showSalaryAdjustmentModal(employeeId) {
+        const employees = await DataManager.getEmployees();
+        const emp = employees.find(e => e.id === employeeId);
+        if (!emp) {
+            App.showNotification('Employee not found', 'error');
+            return;
+        }
+
+        const currentSalary = Number(emp.baseSalary || 0);
+        const today = new Date();
+        const todayDate = today.toISOString().slice(0, 10);
+
+        document.getElementById('salaryAdjEmployeeId').value = emp.id;
+        document.getElementById('salaryAdjEmployeeName').textContent = emp.name || emp.id;
+        document.getElementById('salaryAdjCurrentSalary').textContent = `₹${currentSalary.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+        document.getElementById('salaryAdjType').value = 'hike';
+        document.getElementById('salaryAdjMode').value = 'amount';
+        document.getElementById('salaryAdjValue').value = '';
+        document.getElementById('salaryAdjDate').value = todayDate;
+        document.getElementById('salaryAdjReason').value = '';
+        this.updateSalaryAdjustmentPreview();
+
+        const modalEl = document.getElementById('salaryAdjustmentModal');
+        if (!modalEl) return;
+
+        // Keep modal at document root. When a Bootstrap modal stays nested
+        // inside a transformed/stacked container, the backdrop may render
+        // above it and block all input interactions (looks "dark + frozen").
+        if (modalEl.parentElement !== document.body) {
+            document.body.appendChild(modalEl);
+        }
+
+        // Ensure it stacks above any stale layers.
+        modalEl.style.zIndex = '1080';
+
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        bsModal.show();
+
+        // UX: focus first editable field once opened.
+        modalEl.addEventListener('shown.bs.modal', () => {
+            const el = document.getElementById('salaryAdjValue');
+            if (el) el.focus();
+        }, { once: true });
+    },
+
+    async saveSalaryAdjustment() {
+        try {
+            const employeeId = document.getElementById('salaryAdjEmployeeId')?.value;
+            const type = document.getElementById('salaryAdjType')?.value;
+            const mode = document.getElementById('salaryAdjMode')?.value;
+            const value = Number(document.getElementById('salaryAdjValue')?.value || 0);
+            const effectiveDate = document.getElementById('salaryAdjDate')?.value;
+            const reasonRaw = (document.getElementById('salaryAdjReason')?.value || '').trim();
+
+            if (!employeeId || !effectiveDate) {
+                App.showNotification('Please select employee and effective date.', 'error');
+                return;
+            }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+                App.showNotification('Please enter a valid effective date (YYYY-MM-DD).', 'error');
+                return;
+            }
+            const effectiveMonth = String(effectiveDate).slice(0, 7);
+            if (!isFinite(value) || value <= 0) {
+                App.showNotification('Please enter a value greater than 0.', 'error');
+                return;
+            }
+
+            const employees = await DataManager.getEmployees();
+            const idx = employees.findIndex(e => e.id === employeeId);
+            if (idx === -1) {
+                App.showNotification('Employee not found.', 'error');
+                return;
+            }
+            const employee = employees[idx];
+            const oldSalary = Number(employee.baseSalary || 0);
+
+            let newSalary = oldSalary;
+            if (mode === 'percentage') {
+                // For hike and correction, percentage applies relative delta.
+                newSalary = oldSalary + (oldSalary * value / 100);
+            } else {
+                // amount mode:
+                // - hike       => increment by amount
+                // - correction => set corrected final salary amount
+                newSalary = type === 'hike' ? (oldSalary + value) : value;
+            }
+
+            if (!isFinite(newSalary) || newSalary < 0) {
+                App.showNotification('Calculated salary is invalid.', 'error');
+                return;
+            }
+
+            newSalary = Number(newSalary.toFixed(2));
+            if (newSalary === oldSalary) {
+                App.showNotification('No salary change detected. Please change the value.', 'warning');
+                return;
+            }
+            const reason = reasonRaw || (type === 'hike' ? `Salary hike (${mode})` : `Salary correction (${mode})`);
+
+            const ok = await DataManager.addSalaryRevision(
+                employee.name,
+                newSalary,
+                reason,
+                effectiveDate,
+                employee,
+                {
+                    effectiveMonth,
+                    adjustmentType: type,
+                    adjustmentMode: mode,
+                    adjustmentValue: value
+                }
+            );
+            if (!ok) {
+                App.showNotification('Could not record salary history for this employee.', 'error');
+                return;
+            }
+
+            // Keep latest effective values on employee root for quick lookup by
+            // payroll screens without scanning history every time.
+            employee.salaryEffectiveDate = effectiveDate;
+            employee.salaryEffectiveMonth = effectiveMonth;
+            employee.salaryLastAdjustment = {
+                type,
+                mode,
+                value,
+                oldSalary,
+                newSalary,
+                reason
+            };
+
+            employees[idx] = DataManager.addTimestamp(employee);
+            await DataManager.saveEmployees(employees);
+
+            const modalEl = document.getElementById('salaryAdjustmentModal');
+            if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+
+            if (App.currentView === 'admin') {
+                await AdminModule.load();
+            } else {
+                await this.renderEmployeeList();
+            }
+            App.showNotification('Salary update saved with effective date/month.', 'success');
+        } catch (error) {
+            console.error('Error saving salary adjustment:', error);
+            App.showNotification('Could not save salary update: ' + error.message, 'error');
+        }
+    },
+
+    _bulkSalaryState: {
+        employees: [],
+        values: {},
+        selected: {}
+    },
+
+    _formatINR(n) {
+        const num = Number(n || 0);
+        if (!isFinite(num)) return '₹0';
+        return `₹${num.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    },
+
+    _computeNewSalary(oldSalary, type, mode, value) {
+        const v = Number(value);
+        if (!isFinite(v) || v <= 0) return oldSalary;
+        if (mode === 'percentage') {
+            return oldSalary + (oldSalary * v / 100);
+        }
+        return type === 'hike' ? (oldSalary + v) : v;
+    },
+
+    async showBulkSalaryAdjustmentModal() {
+        const all = await DataManager.getEmployees();
+        const active = all.filter(e => !e.dateOfRelieving || new Date(e.dateOfRelieving) >= new Date());
+
+        const sorted = active.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        this._bulkSalaryState.employees = sorted;
+        this._bulkSalaryState.values = {};
+        this._bulkSalaryState.selected = {};
+
+        const today = new Date().toISOString().slice(0, 10);
+        const typeEl = document.getElementById('bulkSalaryType');
+        const modeEl = document.getElementById('bulkSalaryMode');
+        const dateEl = document.getElementById('bulkSalaryDate');
+        const reasonEl = document.getElementById('bulkSalaryReason');
+        const commonEl = document.getElementById('bulkSalaryCommonValue');
+        const searchEl = document.getElementById('bulkSalarySearch');
+        const headerCheck = document.getElementById('bulkSalaryHeaderCheck');
+
+        if (typeEl) typeEl.value = 'hike';
+        if (modeEl) modeEl.value = 'amount';
+        if (dateEl) dateEl.value = today;
+        if (reasonEl) reasonEl.value = '';
+        if (commonEl) commonEl.value = '';
+        if (searchEl) searchEl.value = '';
+        if (headerCheck) headerCheck.checked = false;
+
+        this._renderBulkSalaryRows('');
+        this._wireBulkSalaryTbodyEvents();
+        this._updateBulkSalarySummary();
+
+        const modalEl = document.getElementById('bulkSalaryAdjustmentModal');
+        if (!modalEl) return;
+
+        if (modalEl.parentElement !== document.body) {
+            document.body.appendChild(modalEl);
+        }
+        modalEl.style.zIndex = '1080';
+
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        bsModal.show();
+
+        modalEl.addEventListener('shown.bs.modal', () => {
+            const s = document.getElementById('bulkSalarySearch');
+            if (s) s.focus();
+        }, { once: true });
+    },
+
+    _renderBulkSalaryRows(filterQuery) {
+        const tbody = document.getElementById('bulkSalaryTbody');
+        if (!tbody) return;
+
+        const q = String(filterQuery || '').trim().toLowerCase();
+        const list = this._bulkSalaryState.employees.filter(emp => {
+            if (!q) return true;
+            return String(emp.name || '').toLowerCase().includes(q)
+                || String(emp.id || '').toLowerCase().includes(q);
+        });
+
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">No employees match "${q}".</td></tr>`;
+            this._updateBulkSalarySummary();
+            return;
+        }
+
+        const rows = list.map(emp => {
+            const cur = Number(emp.baseSalary || 0);
+            const val = this._bulkSalaryState.values[emp.id] || '';
+            const checked = !!this._bulkSalaryState.selected[emp.id];
+            const safeName = String(emp.name || emp.id).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return `
+                <tr data-emp-id="${emp.id}">
+                    <td>
+                        <input type="checkbox" class="form-check-input bulk-salary-check" data-emp-id="${emp.id}" ${checked ? 'checked' : ''}>
+                    </td>
+                    <td>${safeName}</td>
+                    <td class="text-end">${this._formatINR(cur)}</td>
+                    <td>
+                        <input type="number" class="form-control form-control-sm bulk-salary-value" data-emp-id="${emp.id}" step="0.01" min="0" placeholder="Value" value="${val}" ${checked ? '' : 'disabled'}>
+                    </td>
+                    <td class="text-end bulk-salary-preview" data-emp-id="${emp.id}">${this._formatINR(cur)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rows;
+
+        const visibleCount = list.length;
+        const selectedVisible = list.filter(e => this._bulkSalaryState.selected[e.id]).length;
+        const headerCheck = document.getElementById('bulkSalaryHeaderCheck');
+        if (headerCheck) {
+            headerCheck.checked = visibleCount > 0 && selectedVisible === visibleCount;
+            headerCheck.indeterminate = selectedVisible > 0 && selectedVisible < visibleCount;
+        }
+
+        list.forEach(emp => this._updateBulkRowPreview(emp.id));
+        this._updateBulkSalarySummary();
+    },
+
+    _wireBulkSalaryTbodyEvents() {
+        const tbody = document.getElementById('bulkSalaryTbody');
+        if (!tbody || tbody.dataset.wired === '1') return;
+        tbody.dataset.wired = '1';
+
+        tbody.addEventListener('change', (e) => {
+            const t = e.target;
+            if (t && t.classList.contains('bulk-salary-check')) {
+                const empId = t.dataset.empId;
+                this._bulkSalaryState.selected[empId] = !!t.checked;
+                const row = t.closest('tr');
+                if (row) {
+                    const valInput = row.querySelector('.bulk-salary-value');
+                    if (valInput) valInput.disabled = !t.checked;
+                }
+                this._updateBulkRowPreview(empId);
+                this._updateBulkSalarySummary();
+                this._refreshBulkHeaderCheckState();
+            }
+        });
+
+        tbody.addEventListener('input', (e) => {
+            const t = e.target;
+            if (t && t.classList.contains('bulk-salary-value')) {
+                const empId = t.dataset.empId;
+                this._bulkSalaryState.values[empId] = t.value;
+                this._updateBulkRowPreview(empId);
+                this._updateBulkSalarySummary();
+            }
+        });
+    },
+
+    _refreshBulkHeaderCheckState() {
+        const headerCheck = document.getElementById('bulkSalaryHeaderCheck');
+        if (!headerCheck) return;
+        const visibleRows = document.querySelectorAll('#bulkSalaryTbody tr[data-emp-id]');
+        if (visibleRows.length === 0) {
+            headerCheck.checked = false;
+            headerCheck.indeterminate = false;
+            return;
+        }
+        let checked = 0;
+        visibleRows.forEach(r => {
+            const c = r.querySelector('.bulk-salary-check');
+            if (c && c.checked) checked++;
+        });
+        headerCheck.checked = checked === visibleRows.length;
+        headerCheck.indeterminate = checked > 0 && checked < visibleRows.length;
+    },
+
+    _updateBulkRowPreview(empId) {
+        const row = document.querySelector(`#bulkSalaryTbody tr[data-emp-id="${empId}"]`);
+        if (!row) return;
+        const emp = this._bulkSalaryState.employees.find(e => e.id === empId);
+        if (!emp) return;
+        const cur = Number(emp.baseSalary || 0);
+        const selected = !!this._bulkSalaryState.selected[empId];
+        const type = document.getElementById('bulkSalaryType')?.value || 'hike';
+        const mode = document.getElementById('bulkSalaryMode')?.value || 'amount';
+        const value = Number(this._bulkSalaryState.values[empId] || 0);
+
+        const previewCell = row.querySelector('.bulk-salary-preview');
+        if (!previewCell) return;
+
+        if (!selected) {
+            previewCell.textContent = this._formatINR(cur);
+            previewCell.classList.remove('text-success', 'text-danger');
+            return;
+        }
+        const next = this._computeNewSalary(cur, type, mode, value);
+        previewCell.textContent = this._formatINR(next);
+        previewCell.classList.toggle('text-success', next > cur);
+        previewCell.classList.toggle('text-danger', next < cur);
+    },
+
+    recalcAllBulkPreviews() {
+        this._bulkSalaryState.employees.forEach(emp => this._updateBulkRowPreview(emp.id));
+        this._updateBulkSalarySummary();
+    },
+
+    _updateBulkSalarySummary() {
+        const type = document.getElementById('bulkSalaryType')?.value || 'hike';
+        const mode = document.getElementById('bulkSalaryMode')?.value || 'amount';
+        let selectedCount = 0;
+        let totalNew = 0;
+        let totalDelta = 0;
+
+        this._bulkSalaryState.employees.forEach(emp => {
+            const cur = Number(emp.baseSalary || 0);
+            const selected = !!this._bulkSalaryState.selected[emp.id];
+            if (!selected) return;
+            selectedCount++;
+            const v = Number(this._bulkSalaryState.values[emp.id] || 0);
+            const next = this._computeNewSalary(cur, type, mode, v);
+            totalNew += next;
+            totalDelta += (next - cur);
+        });
+
+        const selEl = document.getElementById('bulkSalarySelectedCount');
+        const visEl = document.getElementById('bulkSalaryVisibleCount');
+        const newEl = document.getElementById('bulkSalaryTotalPayout');
+        const deltaEl = document.getElementById('bulkSalaryTotalDelta');
+        const visibleRows = document.querySelectorAll('#bulkSalaryTbody tr[data-emp-id]');
+
+        if (selEl) selEl.textContent = String(selectedCount);
+        if (visEl) visEl.textContent = String(visibleRows.length);
+        if (newEl) newEl.textContent = this._formatINR(totalNew);
+        if (deltaEl) {
+            deltaEl.textContent = (totalDelta >= 0 ? '+' : '−') + this._formatINR(Math.abs(totalDelta)).replace('₹', '₹');
+            deltaEl.classList.toggle('text-success', totalDelta > 0);
+            deltaEl.classList.toggle('text-danger', totalDelta < 0);
+        }
+    },
+
+    bulkSalarySelectVisible(checked) {
+        const visibleRows = document.querySelectorAll('#bulkSalaryTbody tr[data-emp-id]');
+        visibleRows.forEach(row => {
+            const empId = row.getAttribute('data-emp-id');
+            if (!empId) return;
+            this._bulkSalaryState.selected[empId] = !!checked;
+            const cb = row.querySelector('.bulk-salary-check');
+            if (cb) cb.checked = !!checked;
+            const vi = row.querySelector('.bulk-salary-value');
+            if (vi) vi.disabled = !checked;
+            this._updateBulkRowPreview(empId);
+        });
+        this._refreshBulkHeaderCheckState();
+        this._updateBulkSalarySummary();
+    },
+
+    bulkSalaryFilter() {
+        const q = document.getElementById('bulkSalarySearch')?.value || '';
+        this._renderBulkSalaryRows(q);
+    },
+
+    bulkSalaryApplyCommonValue() {
+        const v = document.getElementById('bulkSalaryCommonValue')?.value;
+        if (v === '' || v === null || typeof v === 'undefined') {
+            App.showNotification('Enter a common value first, then click Fill.', 'warning');
+            return;
+        }
+        const num = Number(v);
+        if (!isFinite(num) || num <= 0) {
+            App.showNotification('Common value must be greater than 0.', 'warning');
+            return;
+        }
+
+        const visibleRows = document.querySelectorAll('#bulkSalaryTbody tr[data-emp-id]');
+        const selectedIds = [];
+        visibleRows.forEach(row => {
+            const empId = row.getAttribute('data-emp-id');
+            if (empId && this._bulkSalaryState.selected[empId]) selectedIds.push(empId);
+        });
+
+        const targets = selectedIds.length > 0
+            ? selectedIds
+            : Array.from(visibleRows).map(r => r.getAttribute('data-emp-id')).filter(Boolean);
+
+        if (targets.length === 0) {
+            App.showNotification('No rows visible to fill.', 'warning');
+            return;
+        }
+
+        targets.forEach(empId => {
+            this._bulkSalaryState.values[empId] = String(num);
+            const row = document.querySelector(`#bulkSalaryTbody tr[data-emp-id="${empId}"]`);
+            if (row) {
+                const vi = row.querySelector('.bulk-salary-value');
+                if (vi) vi.value = String(num);
+            }
+            this._updateBulkRowPreview(empId);
+        });
+        this._updateBulkSalarySummary();
+
+        App.showNotification(
+            selectedIds.length > 0
+                ? `Common value filled into ${targets.length} selected row(s).`
+                : `Common value filled into all ${targets.length} visible row(s). Now tick the employees you want to update.`,
+            'success'
+        );
+    },
+
+    async saveBulkSalaryAdjustment() {
+        try {
+            const type = document.getElementById('bulkSalaryType')?.value || 'hike';
+            const mode = document.getElementById('bulkSalaryMode')?.value || 'amount';
+            const effectiveDate = document.getElementById('bulkSalaryDate')?.value || '';
+            const reasonRaw = (document.getElementById('bulkSalaryReason')?.value || '').trim();
+
+            if (!effectiveDate || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+                App.showNotification('Please select a valid effective date.', 'error');
+                return;
+            }
+            if (!reasonRaw) {
+                App.showNotification('Please enter a common reason / notes for the bulk update.', 'error');
+                return;
+            }
+
+            const effectiveMonth = effectiveDate.slice(0, 7);
+            const state = this._bulkSalaryState;
+            const selectedIds = Object.keys(state.selected).filter(id => state.selected[id]);
+
+            if (selectedIds.length === 0) {
+                App.showNotification('Select at least one employee to update.', 'warning');
+                return;
+            }
+
+            const plans = [];
+            const skipped = [];
+
+            for (const empId of selectedIds) {
+                const emp = state.employees.find(e => e.id === empId);
+                if (!emp) {
+                    skipped.push({ id: empId, name: empId, reason: 'Employee not found' });
+                    continue;
+                }
+                const cur = Number(emp.baseSalary || 0);
+                const raw = state.values[empId];
+                const v = Number(raw);
+                if (!isFinite(v) || v <= 0) {
+                    skipped.push({ id: empId, name: emp.name, reason: 'No value / value ≤ 0' });
+                    continue;
+                }
+                const next = Number(this._computeNewSalary(cur, type, mode, v).toFixed(2));
+                if (!isFinite(next) || next < 0) {
+                    skipped.push({ id: empId, name: emp.name, reason: 'Invalid computed salary' });
+                    continue;
+                }
+                if (next === cur) {
+                    skipped.push({ id: empId, name: emp.name, reason: 'No change' });
+                    continue;
+                }
+                plans.push({ empId, empName: emp.name, oldSalary: cur, newSalary: next, value: v });
+            }
+
+            if (plans.length === 0) {
+                App.showNotification('No valid updates to apply. Check the values in selected rows.', 'warning');
+                return;
+            }
+
+            const summary = `About to update ${plans.length} employee(s).\n`
+                + `Type: ${type} (${mode})\nEffective: ${effectiveDate}\n`
+                + (skipped.length ? `Skipped: ${skipped.length}\n` : '')
+                + `\nProceed?`;
+            if (!App.confirmAction(summary)) return;
+
+            const employees = await DataManager.getEmployees();
+            let applied = 0;
+            const failed = [];
+
+            for (const plan of plans) {
+                const idx = employees.findIndex(e => e.id === plan.empId);
+                if (idx === -1) {
+                    failed.push({ name: plan.empName, reason: 'Not found in DB' });
+                    continue;
+                }
+                const employee = employees[idx];
+                const ok = await DataManager.addSalaryRevision(
+                    employee.name,
+                    plan.newSalary,
+                    reasonRaw,
+                    effectiveDate,
+                    employee,
+                    {
+                        effectiveMonth,
+                        adjustmentType: type,
+                        adjustmentMode: mode,
+                        adjustmentValue: plan.value
+                    }
+                );
+                if (!ok) {
+                    failed.push({ name: plan.empName, reason: 'Could not record revision' });
+                    continue;
+                }
+                employee.salaryEffectiveDate = effectiveDate;
+                employee.salaryEffectiveMonth = effectiveMonth;
+                employee.salaryLastAdjustment = {
+                    type,
+                    mode,
+                    value: plan.value,
+                    oldSalary: plan.oldSalary,
+                    newSalary: plan.newSalary,
+                    reason: reasonRaw
+                };
+                employees[idx] = DataManager.addTimestamp(employee);
+                applied++;
+            }
+
+            await DataManager.saveEmployees(employees);
+
+            const modalEl = document.getElementById('bulkSalaryAdjustmentModal');
+            if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+
+            if (App.currentView === 'admin') {
+                await AdminModule.load();
+            } else {
+                await this.renderEmployeeList();
+            }
+
+            const parts = [`Applied ${applied}`];
+            if (skipped.length) parts.push(`Skipped ${skipped.length}`);
+            if (failed.length) parts.push(`Failed ${failed.length}`);
+            App.showNotification(`Bulk salary update: ${parts.join(' · ')}.`, applied > 0 ? 'success' : 'warning');
+
+            if (failed.length) {
+                console.warn('Bulk salary update - failed rows:', failed);
+            }
+            if (skipped.length) {
+                console.info('Bulk salary update - skipped rows:', skipped);
+            }
+        } catch (error) {
+            console.error('Error saving bulk salary adjustment:', error);
+            App.showNotification('Could not apply bulk salary update: ' + error.message, 'error');
+        }
+    },
+
     async deleteEmployee(employeeId) {
         if (!App.confirmAction('Are you sure you want to delete this employee? This action cannot be undone.')) {
             return;
@@ -908,9 +1666,11 @@ const EmployeesModule = {
                         <thead>
                             <tr>
                                 <th>Date</th>
+                                <th>Month</th>
                                 <th>Old Salary</th>
                                 <th>New Salary</th>
                                 <th>Change</th>
+                                <th>Type</th>
                                 <th>Reason</th>
                                 <th>Changed By</th>
                             </tr>
@@ -925,12 +1685,14 @@ const EmployeesModule = {
                 return `
                                     <tr>
                                         <td>${DataManager.formatDateDisplay(rev.date)}</td>
+                                        <td>${rev.effectiveMonth || (rev.date ? String(rev.date).slice(0, 7) : '—')}</td>
                                         <td>₹${rev.oldSalary.toLocaleString('en-IN')}</td>
                                         <td>₹${rev.newSalary.toLocaleString('en-IN')}</td>
                                         <td class="${changeClass}">
                                             ${changeIcon} ₹${Math.abs(change).toLocaleString('en-IN')}
                                             ${rev.oldSalary > 0 ? `(${changePercent}%)` : ''}
                                         </td>
+                                        <td>${rev.adjustmentType ? `${rev.adjustmentType} (${rev.adjustmentMode || 'amount'})` : 'manual'}</td>
                                         <td>${rev.reason}</td>
                                         <td><small class="text-muted">${rev.changedBy === 'system' ? 'System' : 'Admin'}</small></td>
                                     </tr>
