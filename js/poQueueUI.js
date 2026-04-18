@@ -88,6 +88,14 @@ const POQueueUI = (() => {
     async function load() {
         const view = document.getElementById('poQueueView');
         if (!view) return;
+        if (window.MailUI && MailUI.isGmailAvailable && !MailUI.isGmailAvailable()) {
+            MailUI.renderDesktopOnlyNotice('poQueueView', {
+                title: 'PO Queue',
+                feature: 'Automatic detection of Purchase Orders from Gmail',
+                icon: 'bi-receipt'
+            });
+            return;
+        }
         if (window.MailUI && MailUI.ensureMailStyles) MailUI.ensureMailStyles();
         view.innerHTML = `
           <div class="px-3 py-3">

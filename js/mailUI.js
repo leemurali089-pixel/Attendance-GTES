@@ -406,9 +406,64 @@ const MailUI = (() => {
         document.head.appendChild(s);
     }
 
+    function isGmailAvailable() {
+        return !!(typeof window !== 'undefined'
+            && window.electronAPI
+            && window.electronAPI.gmail);
+    }
+
+    // Drop-in renderer used by Mail / PO Queue / Bank Mail when the user is
+    // running the **web** version of the app. The Gmail integration needs
+    // Electron (OAuth loopback, safeStorage, filesystem cache), so in a plain
+    // browser we show a clear, themed "desktop-only" card instead of crashing
+    // on the first `window.electronAPI.gmail.*` call.
+    function renderDesktopOnlyNotice(viewId, opts) {
+        const view = document.getElementById(viewId);
+        if (!view) return;
+        const o = opts || {};
+        const title = o.title || 'Gmail';
+        const feature = o.feature || 'This feature';
+        const icon = o.icon || 'bi-envelope';
+        ensureMailStyles();
+        view.innerHTML = `
+          <div class="mail-app px-3 py-3">
+            <div class="card" style="max-width: 760px; margin: 48px auto;">
+              <div class="card-body text-center py-5">
+                <i class="bi ${icon} display-1 text-secondary d-block mb-3"></i>
+                <h3 class="mb-2">${esc(title)} is available in the Desktop app</h3>
+                <p class="text-muted mb-1">
+                  ${esc(feature)} uses the Gmail API with OAuth 2.0, encrypted token storage
+                  and a local mail cache — all of which only run inside the
+                  <b>Gas Tech Engineering desktop app</b>.
+                </p>
+                <p class="text-muted small mb-4">
+                  You are currently using the browser / web version. Install the desktop app
+                  to connect your Gmail, see POs, and track bank alerts.
+                </p>
+                <div class="d-flex gap-2 justify-content-center flex-wrap">
+                  <a class="btn btn-primary" href="https://github.com/leemurali089-pixel/Attendance-GTES" target="_blank" rel="noopener">
+                    <i class="bi bi-github"></i> Get the Desktop App
+                  </a>
+                  <button class="btn btn-outline-secondary" onclick="App.showView('dashboard')">
+                    <i class="bi bi-arrow-left"></i> Back to Dashboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>`;
+    }
+
     async function load() {
         const view = document.getElementById('mailView');
         if (!view) return;
+        if (!isGmailAvailable()) {
+            renderDesktopOnlyNotice('mailView', {
+                title: 'Mail',
+                feature: 'The built-in Gmail mail client',
+                icon: 'bi-envelope'
+            });
+            return;
+        }
         ensureMailStyles();
         view.innerHTML = renderShell();
         bindShell();
@@ -1064,6 +1119,10 @@ const MailUI = (() => {
     }
 
     async function openSettings() {
+        if (!isGmailAvailable()) {
+            App.showNotification('Gmail Settings are available in the desktop app only. Install the desktop build to connect Gmail.', 'info');
+            return;
+        }
         const cur = await window.electronAPI.gmail.loadCredentials();
         const status = await window.electronAPI.gmail.status();
         const s = status.data || {};
@@ -1296,7 +1355,7 @@ const MailUI = (() => {
         }
     }
 
-    return { load, openCompose, previewAttachment, ensureMailStyles, openLearnedRules, openMessagePreview };
+    return { load, openCompose, previewAttachment, ensureMailStyles, openLearnedRules, openMessagePreview, isGmailAvailable, renderDesktopOnlyNotice };
 })();
 
 window.MailUI = MailUI;

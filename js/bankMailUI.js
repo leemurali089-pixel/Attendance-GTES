@@ -14,6 +14,14 @@ const BankMailUI = (() => {
     async function load() {
         const view = document.getElementById('bankMailView');
         if (!view) return;
+        if (window.MailUI && MailUI.isGmailAvailable && !MailUI.isGmailAvailable()) {
+            MailUI.renderDesktopOnlyNotice('bankMailView', {
+                title: 'Bank Mail',
+                feature: 'Automatic tracking of credit / debit alerts from Gmail',
+                icon: 'bi-bank'
+            });
+            return;
+        }
         if (window.MailUI && MailUI.ensureMailStyles) MailUI.ensureMailStyles();
         view.innerHTML = `
           <div class="px-3 py-3">
