@@ -136,6 +136,7 @@
   {
     "assignedTo": "GTES67",
     "assignedToName": "Administrator",
+    "completedAt": "2026-04-10T05:45:34.661Z",
     "createdAt": "2026-03-23T14:05:42.644Z",
     "followupDate": "2026-04-04",
     "followupTime": "10:00",
@@ -177,9 +178,9 @@
         "user": "admin"
       },
       {
-        "time": "2026-04-10T05:45:34.661Z",
         "action": "Task Completed",
         "details": "Marked as finished",
+        "time": "2026-04-10T05:45:34.661Z",
         "user": "admin"
       }
     ],
@@ -188,8 +189,7 @@
     "partyId": "CUST-1774102231237-2x39o",
     "partyName": "CHOZHA AIR PRODUCTS",
     "status": "completed",
-    "type": "payment_followup",
-    "completedAt": "2026-04-10T05:45:34.661Z"
+    "type": "payment_followup"
   },
   {
     "assignedTo": "GTES67",
@@ -220,10 +220,10 @@
     "type": "normal"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-23T14:18:34.216Z",
-    "followupDate": "2026-03-28",
+    "followupDate": "2026-04-20",
     "followupTime": "10:00",
     "history": [
       {
@@ -236,6 +236,24 @@
         "action": "Task Rescheduled",
         "details": "Manually rescheduled from 2026-03-24 10:00 to 2026-03-28 10:00. Note: Wil Try to make the payment ",
         "time": "2026-03-27T05:23:18.801Z",
+        "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T06:58:41.885Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-28 10:00 to 2026-03-28 10:00.",
+        "time": "2026-04-17T06:58:43.315Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-03-28 10:00 to 2026-04-20 10:00.",
+        "time": "2026-04-17T06:58:57.749Z",
         "user": "admin"
       }
     ],
@@ -277,6 +295,7 @@
   {
     "assignedTo": "GTES67",
     "assignedToName": "Administrator",
+    "completedAt": "2026-04-10T05:46:15.518Z",
     "createdAt": "2026-03-25T15:31:02.838Z",
     "followupDate": "2026-03-26",
     "followupTime": "10:00",
@@ -288,9 +307,9 @@
         "user": "admin"
       },
       {
-        "time": "2026-04-10T05:46:15.518Z",
         "action": "Task Completed",
         "details": "Marked as finished",
+        "time": "2026-04-10T05:46:15.518Z",
         "user": "admin"
       }
     ],
@@ -299,8 +318,7 @@
     "partyId": "",
     "partyName": "",
     "status": "completed",
-    "type": "normal",
-    "completedAt": "2026-04-10T05:46:15.518Z"
+    "type": "normal"
   },
   {
     "assignedTo": "GTES67",
@@ -343,10 +361,10 @@
     "type": "normal"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-27T05:10:48.469Z",
-    "followupDate": "2026-04-03",
+    "followupDate": "2026-04-17",
     "followupTime": "10:00",
     "history": [
       {
@@ -372,6 +390,18 @@
         "details": "Rescheduled from 2026-04-02 10:00 to 2026-04-03 10:00.",
         "time": "2026-04-02T10:12:05.278Z",
         "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T06:58:19.739Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-03 10:00 to 2026-04-17 10:00.",
+        "time": "2026-04-17T06:58:26.647Z",
+        "user": "admin"
       }
     ],
     "id": "TASK-1774588248469",
@@ -382,8 +412,8 @@
     "type": "payment_followup"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-27T06:15:21.825Z",
     "followupDate": "2026-04-04",
     "followupTime": "10:00",
@@ -435,6 +465,18 @@
         "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00. Note: Switch Off",
         "time": "2026-04-03T08:25:58.169Z",
         "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T06:57:55.901Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00.",
+        "time": "2026-04-17T06:57:57.541Z",
+        "user": "admin"
       }
     ],
     "id": "TASK-1774592121825",
@@ -445,8 +487,8 @@
     "type": "payment_followup"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-29T16:42:54.468Z",
     "followupDate": "2026-04-04",
     "followupTime": "10:00",
@@ -468,6 +510,18 @@
         "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-04 10:00. Note: Not Answering the call",
         "time": "2026-04-03T08:28:12.342Z",
         "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T08:23:06.178Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-04 10:00.",
+        "time": "2026-04-17T08:23:10.014Z",
+        "user": "admin"
       }
     ],
     "id": "TASK-1774802574468",
@@ -478,8 +532,8 @@
     "type": "normal"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-29T16:43:14.435Z",
     "followupDate": "2026-04-06",
     "followupTime": "10:00",
@@ -501,6 +555,18 @@
         "details": "Manually rescheduled from 2026-04-02 10:00 to 2026-04-06 10:00. Note: Will make the cylinder payment by today or tomorrow and balance by next week ",
         "time": "2026-04-03T08:33:13.423Z",
         "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T06:57:02.209Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-06 10:00 to 2026-04-06 10:00.",
+        "time": "2026-04-17T06:57:11.077Z",
+        "user": "admin"
       }
     ],
     "id": "TASK-1774802594435",
@@ -511,8 +577,8 @@
     "type": "normal"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-03-29T16:47:13.809Z",
     "followupDate": "2026-04-06",
     "followupTime": "10:00",
@@ -528,6 +594,18 @@
         "details": "Manually rescheduled from 2026-03-30 10:00 to 2026-04-06 10:00. Note: Will try to make the payment within two days ",
         "time": "2026-04-03T08:38:30.292Z",
         "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T06:57:22.650Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-06 10:00 to 2026-04-06 10:00.",
+        "time": "2026-04-17T06:57:23.438Z",
+        "user": "admin"
       }
     ],
     "id": "TASK-1774802833809",
@@ -538,16 +616,52 @@
     "type": "normal"
   },
   {
-    "assignedTo": "GTES67",
-    "assignedToName": "Administrator",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
     "createdAt": "2026-04-01T06:15:20.456Z",
-    "followupDate": "2026-04-04",
+    "followupDate": "2026-04-18",
     "followupTime": "10:00",
     "history": [
       {
         "action": "Task Created",
         "details": "Initial task created",
         "time": "2026-04-01T06:15:20.456Z",
+        "user": "admin"
+      },
+      {
+        "action": "Reassigned",
+        "details": "Task assigned to Ganesh",
+        "time": "2026-04-17T08:23:35.729Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-04 10:00 to 2026-04-17 10:00.",
+        "time": "2026-04-17T08:23:49.760Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-17 10:00 to 2026-04-17 10:00.",
+        "time": "2026-04-17T08:24:04.624Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-17 10:00 to 2026-04-18 10:00. Note: send bill, payment will be made. valve will be return for service after election.",
+        "time": "2026-04-17T10:00:22.042Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-18 10:00 to 2026-04-18 10:00.",
+        "time": "2026-04-17T10:01:40.587Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-18 10:00 to 2026-04-18 10:00. Note: send bill, payment will be made. valve will be return for service after election",
+        "time": "2026-04-17T11:31:12.529Z",
         "user": "admin"
       }
     ],
@@ -595,6 +709,7 @@
   {
     "assignedTo": "GTES67",
     "assignedToName": "Administrator",
+    "completedAt": "2026-04-10T05:46:08.666Z",
     "createdAt": "2026-04-01T15:40:16.764Z",
     "followupDate": "2026-04-02",
     "followupTime": "10:00",
@@ -606,9 +721,9 @@
         "user": "admin"
       },
       {
-        "time": "2026-04-10T05:46:08.666Z",
         "action": "Task Completed",
         "details": "Marked as finished",
+        "time": "2026-04-10T05:46:08.666Z",
         "user": "admin"
       }
     ],
@@ -617,8 +732,7 @@
     "partyId": "",
     "partyName": "",
     "status": "completed",
-    "type": "normal",
-    "completedAt": "2026-04-10T05:46:08.666Z"
+    "type": "normal"
   },
   {
     "assignedTo": "GTES67",
@@ -651,6 +765,7 @@
   {
     "assignedTo": "GTES67",
     "assignedToName": "Administrator",
+    "completedAt": "2026-04-10T05:45:40.162Z",
     "createdAt": "2026-04-01T16:53:40.628Z",
     "followupDate": "2026-04-06",
     "followupTime": "10:00",
@@ -668,9 +783,9 @@
         "user": "admin"
       },
       {
-        "time": "2026-04-10T05:45:40.162Z",
         "action": "Task Completed",
         "details": "Marked as finished",
+        "time": "2026-04-10T05:45:40.162Z",
         "user": "admin"
       }
     ],
@@ -679,7 +794,60 @@
     "partyId": "",
     "partyName": "",
     "status": "completed",
+    "type": "normal"
+  },
+  {
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
+    "createdAt": "2026-04-17T11:33:54.101Z",
+    "followupDate": "2026-04-20",
+    "followupTime": "13:00",
+    "history": [
+      {
+        "action": "Task Created",
+        "details": "Initial task created",
+        "time": "2026-04-17T11:33:54.102Z",
+        "user": "admin"
+      },
+      {
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-18 10:00 to 2026-04-20 13:00. Note: the payment will be made by coming monday.",
+        "time": "2026-04-18T08:26:11.532Z",
+        "user": "admin"
+      },
+      {
+        "time": "2026-04-18T12:06:58.166Z",
+        "action": "Task Rescheduled",
+        "details": "Manually rescheduled from 2026-04-20 13:00 to 2026-04-20 13:00.",
+        "user": "admin"
+      }
+    ],
+    "id": "TASK-1776425634101",
+    "narration": "Payment follow-up for SRI RAM GASES:\nBills: INV-NB-0011 (Bill: ₹28,150, Bal: ₹28,150)\nTotal balance: ₹28,150 (Total Outstanding: ₹28,150)",
+    "partyId": "CUST-1776318555332",
+    "partyName": "SRI RAM GASES",
+    "status": "open",
+    "type": "payment_followup"
+  },
+  {
+    "id": "TASK-1776514000106",
     "type": "normal",
-    "completedAt": "2026-04-10T05:45:40.162Z"
+    "narration": "Deposit the Cheque of CLS on IOB Bank.",
+    "partyId": "",
+    "partyName": "",
+    "assignedTo": "Ganesh",
+    "assignedToName": "Ganesh",
+    "followupDate": "2026-04-20",
+    "followupTime": "10:00",
+    "status": "open",
+    "createdAt": "2026-04-18T12:06:40.106Z",
+    "history": [
+      {
+        "time": "2026-04-18T12:06:40.106Z",
+        "action": "Task Created",
+        "details": "Initial task created",
+        "user": "admin"
+      }
+    ]
   }
 ]

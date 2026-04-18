@@ -22,12 +22,11 @@
     "webPassword": "admin123"
   },
   {
-    "id": "1776411619949",
-    "username": "Ganesh",
-    "password": "526af035cff3bc9509a716de3603a495:73b62a02bd814499913b1bb1f7c1d3e222d30335261d02bcfd3c9f0ca425bcacd614a02a395e7fac1403422ce42e7853aac680e17814725efb75f87b0580c885",
-    "webPassword": null,
-    "role": "user",
+    "createdAt": "2026-04-17T07:40:19.949Z",
     "fullName": "Accounts",
+    "id": "1776411619949",
+    "isActive": true,
+    "password": "526af035cff3bc9509a716de3603a495:73b62a02bd814499913b1bb1f7c1d3e222d30335261d02bcfd3c9f0ca425bcacd614a02a395e7fac1403422ce42e7853aac680e17814725efb75f87b0580c885",
     "permissions": [
       "MANAGE_EMPLOYEES",
       "MANAGE_ATTENDANCE",
@@ -36,7 +35,8 @@
       "VIEW_REPORTS",
       "VIEW_DASHBOARD"
     ],
-    "createdAt": "2026-04-17T07:40:19.949Z",
-    "isActive": true
+    "role": "user",
+    "username": "Ganesh",
+    "webPassword": "Gan123"
   }
 ]
