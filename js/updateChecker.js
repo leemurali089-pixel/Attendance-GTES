@@ -3,7 +3,7 @@
  * Checks for application updates and notifies users
  */
 const UpdateChecker = {
-    APP_VERSION: '1.3.5', // Match package.json version
+    APP_VERSION: '1.3.6', // Match package.json version
     
     /**
      * Get current application version
@@ -20,7 +20,7 @@ const UpdateChecker = {
         return {
             updateAvailable: false,
             latestVersion: this.APP_VERSION,
-            releaseNotes: 'The desktop app checks GitHub Releases automatically on startup. Open the Admin → App Updates card to check now, download, and restart to install.',
+            releaseNotes: 'The desktop app checks GitHub Releases automatically on startup. An "Update ready" button appears in the top navbar for every user when a new version is downloaded.',
             downloadUrl: 'https://github.com/leemurali089-pixel/Attendance-GTES/releases/latest'
         };
     },

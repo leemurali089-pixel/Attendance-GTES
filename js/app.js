@@ -295,6 +295,11 @@ const App = {
         // Check localStorage for saved theme, default to dark
         const savedTheme = localStorage.getItem('theme') || 'dark';
         document.documentElement.setAttribute('data-theme', savedTheme);
+        // Bootstrap 5.3 reads `data-bs-theme`, not our custom `data-theme`.
+        // Setting both keeps every Bootstrap component (card, form-control,
+        // table, modal, dropdown…) in sync with the app theme without
+        // manual per-component overrides.
+        document.documentElement.setAttribute('data-bs-theme', savedTheme);
 
         // Update checkbox state
         const themeToggle = document.getElementById('theme-toggle');
@@ -309,6 +314,7 @@ const App = {
         const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
 
         document.documentElement.setAttribute('data-theme', newTheme);
+        document.documentElement.setAttribute('data-bs-theme', newTheme);
         localStorage.setItem('theme', newTheme);
 
         // Sync Main Toggle

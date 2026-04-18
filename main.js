@@ -9,6 +9,7 @@ const gmailIpc = require('./gmail/gmailIpc');
 // Release configured under "build.publish" in package.json. Skipped in
 // dev (`npm start`) because there is no packaged app to replace.
 let autoUpdater = null;
+let updaterLastEvent = null;
 try {
     autoUpdater = require('electron-updater').autoUpdater;
     autoUpdater.autoDownload = true;
@@ -126,9 +127,12 @@ app.whenReady().then(async () => {
     try { gmailIpc.init(); } catch (e) { console.error('[main] gmailIpc init error:', e.message); }
 
     // Forward lifecycle events to the renderer so the Admin UI can show
-    // "checking / available / downloading / downloaded / error".
+    // "checking / available / downloading / downloaded / error", and cache
+    // the last significant event so late-joining views (e.g. the global
+    // "Update ready" banner) can query current state on render.
     if (autoUpdater && app.isPackaged) {
         const send = (type, payload) => {
+            updaterLastEvent = { type, ...payload };
             try {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('updater:event', { type, ...payload });
@@ -158,20 +162,51 @@ app.whenReady().then(async () => {
     });
 });
 
-// Updater IPC surface (used by Admin UI "Check for Updates" button).
+// Updater IPC surface (used by Admin UI + global update banner).
 ipcMain.handle('updater:getVersion', () => {
     return { version: app.getVersion(), packaged: app.isPackaged };
+});
+// Last significant updater event, so views that mount AFTER the events
+// fired (e.g. a user switching to the Admin tab post-download) can still
+// see the correct state instead of a stale "Ready." label.
+ipcMain.handle('updater:getState', () => {
+    return { lastEvent: updaterLastEvent, version: app.getVersion(), packaged: app.isPackaged };
 });
 ipcMain.handle('updater:check', async () => {
     if (!autoUpdater) return { success: false, error: 'updater unavailable' };
     if (!app.isPackaged) return { success: false, error: 'dev mode (run the installed app to check for updates)' };
     try {
+        // checkForUpdates() always returns the LATEST available version
+        // even when it is equal to the current one. Compare versions so
+        // the renderer can display the right message without waiting
+        // for the async update-available / update-not-available event.
         const r = await autoUpdater.checkForUpdates();
-        return { success: true, data: r && r.updateInfo ? { version: r.updateInfo.version, releaseDate: r.updateInfo.releaseDate } : null };
+        const remote = r && r.updateInfo && r.updateInfo.version;
+        const current = app.getVersion();
+        const updateAvailable = !!(remote && compareSemver(remote, current) > 0);
+        return {
+            success: true,
+            data: {
+                currentVersion: current,
+                remoteVersion: remote || null,
+                updateAvailable,
+                releaseDate: r && r.updateInfo && r.updateInfo.releaseDate
+            }
+        };
     } catch (e) {
         return { success: false, error: e && e.message ? e.message : String(e) };
     }
 });
+
+function compareSemver(a, b) {
+    const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+        const diff = (pa[i] || 0) - (pb[i] || 0);
+        if (diff !== 0) return diff;
+    }
+    return 0;
+}
 ipcMain.handle('updater:download', async () => {
     if (!autoUpdater) return { success: false, error: 'updater unavailable' };
     if (!app.isPackaged) return { success: false, error: 'dev mode' };

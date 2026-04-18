@@ -442,59 +442,85 @@ const AdminModule = {
             }
         } catch {}
 
+        const applyEvent = (data) => {
+            if (!data || !data.type) return;
+            switch (data.type) {
+                case 'checking-for-update':
+                    setStatus('Checking for updates…', 'text-muted');
+                    show(progressWrap, false);
+                    show(dlBtn, false);
+                    show(installBtn, false);
+                    break;
+                case 'update-available': {
+                    const v = data.info && data.info.version;
+                    setStatus(`Update available: v${v || '?'}. Downloading…`, 'text-primary');
+                    show(dlBtn, false);
+                    show(installBtn, false);
+                    show(progressWrap, true);
+                    const bar = progressWrap && progressWrap.querySelector('.progress-bar');
+                    if (bar) bar.style.width = '0%';
+                    break;
+                }
+                case 'update-not-available':
+                    setStatus('You are already on the latest version.', 'text-success');
+                    show(progressWrap, false);
+                    show(dlBtn, false);
+                    show(installBtn, false);
+                    break;
+                case 'download-progress': {
+                    const p = (data.progress && data.progress.percent) || 0;
+                    const mb = (data.progress && data.progress.transferred / (1024 * 1024)) || 0;
+                    const total = (data.progress && data.progress.total / (1024 * 1024)) || 0;
+                    setStatus(`Downloading update… ${p.toFixed(0)}% (${mb.toFixed(1)} / ${total.toFixed(1)} MB)`, 'text-primary');
+                    show(progressWrap, true);
+                    const bar = progressWrap && progressWrap.querySelector('.progress-bar');
+                    if (bar) bar.style.width = p + '%';
+                    break;
+                }
+                case 'update-downloaded': {
+                    const v = data.info && data.info.version;
+                    setStatus(`Update v${v || '?'} downloaded. Click "Restart & Install" to apply.`, 'text-success');
+                    show(progressWrap, false);
+                    show(dlBtn, false);
+                    show(installBtn, true);
+                    break;
+                }
+                case 'error':
+                    setStatus('Update error: ' + (data.message || 'unknown'), 'text-danger');
+                    show(progressWrap, false);
+                    break;
+            }
+        };
+
+        // Rehydrate from last cached event so re-opening the tab after
+        // a download completed still shows the Install button.
+        try {
+            if (typeof api.getState === 'function') {
+                const st = await api.getState();
+                if (st && st.lastEvent) applyEvent(st.lastEvent);
+            }
+        } catch {}
+
         if (typeof api.onEvent === 'function' && !AdminModule._updaterBound) {
             AdminModule._updaterBound = true;
-            api.onEvent((data) => {
-                if (!data || !data.type) return;
-                switch (data.type) {
-                    case 'checking-for-update':
-                        setStatus('Checking for updates…', 'text-muted');
-                        break;
-                    case 'update-available':
-                        setStatus(`Update available: v${data.info && data.info.version}. Downloading…`, 'text-primary');
-                        show(dlBtn, false);
-                        show(progressWrap, true);
-                        break;
-                    case 'update-not-available':
-                        setStatus('You are on the latest version.', 'text-success');
-                        show(progressWrap, false);
-                        break;
-                    case 'download-progress': {
-                        const p = (data.progress && data.progress.percent) || 0;
-                        const mb = (data.progress && data.progress.transferred / (1024 * 1024)) || 0;
-                        const total = (data.progress && data.progress.total / (1024 * 1024)) || 0;
-                        setStatus(`Downloading update… ${p.toFixed(0)}% (${mb.toFixed(1)} / ${total.toFixed(1)} MB)`, 'text-primary');
-                        show(progressWrap, true);
-                        const bar = progressWrap && progressWrap.querySelector('.progress-bar');
-                        if (bar) bar.style.width = p + '%';
-                        break;
-                    }
-                    case 'update-downloaded':
-                        setStatus(`Update v${data.info && data.info.version} downloaded. Restart to install.`, 'text-success');
-                        show(progressWrap, false);
-                        show(dlBtn, false);
-                        show(installBtn, true);
-                        break;
-                    case 'error':
-                        setStatus('Update error: ' + (data.message || 'unknown'), 'text-danger');
-                        show(progressWrap, false);
-                        break;
-                }
-            });
+            api.onEvent(applyEvent);
         }
 
         checkBtn.onclick = async () => {
             checkBtn.disabled = true;
             setStatus('Checking for updates…', 'text-muted');
+            show(progressWrap, false);
+            show(dlBtn, false);
+            show(installBtn, false);
             try {
                 const r = await api.check();
                 if (!r || !r.success) {
                     setStatus('Could not check: ' + ((r && r.error) || 'unknown'), 'text-warning');
-                } else if (r.data && r.data.version) {
-                    setStatus(`Found update: v${r.data.version}. Downloading in background…`, 'text-primary');
-                } else {
-                    setStatus('You are on the latest version.', 'text-success');
                 }
+                // On success, `update-available` or `update-not-available`
+                // events will drive the status/button visibility. Do not
+                // set the status here — that would overwrite the correct
+                // event-driven message.
             } finally {
                 checkBtn.disabled = false;
             }
@@ -1052,7 +1078,7 @@ const AdminModule = {
                     ${analysis.detectedFeatures.length > 0 ? analysis.detectedFeatures.join(', ') : 'None detected (Standard Version)'}
                     <br/><br/>
                     <strong>Database Tables Found (${analysis.tables.length}):</strong><br/>
-                    <div style="max-height: 200px; overflow-y: auto; font-size: 0.8em; background: #eee; color: #333; padding: 5px;">
+                    <div class="bk-analysis" style="max-height: 200px; overflow-y: auto; font-size: 0.8em; background: #eee; color: #333; padding: 5px;">
                         ${analysis.tables.join(', ')}
                     </div>
                     <br/>

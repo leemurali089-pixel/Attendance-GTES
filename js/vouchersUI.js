@@ -187,6 +187,18 @@ const VouchersUI = {
     },
 
     load(params = {}) {
+        // Bank Mail → Create Voucher handoff: the Bank Mail view passes
+        // `{ fromBankMail: true, prefill: {...}, mode: 'purchase' | 'gst' | 'non-gst' }`.
+        // Pull prefill from sessionStorage as a fallback if the caller didn't
+        // include it inline (some navigation paths drop params).
+        let prefill = params.prefill || null;
+        if (params.fromBankMail && !prefill) {
+            try {
+                const raw = sessionStorage.getItem('mail_bank_prefill');
+                if (raw) prefill = JSON.parse(raw);
+            } catch {}
+        }
+
         const mode = params.mode || null;
         if (!mode) {
             this.renderSubSelection();
@@ -194,6 +206,83 @@ const VouchersUI = {
             this.currentMode = mode;
             this.renderVouchersList();
         }
+
+        if (params.fromBankMail && prefill) {
+            // Clear the session hand-off so re-entering Vouchers later does not
+            // re-trigger the create modal with stale data.
+            try { sessionStorage.removeItem('mail_bank_prefill'); } catch {}
+            setTimeout(() => this.openCreateVoucherFromBankMail(prefill), 250);
+        }
+    },
+
+    openCreateVoucherFromBankMail(prefill) {
+        if (!prefill || typeof prefill !== 'object') return;
+        // Debit (bank outflow) → Payment to vendor (Purchase voucher).
+        // Credit (bank inflow)  → Receipt from customer (mode already set by caller to gst/non-gst).
+        const vtype = prefill.type === 'debit' ? 'payment' : 'receipt';
+        this._pendingBankMailLink = {
+            messageId: prefill.messageId,
+            type: prefill.type,
+            bankSender: prefill.bankSender,
+            subject: prefill.subject
+        };
+        this.showCreateModal(vtype);
+
+        // Populate fields once the modal DOM is in place. setupPartyDropdown
+        // runs synchronously inside showCreateModal but we still defer so the
+        // bootstrap Modal finishes its first frame.
+        setTimeout(() => {
+            const form = document.getElementById('createVoucherForm');
+            if (!form) return;
+
+            if (prefill.amount != null && !isNaN(Number(prefill.amount))) {
+                const amountField = form.querySelector('[name="amount"]');
+                if (amountField) amountField.value = Number(prefill.amount);
+            }
+
+            if (prefill.receivedAt) {
+                const dateField = form.querySelector('[name="date"]');
+                if (dateField) {
+                    const d = new Date(Number(prefill.receivedAt));
+                    if (!isNaN(d)) dateField.value = d.toISOString().split('T')[0];
+                }
+            }
+
+            // Pre-select "Bank Transfer" — a bank-alert email almost always
+            // corresponds to a bank-channel movement.
+            const paymentModeField = form.querySelector('[name="paymentMode"]');
+            if (paymentModeField) {
+                paymentModeField.value = 'bank';
+                if (typeof this.onPaymentModeChange === 'function') {
+                    this.onPaymentModeChange(paymentModeField);
+                }
+            }
+
+            // Seed party name from the bank sender's display name (e.g.,
+            // "HDFC Bank InstaAlerts" out of "HDFC Bank InstaAlerts <alerts@hdfcbank.net>").
+            if (prefill.bankSender) {
+                const senderName = String(prefill.bankSender).split('<')[0].trim();
+                const partySearch = document.getElementById('voucherPartySearch');
+                if (partySearch) partySearch.value = senderName;
+            }
+
+            if (prefill.subject) {
+                const remarksField = form.querySelector('[name="remarks"]');
+                if (remarksField && !remarksField.value) remarksField.value = prefill.subject;
+            }
+
+            // Visual hint that the voucher was started from a bank email.
+            const modalBody = document.querySelector('#createVoucherModal .modal-body');
+            if (modalBody && !document.getElementById('bankMailPrefillBanner')) {
+                const banner = document.createElement('div');
+                banner.id = 'bankMailPrefillBanner';
+                banner.className = 'alert alert-info mx-4 mt-2 mb-0 py-2 small';
+                banner.innerHTML = `<i class="bi bi-envelope-open"></i>
+                    Prefilled from bank email <strong>"${(prefill.subject || '').replace(/</g, '&lt;')}"</strong>
+                    — saving will link this voucher back to the bank alert entry.`;
+                modalBody.insertBefore(banner, modalBody.firstChild);
+            }
+        }, 250);
     },
 
     renderSubSelection() {
@@ -2456,6 +2545,29 @@ const VouchersUI = {
             // Record this serial locally to ensure immediate auto-increment correctness for the next row
             if (typeof VoucherManager.recordUsedSerial === 'function') {
                 VoucherManager.recordUsedSerial(data.type, data.id);
+            }
+
+            // If this voucher was started from a Bank Mail entry, patch the
+            // bank queue with the new voucher id so the Bank Mail view can
+            // now show "Voucher-ed" and the entry disappears from "Open".
+            try {
+                if (this._pendingBankMailLink && this._pendingBankMailLink.messageId
+                    && window.electronAPI && window.electronAPI.gmail
+                    && typeof window.electronAPI.gmail.queueUpdate === 'function') {
+                    const msgId = this._pendingBankMailLink.messageId;
+                    await window.electronAPI.gmail.queueUpdate({
+                        name: 'bank',
+                        messageId: msgId,
+                        patch: { linkedVoucherId: newVoucher && newVoucher.id ? newVoucher.id : data.id, status: 'linked' }
+                    });
+                    if (typeof App !== 'undefined' && App.showNotification) {
+                        App.showNotification(`Voucher ${data.id} linked to bank email.`, 'success');
+                    }
+                }
+            } catch (linkErr) {
+                console.warn('[vouchers] Bank mail link failed:', linkErr && linkErr.message);
+            } finally {
+                this._pendingBankMailLink = null;
             }
 
             const modalEl = document.getElementById('createVoucherModal');

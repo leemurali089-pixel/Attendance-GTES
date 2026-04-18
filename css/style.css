@@ -2893,3 +2893,90 @@ footer p {
     overflow-x: auto;
     max-width: 100%;
 }
+
+/* =========================================================================
+   Admin panel — dark theme readability overrides.
+   Bootstrap's `bg-light` card-header and `table-light` thead render with a
+   pale beige against a dark page, which was making labels unreadable on
+   /admin. Force them to theme-aware tokens.
+   ========================================================================= */
+[data-theme="dark"] #adminView .card {
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+[data-theme="dark"] #adminView .card-header.bg-light,
+[data-theme="dark"] #adminView .card-header {
+    background-color: rgba(30, 41, 59, 0.6) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-color);
+}
+[data-theme="dark"] #adminView .card-header.bg-light h5,
+[data-theme="dark"] #adminView .card-header h5 {
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] #adminView .card-header .badge.bg-secondary {
+    background-color: rgba(148, 163, 184, 0.25) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] #adminView .form-label,
+[data-theme="dark"] #adminView label {
+    color: var(--text-primary);
+}
+[data-theme="dark"] #adminView .form-control,
+[data-theme="dark"] #adminView .form-select {
+    background-color: rgba(15, 23, 42, 0.6);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+[data-theme="dark"] #adminView .form-control::placeholder {
+    color: var(--text-muted);
+}
+[data-theme="dark"] #adminView .form-check-label {
+    color: var(--text-primary);
+}
+[data-theme="dark"] #adminView .text-muted,
+[data-theme="dark"] #adminView .form-text.text-muted {
+    color: var(--text-secondary) !important;
+}
+[data-theme="dark"] #adminView .table-light,
+[data-theme="dark"] #adminView thead.table-light,
+[data-theme="dark"] #adminView thead.table-light th {
+    background-color: rgba(148, 163, 184, 0.08) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color);
+}
+[data-theme="dark"] #adminView table,
+[data-theme="dark"] #adminView .table {
+    --bs-table-bg: transparent;
+    color: var(--text-primary);
+}
+[data-theme="dark"] #adminView .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+[data-theme="dark"] #adminView .modal-content.text-dark {
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] #adminView .bk-analysis {
+    background: rgba(15, 23, 42, 0.6) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color);
+}
+[data-theme="dark"] #adminView #appUpdateCard .progress {
+    background-color: rgba(148, 163, 184, 0.2);
+}
+
+/* Update-ready indicator in the top navbar: subtle pulse so it's noticed
+   without being aggressive. Visible to ALL users regardless of role. */
+#navUpdateIndicator .btn {
+    font-weight: 600;
+}
+#navUpdateIndicator .btn-warning {
+    animation: pulse-update 2.4s ease-in-out infinite;
+    box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.55);
+}
+@keyframes pulse-update {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(255, 193, 7, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0); }
+}

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // App auto-update (electron-updater + GitHub Releases)
     updater: {
         getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+        getState: () => ipcRenderer.invoke('updater:getState'),
         check: () => ipcRenderer.invoke('updater:check'),
         download: () => ipcRenderer.invoke('updater:download'),
         install: () => ipcRenderer.invoke('updater:install'),

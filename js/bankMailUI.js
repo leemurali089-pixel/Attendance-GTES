@@ -34,8 +34,10 @@ const BankMailUI = (() => {
                 <button class="btn btn-outline-secondary" data-filter="voucher">Voucher-ed</button>
                 <button class="btn btn-outline-primary" data-filter="all">All</button>
               </div>
-              <div class="ms-auto d-flex gap-2">
+              <div class="ms-auto d-flex gap-2 flex-wrap">
                 <input id="bankSearch" type="search" class="form-control form-control-sm" placeholder="Search" style="width:240px">
+                <button class="btn btn-sm btn-outline-success" id="bankExportXlsx" title="Export current filtered rows to Excel"><i class="bi bi-file-earmark-excel"></i> Export</button>
+                <button class="btn btn-sm btn-outline-info" id="bankBulkVoucher" title="Create vouchers in bulk from the Import Bank Statement workflow"><i class="bi bi-lightning-charge"></i> Bulk Import</button>
                 <button class="btn btn-sm btn-outline-light" id="bankRefresh" title="Refresh from local cache"><i class="bi bi-arrow-repeat"></i></button>
                 <button class="btn btn-sm btn-outline-primary" id="bankRescan" title="Re-scan Gmail for bank transaction alerts"><i class="bi bi-search"></i> Rescan</button>
               </div>
@@ -64,6 +66,11 @@ const BankMailUI = (() => {
             btn.disabled = true; icon.classList.add('spin');
             try { await refresh(); } finally { btn.disabled = false; icon.classList.remove('spin'); }
         };
+        const exportBtn = document.getElementById('bankExportXlsx');
+        if (exportBtn) exportBtn.onclick = () => exportVisibleToExcel();
+        const bulkBtn = document.getElementById('bankBulkVoucher');
+        if (bulkBtn) bulkBtn.onclick = () => openBulkImport();
+
         document.getElementById('bankRescan').onclick = async () => {
             const btn = document.getElementById('bankRescan');
             btn.disabled = true;
@@ -257,15 +264,141 @@ const BankMailUI = (() => {
             receivedAt: item.receivedAt
         };
         sessionStorage.setItem('mail_bank_prefill', JSON.stringify(prefill));
+
+        const txnType = item.txn && item.txn.type;
+        let mode;
+        if (txnType === 'debit') {
+            // Money OUT → Payment to vendor / expense → Purchase Voucher.
+            mode = 'purchase';
+        } else if (txnType === 'credit') {
+            // Money IN → ask the user whether this inflow is GST (taxable)
+            // or plain (non-taxable). Defaults to non-GST because most
+            // retail bank alerts are for non-taxable movements.
+            mode = await askCreditVoucherMode();
+            if (!mode) return; // user cancelled
+        } else {
+            // Unknown — fall back to mode selector.
+            mode = null;
+        }
+
         try {
-            App.showView('vouchers', { fromBankMail: true, prefill });
+            App.showView('vouchers', { fromBankMail: true, prefill, mode });
             await window.electronAPI.gmail.queueUpdate({ name: 'bank', messageId, patch: { status: 'drafting' } });
         } catch (e) {
             App.showNotification('Could not open Vouchers module: ' + e.message, 'error');
         }
     }
 
-    return { load, refresh };
+    function askCreditVoucherMode() {
+        return new Promise((resolve) => {
+            const existing = document.getElementById('bankCreditModeModal');
+            if (existing) existing.remove();
+            const wrap = document.createElement('div');
+            wrap.innerHTML = `
+              <div class="modal fade" id="bankCreditModeModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                  <div class="modal-content">
+                    <div class="modal-header">
+                      <h5 class="modal-title"><i class="bi bi-cash-coin text-success"></i> Credit Received</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                      <p class="mb-3">What type of Receipt voucher do you want to create?</p>
+                      <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-outline-primary text-start py-3" data-mode="gst">
+                          <i class="bi bi-receipt me-2"></i>
+                          <strong>GST Receipt</strong>
+                          <div class="small text-muted mt-1">Taxable inflow — invoice-linked, CGST/SGST/IGST tracked, shows in GST reports.</div>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary text-start py-3" data-mode="non-gst">
+                          <i class="bi bi-wallet2 me-2"></i>
+                          <strong>Plain Receipt</strong>
+                          <div class="small text-muted mt-1">Non-GST inflow — direct cash/bank receipt without tax allocation.</div>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+            document.body.appendChild(wrap.firstElementChild);
+            const modalEl = document.getElementById('bankCreditModeModal');
+            const modal = new bootstrap.Modal(modalEl);
+            let resolved = false;
+            modalEl.querySelectorAll('[data-mode]').forEach(btn => btn.onclick = () => {
+                resolved = true;
+                const pick = btn.getAttribute('data-mode');
+                modal.hide();
+                resolve(pick);
+            });
+            modalEl.addEventListener('hidden.bs.modal', () => {
+                modalEl.remove();
+                if (!resolved) resolve(null);
+            }, { once: true });
+            modal.show();
+        });
+    }
+
+    function currentFilteredItems() {
+        let items = state.items.slice();
+        if (state.filter === 'open') items = items.filter(x => !x.linkedVoucherId);
+        else if (state.filter === 'credit') items = items.filter(x => x.txn && x.txn.type === 'credit');
+        else if (state.filter === 'debit') items = items.filter(x => x.txn && x.txn.type === 'debit');
+        else if (state.filter === 'voucher') items = items.filter(x => x.linkedVoucherId);
+        if (state.search) {
+            const q = state.search;
+            items = items.filter(x => (x.from || '').toLowerCase().includes(q) || (x.subject || '').toLowerCase().includes(q));
+        }
+        return items;
+    }
+
+    function exportVisibleToExcel() {
+        const items = currentFilteredItems();
+        if (!items.length) {
+            if (typeof App !== 'undefined' && App.showNotification) App.showNotification('Nothing to export for the current filter.', 'warning');
+            return;
+        }
+        if (typeof XLSX === 'undefined') {
+            if (typeof App !== 'undefined' && App.showNotification) App.showNotification('Excel library not loaded.', 'error');
+            return;
+        }
+        const rows = items.map(x => ({
+            'Received': x.receivedAt ? new Date(Number(x.receivedAt)).toLocaleString() : '',
+            'Bank / Sender': x.from || '',
+            'Type': (x.txn && x.txn.type) ? x.txn.type.toUpperCase() : '',
+            'Amount (INR)': x.txn && x.txn.amount != null ? Number(x.txn.amount) : '',
+            'Subject': x.subject || '',
+            'Status': x.linkedVoucherId ? `Linked to Voucher ${x.linkedVoucherId}` : 'Open',
+            'Message ID': x.messageId || ''
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        // Reasonable column widths.
+        ws['!cols'] = [ { wch: 22 }, { wch: 34 }, { wch: 8 }, { wch: 14 }, { wch: 60 }, { wch: 28 }, { wch: 28 } ];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Bank Mails');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        XLSX.writeFile(wb, `bank-mails-${state.filter}-${stamp}.xlsx`);
+    }
+
+    function openBulkImport() {
+        // Route the user to the existing Import Bank Statement workflow so
+        // they can pick multiple transactions at once (same feature set as
+        // the Vouchers → Import Bank Statement toolbar button).
+        try {
+            App.showView('vouchers', { mode: 'non-gst' });
+            setTimeout(() => {
+                if (typeof VouchersUI !== 'undefined' && typeof VouchersUI.importBankStatement === 'function') {
+                    VouchersUI.importBankStatement();
+                }
+            }, 350);
+        } catch (e) {
+            if (typeof App !== 'undefined' && App.showNotification) App.showNotification('Could not open Import Bank Statement: ' + e.message, 'error');
+        }
+    }
+
+    return { load, refresh, exportVisibleToExcel };
 })();
 
 window.BankMailUI = BankMailUI;
