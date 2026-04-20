@@ -46,15 +46,33 @@ const FileStorage = {
         ];
 
         const onRemote = (key, snap) => {
-            if (!snap.exists()) return;
-            const val = snap.val();
             try {
                 DM.invalidateDataCache(key);
-                if (key === 'gtes_users' && typeof DM._normalizeGtesUsersPayload === 'function') {
-                    DM._cache[key] = DM._normalizeGtesUsersPayload(val);
-                } else {
-                    DM._cache[key] = val;
+                if (!snap.exists()) {
+                    if (key === DM.KEYS.ATTENDANCE) {
+                        DM._cache[key] = [];
+                    } else if (key === DM.KEYS.EMPLOYEES) {
+                        DM._cache[key] = [];
+                    } else if (key === 'gtes_users') {
+                        DM._cache[key] = [];
+                    } else {
+                        DM._cache[key] = null;
+                    }
+                    DM._trustedCacheKeys.add(key);
+                    if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
+                        DM._clearAttendanceDerivedCaches();
+                    }
+                    DM._emitDataChangedEvent(key, 'firebase-listener');
+                    return;
                 }
+                const val = snap.val();
+                let toStore = val;
+                if (key === DM.KEYS.ATTENDANCE || key === DM.KEYS.EMPLOYEES) {
+                    toStore = typeof DM.coerceJsonArray === 'function' ? DM.coerceJsonArray(val) : val;
+                } else if (key === 'gtes_users' && typeof DM._normalizeGtesUsersPayload === 'function') {
+                    toStore = DM._normalizeGtesUsersPayload(val);
+                }
+                DM._cache[key] = toStore;
                 DM._trustedCacheKeys.add(key);
                 if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
                     DM._clearAttendanceDerivedCaches();

@@ -125,6 +125,21 @@ const DataManager = {
     /** Above this JSON length, skip localStorage and mirror only to IndexedDB (leaves room for Firebase SDK keys). */
     LOCALSTORAGE_JSON_MAX_CHARS: 380000,
 
+    /**
+     * Realtime Database often stores JSON arrays as { "0": row, "1": row }.
+     * Coerce to a real Array so getAttendance / getEmployees stay correct.
+     */
+    coerceJsonArray(val) {
+        if (Array.isArray(val)) return val;
+        if (val != null && typeof val === 'object') {
+            return Object.keys(val)
+                .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+                .map((k) => val[k])
+                .filter((x) => x != null);
+        }
+        return [];
+    },
+
     _cache: {}, // Memory cache for synchronous access when localStorage fails quota
     /** Keys that have completed a full `loadData` this session — avoids re-fetching Firebase on every getAttendance/getEmployees call */
     _trustedCacheKeys: new Set(),

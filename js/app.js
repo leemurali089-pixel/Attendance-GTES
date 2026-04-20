@@ -352,6 +352,11 @@ const App = {
                         AttendanceModule.load().catch(() => {});
                     } else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') {
                         FilterAttendanceModule.load();
+                    } else if (v === 'dashboard') {
+                        this.loadDashboard().catch(() => {});
+                    }
+                    if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard' && typeof this.showNotification === 'function') {
+                        this.showNotification('Attendance was updated elsewhere. Numbers refresh when you open Attendance or Dashboard.', 'info');
                     }
                 }
                 if (d.key === 'gtes_employees' && v === 'employees' && typeof EmployeesModule !== 'undefined') {
