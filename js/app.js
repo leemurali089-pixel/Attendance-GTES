@@ -7,6 +7,9 @@ const App = {
     currentMonth: null,
     currentYear: null,
     authInProgress: false,
+    /** Fingerprint for Tasks-style live attendance polling (dashboard / attendance / filter views). */
+    _attendanceLivePollFp: null,
+    _attendanceLivePollTimer: null,
 
     showLoader() {
         const loader = document.getElementById('globalLoader');
@@ -40,7 +43,7 @@ const App = {
 
         this.showLoader();
 
-        console.log("%c🚀 MJS PrimeLogic v1.3.11 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
+        console.log("%c🚀 MJS PrimeLogic v1.3.12 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
@@ -100,6 +103,54 @@ const App = {
         if (typeof TasksUI !== 'undefined') {
             TasksUI.init();
         }
+        this._ensureAttendanceLivePoll();
+    },
+
+    /**
+     * Same idea as TasksUI: periodic forceRefresh from cloud + refresh open views so
+     * edits from another device (web) appear without a full page reload.
+     */
+    _ensureAttendanceLivePoll() {
+        if (this._attendanceLivePollTimer) return;
+        const computeFp = async () => {
+            const a = await DataManager.getAttendance();
+            const list = Array.isArray(a) ? a : [];
+            let latestTs = 0;
+            let checksum = 0;
+            for (const r of list) {
+                const stamp = Date.parse(r?.updatedAt || r?.createdAt || 0) || 0;
+                if (stamp > latestTs) latestTs = stamp;
+                const sig = [
+                    r?.id || '',
+                    r?.status || '',
+                    r?.employee || '',
+                    String(r?.date || ''),
+                    String(r?.checkIn || ''),
+                    String(r?.checkOut || '')
+                ].join('|');
+                for (let i = 0; i < sig.length; i++) checksum = (checksum + sig.charCodeAt(i)) % 1000000007;
+            }
+            return `${list.length}:${latestTs}:${checksum}`;
+        };
+        this._attendanceLivePollTimer = setInterval(async () => {
+            const v = this.currentView;
+            if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard') return;
+            try {
+                await DataManager.loadData(DataManager.KEYS.ATTENDANCE, { forceRefresh: true });
+                const next = await computeFp();
+                if (this._attendanceLivePollFp === null) {
+                    this._attendanceLivePollFp = next;
+                    return;
+                }
+                if (next === this._attendanceLivePollFp) return;
+                this._attendanceLivePollFp = next;
+                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.load();
+                else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
+                else if (v === 'dashboard') await this.loadDashboard();
+            } catch (e) {
+                console.warn('[App] attendance live poll:', e && e.message);
+            }
+        }, 8000);
     },
 
     async checkLoginStatus() {
@@ -341,28 +392,45 @@ const App = {
     },
 
     setupEventListeners() {
-        // Another device wrote to Firebase → refresh the screen you have open
+        // Attendance: match TasksUI — react to any save/sync event, not only firebase-listener.
         window.addEventListener('gtes:data-changed', (event) => {
             const d = event && event.detail;
-            if (!d || d.source !== 'firebase-listener') return;
+            if (!d) return;
             const v = this.currentView;
             try {
                 if (d.key === 'gtes_attendance') {
                     if (v === 'attendance' && typeof AttendanceModule !== 'undefined') {
-                        AttendanceModule.load().catch((e) => console.warn('[App] attendance refresh (remote):', e && e.message));
+                        AttendanceModule.load().catch((e) => console.warn('[App] attendance refresh:', e && e.message));
                     } else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') {
-                        FilterAttendanceModule.load().catch((e) => console.warn('[App] filter attendance refresh (remote):', e && e.message));
+                        FilterAttendanceModule.load().catch((e) => console.warn('[App] filter attendance refresh:', e && e.message));
                     } else if (v === 'dashboard') {
-                        this.loadDashboard().catch((e) => console.warn('[App] dashboard refresh (remote):', e && e.message));
+                        this.loadDashboard().catch((e) => console.warn('[App] dashboard refresh:', e && e.message));
                     }
                     if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard' && typeof this.showNotification === 'function') {
                         this.showNotification('Attendance was updated elsewhere. Numbers refresh when you open Attendance or Dashboard.', 'info');
                     }
+                    return;
                 }
+                if (d.source !== 'firebase-listener') return;
                 if (d.key === 'gtes_employees' && v === 'employees' && typeof EmployeesModule !== 'undefined') {
                     EmployeesModule.load().catch(() => {});
                 }
             } catch (_) { /* ignore */ }
+        });
+
+        // Mirror TasksUI: external file / sync invalidation → pull attendance from cloud then refresh.
+        window.addEventListener('gtes:remote-change', async (event) => {
+            const key = event && event.detail && event.detail.key;
+            if (key !== 'gtes_attendance') return;
+            try {
+                await DataManager.loadData(DataManager.KEYS.ATTENDANCE, { forceRefresh: true });
+                const v = this.currentView;
+                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.load();
+                else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
+                else if (v === 'dashboard') await this.loadDashboard();
+            } catch (e) {
+                console.warn('[App] attendance remote-change refresh:', e && e.message);
+            }
         });
 
         // Login Form

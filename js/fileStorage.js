@@ -3,6 +3,21 @@ const FileStorage = {
     isCloudReady: false,
     _permissionDeniedHintShown: false,
     _realtimeListenersAttached: false,
+    /** Keys we are writing to disk to mirror RTDB → ignore matching fs.watch invalidation (see syncManager). */
+    _mirrorWriteKeys: new Set(),
+
+    markMirrorWriteFromRtdb(key) {
+        if (key) this._mirrorWriteKeys.add(key);
+    },
+    unmarkMirrorWriteFromRtdb(key) {
+        if (key) this._mirrorWriteKeys.delete(key);
+    },
+    /** @returns {boolean} true if this file change was our RTDB→disk mirror (consume one-shot). */
+    consumeMirrorWriteFromRtdb(baseKey) {
+        if (!baseKey || !this._mirrorWriteKeys.has(baseKey)) return false;
+        this._mirrorWriteKeys.delete(baseKey);
+        return true;
+    },
 
     async init() {
         if (typeof window.db === 'undefined') {
@@ -63,6 +78,22 @@ const FileStorage = {
                         DM._clearAttendanceDerivedCaches();
                     }
                     DM._emitDataChangedEvent(key, 'firebase-listener');
+                    const emptyMirror = DM._cache[key];
+                    if (window.electronAPI) {
+                        const payload = emptyMirror == null ? {} : emptyMirror;
+                        FileStorage.markMirrorWriteFromRtdb(key);
+                        window.electronAPI.saveData(key, payload)
+                            .then((res) => {
+                                if (!res || !res.success) FileStorage.unmarkMirrorWriteFromRtdb(key);
+                            })
+                            .catch((e) => {
+                                FileStorage.unmarkMirrorWriteFromRtdb(key);
+                                console.warn('[FileStorage] Mirror empty RTDB to local disk failed:', key, e && e.message);
+                            });
+                    }
+                    if (typeof DM._mirrorToLocalOrIDB === 'function') {
+                        void DM._mirrorToLocalOrIDB(key, Array.isArray(emptyMirror) ? emptyMirror : []).catch(() => {});
+                    }
                     return;
                 }
                 // Do not invalidate before assigning: clearing the cache lets a concurrent loadData()
@@ -80,6 +111,23 @@ const FileStorage = {
                     DM._clearAttendanceDerivedCaches();
                 }
                 DM._emitDataChangedEvent(key, 'firebase-listener');
+
+                // Electron: keep local JSON in sync with RTDB so loadData() + file watcher never
+                // re-merge stale on-disk rows over fresher cloud edits from another device.
+                if (window.electronAPI) {
+                    FileStorage.markMirrorWriteFromRtdb(key);
+                    window.electronAPI.saveData(key, toStore)
+                        .then((res) => {
+                            if (!res || !res.success) FileStorage.unmarkMirrorWriteFromRtdb(key);
+                        })
+                        .catch((e) => {
+                            FileStorage.unmarkMirrorWriteFromRtdb(key);
+                            console.warn('[FileStorage] Mirror RTDB to local disk failed:', key, e && e.message);
+                        });
+                }
+                if (typeof DM._mirrorToLocalOrIDB === 'function') {
+                    void DM._mirrorToLocalOrIDB(key, toStore).catch(() => {});
+                }
             } catch (e) {
                 console.warn('[FileStorage] Realtime merge failed:', key, e && e.message);
             }

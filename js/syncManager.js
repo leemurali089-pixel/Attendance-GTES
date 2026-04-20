@@ -469,11 +469,21 @@ const SyncManager = {
     },
 
     handleRemoteChange(filename) {
+        let base = '';
+        if (typeof filename === 'string') {
+            base = filename.replace(/\.json$/i, '').replace(/^.*[/\\]/, '');
+        }
+        // RTDB listener already updated memory + we mirrored the same payload to disk — do not
+        // invalidate cache or the UI can reload merged stale rows from before the mirror completed.
+        if (base && window.FileStorage && typeof FileStorage.consumeMirrorWriteFromRtdb === 'function') {
+            if (FileStorage.consumeMirrorWriteFromRtdb(base)) {
+                return;
+            }
+        }
+
         this.logSyncEvent('warning', `Remote changes detected in ${filename}`);
         this.updateStatus('changes', `Changes detected in ${filename}`);
-        let base = '';
         if (typeof filename === 'string' && window.DataManager && typeof DataManager.invalidateDataCache === 'function') {
-            base = filename.replace(/\.json$/i, '').replace(/^.*[/\\]/, '');
             if (base) {
                 DataManager.invalidateDataCache(base);
             }
