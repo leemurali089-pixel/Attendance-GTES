@@ -3,14 +3,28 @@ const FileStorage = {
     isCloudReady: false,
 
     async init() {
-        if (typeof window.db !== 'undefined') {
-            this.isCloudReady = true;
-            console.log("☁️ Realtime Database cloud connection active.");
-            return true;
-        } else {
+        if (typeof window.db === 'undefined') {
             console.error("Realtime DB not initialized.");
             return false;
         }
+        // Finish Firebase Anonymous Auth before any RTDB read, or security
+        // rules that require `auth != null` will deny every path.
+        if (window.firebaseAuthReady) {
+            try {
+                const ar = await window.firebaseAuthReady;
+                if (!ar || !ar.ok) {
+                    console.warn(
+                        '[FileStorage] Firebase Anonymous Auth did not succeed — cloud sync may show permission_denied. ' +
+                        'Enable Anonymous in Firebase Console (Authentication → Sign-in method).'
+                    );
+                }
+            } catch (e) {
+                console.warn('[FileStorage] firebaseAuthReady error:', e && e.message);
+            }
+        }
+        this.isCloudReady = true;
+        console.log("☁️ Realtime Database cloud connection active.");
+        return true;
     },
 
     async saveData(key, data) {
