@@ -188,6 +188,15 @@ const FileStorage = {
             return localSuccess; // Electron file write only — reflect actual file result
         }
 
+        // Desktop: do not block UI on RTDB round-trip for attendance; local .json is already saved.
+        const attKey = window.DataManager && window.DataManager.KEYS && window.DataManager.KEYS.ATTENDANCE;
+        if (window.electronAPI && localSuccess && attKey && key === attKey) {
+            window.db.ref(key).set(data)
+                .then(() => console.log(`✅ Cloud Sync [${key}]: Success`))
+                .catch((error) => console.error(`🚨 Cloud Sync Failed for ${key}:`, error));
+            return true;
+        }
+
         try {
             await window.db.ref(key).set(data);
             console.log(`✅ Cloud Sync [${key}]: Success`);

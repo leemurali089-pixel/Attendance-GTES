@@ -43,7 +43,7 @@ const App = {
 
         this.showLoader();
 
-        console.log("%c🚀 MJS PrimeLogic v1.3.12 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
+        console.log("%c🚀 MJS PrimeLogic v1.3.13 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
