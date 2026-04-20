@@ -1,0 +1,25 @@
+Firebase Realtime Database — fix "permission_denied" for the web & desktop app
+================================================================================
+
+The app signs in with Firebase ANONYMOUS auth so paths satisfy "auth != null".
+Your project rules must ALLOW any signed-in user (including anonymous) to read/write.
+
+1) Open https://console.firebase.google.com/ → select project "mjs-primelogic"
+2) Build → Realtime Database → Rules
+3) Replace the rules with the contents of database.rules.json in this repo:
+
+   {
+     "rules": {
+       ".read": "auth != null",
+       ".write": "auth != null"
+     }
+   }
+
+4) Click "Publish"
+
+5) Reload the web app (Ctrl+F5). The console should stop showing permission_denied.
+
+Security note: Your real access control is the in-app login (gtes_users). These rules
+only let the Firebase client sync data; they do not replace username/password.
+
+Optional CLI: firebase deploy --only database

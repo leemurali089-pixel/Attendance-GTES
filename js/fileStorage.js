@@ -1,6 +1,8 @@
 // File Storage Module - Firebase Realtime Database Integration
 const FileStorage = {
     isCloudReady: false,
+    _permissionDeniedHintShown: false,
+    _realtimeListenersAttached: false,
 
     async init() {
         if (typeof window.db === 'undefined') {
@@ -24,7 +26,71 @@ const FileStorage = {
         }
         this.isCloudReady = true;
         console.log("☁️ Realtime Database cloud connection active.");
+        this.attachRealtimeListeners();
         return true;
+    },
+
+    /**
+     * Live sync: when another device writes to RTDB, refresh local cache + UI.
+     * Requires database rules that allow auth != null (see database.rules.json).
+     */
+    attachRealtimeListeners() {
+        if (this._realtimeListenersAttached || !window.db || !this.isCloudReady) return;
+        const DM = window.DataManager;
+        if (!DM || !DM.KEYS) return;
+
+        const watchKeys = [
+            DM.KEYS.ATTENDANCE,
+            DM.KEYS.EMPLOYEES,
+            'gtes_users'
+        ];
+
+        const onRemote = (key, snap) => {
+            if (!snap.exists()) return;
+            const val = snap.val();
+            try {
+                DM.invalidateDataCache(key);
+                if (key === 'gtes_users' && typeof DM._normalizeGtesUsersPayload === 'function') {
+                    DM._cache[key] = DM._normalizeGtesUsersPayload(val);
+                } else {
+                    DM._cache[key] = val;
+                }
+                DM._trustedCacheKeys.add(key);
+                if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
+                    DM._clearAttendanceDerivedCaches();
+                }
+                DM._emitDataChangedEvent(key, 'firebase-listener');
+            } catch (e) {
+                console.warn('[FileStorage] Realtime merge failed:', key, e && e.message);
+            }
+        };
+
+        const errOnce = (key, err) => {
+            const code = err && (err.code || err.message || '');
+            const denied = String(code).indexOf('PERMISSION') !== -1 || String(code).indexOf('permission') !== -1;
+            if (denied && !FileStorage._permissionDeniedHintShown) {
+                FileStorage._permissionDeniedHintShown = true;
+                console.warn(
+                    '[FileStorage] Realtime Database rules denied access. Publish rules from database.rules.json ' +
+                    '(see database.rules.README.txt in the repo). Until then, cloud sync and live updates are disabled.'
+                );
+            }
+        };
+
+        watchKeys.forEach((key) => {
+            try {
+                window.db.ref(key).on(
+                    'value',
+                    (snap) => onRemote(key, snap),
+                    (err) => errOnce(key, err)
+                );
+            } catch (e) {
+                console.warn('[FileStorage] Could not attach listener for', key, e && e.message);
+            }
+        });
+
+        this._realtimeListenersAttached = true;
+        console.log('[FileStorage] Realtime listeners attached for:', watchKeys.join(', '));
     },
 
     async saveData(key, data) {
@@ -123,7 +189,24 @@ const FileStorage = {
             // No cloud value; fall back to local if any.
             return localData;
         } catch (error) {
-            console.error(`Error loading ${key} from Cloud:`, error);
+            const code = error && error.code;
+            const msg = error && error.message ? String(error.message) : '';
+            const denied = code === 'PERMISSION_DENIED' || msg.indexOf('permission_denied') !== -1;
+            if (denied) {
+                if (!FileStorage._permissionDeniedHintShown) {
+                    FileStorage._permissionDeniedHintShown = true;
+                    console.warn(
+                        `[FileStorage] permission_denied for Realtime Database (example: ${key}). ` +
+                        'Anonymous auth is working, but Database Rules must allow authenticated users. ' +
+                        'In Firebase Console → Realtime Database → Rules, publish the JSON from database.rules.json ' +
+                        '(see database.rules.README.txt in this repository).'
+                    );
+                } else {
+                    console.debug(`[FileStorage] permission_denied for '${key}' (rules not updated yet)`);
+                }
+            } else {
+                console.error(`Error loading ${key} from Cloud:`, error);
+            }
             try {
                 const raw = localStorage.getItem(key);
                 return raw ? JSON.parse(raw) : null;

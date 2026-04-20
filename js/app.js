@@ -341,6 +341,25 @@ const App = {
     },
 
     setupEventListeners() {
+        // Another device wrote to Firebase → refresh the screen you have open
+        window.addEventListener('gtes:data-changed', (event) => {
+            const d = event && event.detail;
+            if (!d || d.source !== 'firebase-listener') return;
+            const v = this.currentView;
+            try {
+                if (d.key === 'gtes_attendance') {
+                    if (v === 'attendance' && typeof AttendanceModule !== 'undefined') {
+                        AttendanceModule.load().catch(() => {});
+                    } else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') {
+                        FilterAttendanceModule.load();
+                    }
+                }
+                if (d.key === 'gtes_employees' && v === 'employees' && typeof EmployeesModule !== 'undefined') {
+                    EmployeesModule.load().catch(() => {});
+                }
+            } catch (_) { /* ignore */ }
+        });
+
         // Login Form
         const loginForm = document.getElementById('loginForm');
 
