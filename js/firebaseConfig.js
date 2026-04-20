@@ -1,3 +1,12 @@
+// Free browser quota for Firebase SDK internal keys (runs before init).
+if (typeof gtesEnsureLocalStorageHeadroom === 'function') {
+    try {
+        gtesEnsureLocalStorageHeadroom();
+    } catch (e) {
+        console.warn('[Firebase] storage headroom check skipped:', e && e.message);
+    }
+}
+
 // Firebase Configuration
 const firebaseConfig = {
     apiKey: "AIzaSyC4LAIOoHCpzIemtkF8hx7OO7-14fcgv7c",

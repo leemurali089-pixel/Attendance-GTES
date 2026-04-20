@@ -1,6 +1,6 @@
 {
     "name": "attendance-gtes",
-    "version": "1.3.7",
+    "version": "1.3.8",
     "description": "MJS PrimeLogic - Attendance & Salary Management System",
     "main": "main.js",
     "author": "Murali D",

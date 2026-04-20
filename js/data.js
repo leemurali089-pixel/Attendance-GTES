@@ -122,6 +122,9 @@ const DataManager = {
 
     // Device ID for tracking changes (used for sync and audit)
     _deviceId: null,
+    /** Above this JSON length, skip localStorage and mirror only to IndexedDB (leaves room for Firebase SDK keys). */
+    LOCALSTORAGE_JSON_MAX_CHARS: 380000,
+
     _cache: {}, // Memory cache for synchronous access when localStorage fails quota
     /** Keys that have completed a full `loadData` this session — avoids re-fetching Firebase on every getAttendance/getEmployees call */
     _trustedCacheKeys: new Set(),
@@ -174,6 +177,31 @@ const DataManager = {
                 request.onerror = () => reject(null);
             });
         } catch(e) { return null; }
+    },
+
+    /** Keep a copy in localStorage only for smaller payloads; large data → IndexedDB to avoid QuotaExceededError for Firebase. */
+    async _mirrorToLocalOrIDB(key, data) {
+        try {
+            const s = JSON.stringify(data);
+            if (s.length > this.LOCALSTORAGE_JSON_MAX_CHARS) {
+                try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
+                await this.saveToIDB(key, data);
+                return;
+            }
+            try {
+                localStorage.setItem(key, s);
+            } catch (e) {
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    console.warn(`[DataManager] localStorage full for '${key}'; mirroring to IndexedDB.`);
+                    try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
+                    await this.saveToIDB(key, data);
+                } else {
+                    throw e;
+                }
+            }
+        } catch (e) {
+            console.error(`[DataManager] _mirrorToLocalOrIDB('${key}'):`, e);
+        }
     },
 
     /**
@@ -496,17 +524,8 @@ const DataManager = {
             this._clearAttendanceDerivedCaches();
         }
 
-        // Try local storage cache
-        try {
-            localStorage.setItem(key, JSON.stringify(data));
-        } catch (e) {
-            if (e.name === 'QuotaExceededError' || e.code === 22) {
-                console.warn(`[DataManager] LocalStorage quota exceeded for ${key} during save. Falling back to IndexedDB.`);
-                this.saveToIDB(key, data);
-            } else {
-                console.error('Error updating localStorage cache:', e);
-            }
-        }
+        // Try local storage cache (large JSON → IndexedDB only)
+        await this._mirrorToLocalOrIDB(key, data);
 
         // Phase 5: Check for conflicts before saving
         if (window.SyncManager) {
@@ -520,9 +539,7 @@ const DataManager = {
                 if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
                     payload = this._mergeRecordArraysById(cloudExisting, data, key);
                     this._cache[key] = payload;
-                    try {
-                        localStorage.setItem(key, JSON.stringify(payload));
-                    } catch (_) { }
+                    await this._mirrorToLocalOrIDB(key, payload);
                 }
             } catch (e) {
                 console.warn(`[DataManager] Pre-save merge skipped for '${key}':`, e);
@@ -603,17 +620,7 @@ const DataManager = {
             this._cache[key] = data;
             this._trustedCacheKeys.add(key);
 
-            try {
-                localStorage.setItem(key, JSON.stringify(data));
-            } catch (e) {
-                // If QuotaExceeded, save to IndexedDB instead
-                if (e.name === 'QuotaExceededError' || e.code === 22) {
-                    console.warn(`[DataManager] LocalStorage full for ${key}. Falling back to IndexedDB.`);
-                    this.saveToIDB(key, data);
-                } else {
-                    console.error('Error updating localStorage cache during load:', e);
-                }
-            }
+            await this._mirrorToLocalOrIDB(key, data);
         }
         return data;
     },
@@ -644,7 +651,13 @@ const DataManager = {
             this._clearAttendanceDerivedCaches();
         }
         try {
-            localStorage.setItem(key, JSON.stringify(value));
+            const s = JSON.stringify(value);
+            if (s.length > this.LOCALSTORAGE_JSON_MAX_CHARS) {
+                try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
+                this.saveToIDB(key, value).catch(() => {});
+            } else {
+                localStorage.setItem(key, s);
+            }
             this._emitDataChangedEvent(key, 'saveDataSync');
             // Also trigger async save for file storage
             this.saveData(key, value).catch(err => console.error('Async save error:', err));
