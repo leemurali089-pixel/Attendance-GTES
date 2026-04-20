@@ -6,8 +6,8 @@ const FilterAttendanceModule = {
     viewType: 'table', // 'table' or 'calendar'
     _cachedTimeSlots: null, // Cache for time slot options HTML
 
-    load() {
-        this.renderFilterView();
+    async load() {
+        await this.renderFilterView();
     },
 
     setViewType(type) {

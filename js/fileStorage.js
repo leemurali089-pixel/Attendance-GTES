@@ -47,8 +47,8 @@ const FileStorage = {
 
         const onRemote = (key, snap) => {
             try {
-                DM.invalidateDataCache(key);
                 if (!snap.exists()) {
+                    DM.invalidateDataCache(key);
                     if (key === DM.KEYS.ATTENDANCE) {
                         DM._cache[key] = [];
                     } else if (key === DM.KEYS.EMPLOYEES) {
@@ -65,6 +65,8 @@ const FileStorage = {
                     DM._emitDataChangedEvent(key, 'firebase-listener');
                     return;
                 }
+                // Do not invalidate before assigning: clearing the cache lets a concurrent loadData()
+                // fall through to Electron/local JSON and repopulate stale rows before this write lands.
                 const val = snap.val();
                 let toStore = val;
                 if (key === DM.KEYS.ATTENDANCE || key === DM.KEYS.EMPLOYEES) {

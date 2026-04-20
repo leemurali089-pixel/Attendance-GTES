@@ -40,7 +40,7 @@ const App = {
 
         this.showLoader();
 
-        console.log("%c🚀 MJS PrimeLogic v1.3.0 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
+        console.log("%c🚀 MJS PrimeLogic v1.3.11 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
@@ -349,11 +349,11 @@ const App = {
             try {
                 if (d.key === 'gtes_attendance') {
                     if (v === 'attendance' && typeof AttendanceModule !== 'undefined') {
-                        AttendanceModule.load().catch(() => {});
+                        AttendanceModule.load().catch((e) => console.warn('[App] attendance refresh (remote):', e && e.message));
                     } else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') {
-                        FilterAttendanceModule.load();
+                        FilterAttendanceModule.load().catch((e) => console.warn('[App] filter attendance refresh (remote):', e && e.message));
                     } else if (v === 'dashboard') {
-                        this.loadDashboard().catch(() => {});
+                        this.loadDashboard().catch((e) => console.warn('[App] dashboard refresh (remote):', e && e.message));
                     }
                     if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard' && typeof this.showNotification === 'function') {
                         this.showNotification('Attendance was updated elsewhere. Numbers refresh when you open Attendance or Dashboard.', 'info');

@@ -142,7 +142,13 @@ app.whenReady().then(async () => {
         autoUpdater.on('checking-for-update', () => send('checking-for-update', {}));
         autoUpdater.on('update-available', (info) => send('update-available', { info }));
         autoUpdater.on('update-not-available', (info) => send('update-not-available', { info }));
-        autoUpdater.on('error', (err) => send('error', { message: String(err && err.message || err) }));
+        autoUpdater.on('error', (err) => {
+            let msg = String(err && err.message || err);
+            if (/404|status code 404/i.test(msg) && /github\.com.*releases\/download/i.test(msg)) {
+                msg += ' The release file name must match latest.yml (e.g. MJS-PrimeLogic-Setup-<version>.exe from dist/ after build).';
+            }
+            send('error', { message: msg });
+        });
         autoUpdater.on('download-progress', (p) => send('download-progress', { progress: p }));
         autoUpdater.on('update-downloaded', (info) => send('update-downloaded', { info }));
 
