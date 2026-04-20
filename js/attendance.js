@@ -1192,10 +1192,16 @@ const AttendanceModule = {
             attendance.push(record);
         }
 
-        await DataManager.saveAttendance(attendance);
-        this.closeAttendanceModal();
+        try {
+            await DataManager.saveAttendance(attendance);
+            App.showNotification('Attendance record saved successfully', 'success');
+        } catch (e) {
+            console.error('[Attendance] save:', e);
+            App.showNotification((e && e.message) || 'Failed to save attendance', 'error');
+        } finally {
+            this.closeAttendanceModal();
+        }
         await this.loadAttendanceForDate();
-        App.showNotification('Attendance record saved successfully', 'success');
     },
 
     async editAttendanceRecord(recordId) {

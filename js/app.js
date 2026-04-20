@@ -144,7 +144,7 @@ const App = {
                 }
                 if (next === this._attendanceLivePollFp) return;
                 this._attendanceLivePollFp = next;
-                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.load();
+                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
                 else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
                 else if (v === 'dashboard') await this.loadDashboard();
             } catch (e) {
@@ -400,7 +400,7 @@ const App = {
             try {
                 if (d.key === 'gtes_attendance') {
                     if (v === 'attendance' && typeof AttendanceModule !== 'undefined') {
-                        AttendanceModule.load().catch((e) => console.warn('[App] attendance refresh:', e && e.message));
+                        AttendanceModule.loadAttendanceForDate().catch((e) => console.warn('[App] attendance refresh:', e && e.message));
                     } else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') {
                         FilterAttendanceModule.load().catch((e) => console.warn('[App] filter attendance refresh:', e && e.message));
                     } else if (v === 'dashboard') {
@@ -425,7 +425,7 @@ const App = {
             try {
                 await DataManager.loadData(DataManager.KEYS.ATTENDANCE, { forceRefresh: true });
                 const v = this.currentView;
-                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.load();
+                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
                 else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
                 else if (v === 'dashboard') await this.loadDashboard();
             } catch (e) {
