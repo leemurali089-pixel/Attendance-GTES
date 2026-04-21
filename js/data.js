@@ -55,7 +55,12 @@ const DataManager = {
     },
 
     /** On load, union-merge local/cloud for append-heavy transactional collections only. */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'customers', 'purchases', 'gtes_employees']),
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_challans', 'customers', 'purchases', 'gtes_employees']),
+
+    /** Legacy code used 'challans'; Firebase/Electron + RTDB use KEYS.CHALLANS (gtes_challans). */
+    resolveStorageKey(key) {
+        return key === 'challans' ? this.KEYS.CHALLANS : key;
+    },
 
     _normalizeGtesUsersPayload(raw) {
         if (raw == null) return raw;
@@ -288,11 +293,73 @@ const DataManager = {
                 'inventory',
                 'gtes_services',
                 'inventoryTransactions',
-                'challans',
+                this.KEYS.CHALLANS,
                 'gtes_inventory_items',
                 'gtes_expenses'
             ]
         };
+    },
+
+    /**
+     * All storage keys we mirror from RTDB → local + should push live UI updates (see fileStorage.attachRealtimeListeners).
+     */
+    getRealtimeWatchKeys() {
+        const { core, background } = this.getDataLoadKeyGroups();
+        const extra = [
+            this.KEYS.WAREHOUSES,
+            this.KEYS.ACCOUNTS,
+            this.KEYS.JOURNAL_ENTRIES,
+            this.KEYS.TAX_SCHEMES,
+            this.KEYS.BANK_ALIAS,
+            this.KEYS.CHALLANS
+        ];
+        return [...new Set([...core, ...background, ...extra])];
+    },
+
+    /**
+     * Keys stored as JSON arrays (Firebase may use object-maps). Used by RTDB listeners.
+     */
+    _keysStoredAsArrays() {
+        return new Set([
+            this.KEYS.ATTENDANCE,
+            this.KEYS.EMPLOYEES,
+            this.KEYS.HOLIDAYS,
+            this.KEYS.ADVANCES,
+            this.KEYS.BONUS_PAYOUTS,
+            this.KEYS.EMAIL_LOGS,
+            this.KEYS.EXPENSE_CATEGORIES,
+            this.KEYS.ESTIMATES,
+            this.KEYS.PURCHASE_ORDERS,
+            this.KEYS.RECURRING_INVOICES,
+            this.KEYS.RECYCLE_BIN,
+            this.KEYS.INVENTORY_ITEMS,
+            this.KEYS.SERVICES,
+            this.KEYS.WAREHOUSES,
+            this.KEYS.ACCOUNTS,
+            this.KEYS.CHALLANS,
+            'gtes_challans',
+            'gtes_tasks',
+            'customers',
+            'invoices',
+            'vouchers',
+            'challans',
+            'purchases',
+            'inventory',
+            'inventoryTransactions',
+            'gtes_expenses'
+        ]);
+    },
+
+    /** Normalize a Realtime DB snapshot value into the shape DataManager.loadData() would cache. */
+    coerceRealtimeSnapshotValue(key, val) {
+        if (val == null) return null;
+        if (key === 'gtes_users' && typeof this._normalizeGtesUsersPayload === 'function') {
+            return this._normalizeGtesUsersPayload(val);
+        }
+        if (this._keysStoredAsArrays().has(key)) {
+            return typeof this.coerceJsonArray === 'function' ? this.coerceJsonArray(val) : val;
+        }
+        return val;
     },
 
     _clearAttendanceDerivedCaches() {
@@ -316,8 +383,17 @@ const DataManager = {
             this._clearAttendanceDerivedCaches();
             return;
         }
+        const sk = this.resolveStorageKey(key);
         delete this._cache[key];
+        delete this._cache[sk];
         this._trustedCacheKeys.delete(key);
+        this._trustedCacheKeys.delete(sk);
+        if (key === 'challans' || sk === this.KEYS.CHALLANS) {
+            delete this._cache['challans'];
+            delete this._cache[this.KEYS.CHALLANS];
+            this._trustedCacheKeys.delete('challans');
+            this._trustedCacheKeys.delete(this.KEYS.CHALLANS);
+        }
         if (key === this.KEYS.ATTENDANCE) {
             this._clearAttendanceDerivedCaches();
         }
@@ -532,98 +608,110 @@ const DataManager = {
 
     // Helper methods for storage operations
     async saveData(key, data, options = {}) {
+        const storageKey = this.resolveStorageKey(key);
         // Update memory cache for synchronous access
-        this._cache[key] = data;
-        this._trustedCacheKeys.add(key);
-        if (key === this.KEYS.ATTENDANCE) {
+        this._cache[storageKey] = data;
+        if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = data;
+        this._trustedCacheKeys.add(storageKey);
+        if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
+        if (storageKey === this.KEYS.ATTENDANCE) {
             this._clearAttendanceDerivedCaches();
         }
 
         // Try local storage cache (large JSON → IndexedDB only)
-        await this._mirrorToLocalOrIDB(key, data);
+        await this._mirrorToLocalOrIDB(storageKey, data);
 
         // Phase 5: Check for conflicts before saving
         if (window.SyncManager) {
-            const canProceed = await window.SyncManager.checkConflict(key);
+            const canProceed = await window.SyncManager.checkConflict(storageKey);
             if (!canProceed) return false;
         }
         let payload = data;
-        if (!options.skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
+        if (!options.skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
             try {
-                const cloudExisting = await FileStorage.loadData(key);
+                const cloudExisting = await FileStorage.loadData(storageKey);
                 if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
-                    payload = this._mergeRecordArraysById(cloudExisting, data, key);
-                    this._cache[key] = payload;
-                    await this._mirrorToLocalOrIDB(key, payload);
+                    payload = this._mergeRecordArraysById(cloudExisting, data, storageKey);
+                    this._cache[storageKey] = payload;
+                    if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = payload;
+                    await this._mirrorToLocalOrIDB(storageKey, payload);
                 }
             } catch (e) {
-                console.warn(`[DataManager] Pre-save merge skipped for '${key}':`, e);
+                console.warn(`[DataManager] Pre-save merge skipped for '${storageKey}':`, e);
             }
         }
-        const ok = await FileStorage.saveData(key, payload);
-        this._emitDataChangedEvent(key, 'saveData');
+        const ok = await FileStorage.saveData(storageKey, payload);
+        const emitKey = storageKey === this.KEYS.CHALLANS ? 'challans' : storageKey;
+        this._emitDataChangedEvent(emitKey, 'saveData');
         return ok;
     },
 
     async loadData(key, options = {}) {
+        const storageKey = this.resolveStorageKey(key);
         const forceRefresh = options.forceRefresh === true;
-        if (!forceRefresh && this._trustedCacheKeys.has(key)) {
-            return this._cache[key];
+        if (!forceRefresh && this._trustedCacheKeys.has(storageKey)) {
+            return this._cache[storageKey];
         }
 
         let localParsed = null;
         try {
-            const raw = localStorage.getItem(key);
+            let raw = localStorage.getItem(storageKey);
+            if (!raw && storageKey === this.KEYS.CHALLANS) raw = localStorage.getItem('challans');
             if (raw) localParsed = JSON.parse(raw);
         } catch (e) {
             localParsed = null;
         }
 
-        if (key === 'gtes_users') {
+        if (storageKey === 'gtes_users') {
             localParsed = this._normalizeGtesUsersPayload(localParsed);
         }
 
         let data;
         try {
-            data = await FileStorage.loadData(key);
+            data = await FileStorage.loadData(storageKey);
         } catch (err) {
-            console.error(`[DataManager] FileStorage.loadData('${key}') failed:`, err);
+            console.error(`[DataManager] FileStorage.loadData('${storageKey}') failed:`, err);
             data = null;
         }
 
-        if (key === 'gtes_users') {
+        if (storageKey === 'gtes_users') {
             data = this._normalizeGtesUsersPayload(data);
         }
 
         if (data === null || data === undefined) {
             data = localParsed;
             if (data === null || data === undefined) {
-                data = await this.getFromIDB(key);
+                let idbTry = await this.getFromIDB(storageKey);
+                if (!idbTry && storageKey === this.KEYS.CHALLANS) idbTry = await this.getFromIDB('challans');
+                data = idbTry;
             }
         } else if (
             Array.isArray(data) && data.length === 0 &&
             Array.isArray(localParsed) && localParsed.length > 0
         ) {
-            console.warn(`[DataManager] Cloud returned empty '${key}'; keeping ${localParsed.length} local record(s).`);
+            console.warn(`[DataManager] Cloud returned empty '${storageKey}'; keeping ${localParsed.length} local record(s).`);
             data = localParsed;
         } else if (
             Array.isArray(data) && data.length === 0 &&
-            this.MERGE_ON_LOAD_KEYS.has(key) &&
+            this.MERGE_ON_LOAD_KEYS.has(storageKey) &&
             (!Array.isArray(localParsed) || localParsed.length === 0)
         ) {
-            const idbArr = await this.getFromIDB(key);
+            let idbArr = await this.getFromIDB(storageKey);
+            if ((!idbArr || idbArr.length === 0) && storageKey === this.KEYS.CHALLANS) {
+                idbArr = await this.getFromIDB('challans');
+            }
             if (Array.isArray(idbArr) && idbArr.length > 0) {
-                console.warn(`[DataManager] Cloud returned empty '${key}'; keeping ${idbArr.length} record(s) from IndexedDB.`);
+                console.warn(`[DataManager] Cloud returned empty '${storageKey}'; keeping ${idbArr.length} record(s) from IndexedDB.`);
                 data = idbArr;
             }
         }
 
-        if (this.MERGE_ON_LOAD_KEYS.has(key) && Array.isArray(data)) {
+        if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
             const loc = Array.isArray(localParsed) ? localParsed : [];
-            const merged = this._mergeRecordArraysById(loc, data, key);
+            const merged = this._mergeRecordArraysById(loc, data, storageKey);
             if (merged.length !== data.length || merged.length !== loc.length) {
                 console.debug(
-                    `[DataManager] Merged '${key}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
+                    `[DataManager] Merged '${storageKey}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
                     '(Union by id; vouchers also use bookkeeperId when present — not a login error.)'
                 );
             }
@@ -631,27 +719,35 @@ const DataManager = {
         }
 
         if (data !== null && data !== undefined) {
-            // Update memory cache for synchronous getData calls
-            this._cache[key] = data;
-            this._trustedCacheKeys.add(key);
+            this._cache[storageKey] = data;
+            if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = data;
+            this._trustedCacheKeys.add(storageKey);
+            if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
 
-            await this._mirrorToLocalOrIDB(key, data);
+            await this._mirrorToLocalOrIDB(storageKey, data);
         }
         return data;
     },
 
     // Alias for loadData (used by delivery modules)
     getData(key) {
-        if (Object.prototype.hasOwnProperty.call(this._cache, key)) {
-            return this._cache[key];
+        const storageKey = this.resolveStorageKey(key);
+        if (Object.prototype.hasOwnProperty.call(this._cache, storageKey)) {
+            return this._cache[storageKey];
+        }
+        if (storageKey === this.KEYS.CHALLANS && Object.prototype.hasOwnProperty.call(this._cache, 'challans')) {
+            return this._cache['challans'];
         }
 
-        // Priority 2: LocalStorage
-        const data = localStorage.getItem(key);
-        if (!data) return null;
+        let raw = localStorage.getItem(storageKey);
+        if (!raw && storageKey === this.KEYS.CHALLANS) {
+            raw = localStorage.getItem('challans');
+        }
+        if (!raw) return null;
         try {
-            const parsed = JSON.parse(data);
-            this._cache[key] = parsed; // Populate cache
+            const parsed = JSON.parse(raw);
+            this._cache[storageKey] = parsed;
+            if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = parsed;
             return parsed;
         } catch (e) {
             return null;
@@ -660,27 +756,30 @@ const DataManager = {
 
     // Synchronous saveData wrapper for delivery modules  
     saveDataSync(key, value) {
-        this._cache[key] = value; // Always update memory cache for instant access
-        this._trustedCacheKeys.add(key);
-        if (key === this.KEYS.ATTENDANCE) {
+        const storageKey = this.resolveStorageKey(key);
+        this._cache[storageKey] = value;
+        if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = value;
+        this._trustedCacheKeys.add(storageKey);
+        if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
+        if (storageKey === this.KEYS.ATTENDANCE) {
             this._clearAttendanceDerivedCaches();
         }
         try {
             const s = JSON.stringify(value);
             if (s.length > this.LOCALSTORAGE_JSON_MAX_CHARS) {
-                try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
-                this.saveToIDB(key, value).catch(() => {});
+                try { localStorage.removeItem(storageKey); } catch (_) { /* ignore */ }
+                this.saveToIDB(storageKey, value).catch(() => {});
             } else {
-                localStorage.setItem(key, s);
+                localStorage.setItem(storageKey, s);
             }
-            this._emitDataChangedEvent(key, 'saveDataSync');
-            // Also trigger async save for file storage
+            const emitKey = storageKey === this.KEYS.CHALLANS ? 'challans' : storageKey;
+            this._emitDataChangedEvent(emitKey, 'saveDataSync');
             this.saveData(key, value).catch(err => console.error('Async save error:', err));
             return true;
         } catch (e) {
             if (e.name === 'QuotaExceededError' || e.code === 22) {
-                console.warn(`[DataManager] LocalStorage quota exceeded for ${key}. Saving to Fallbacks.`);
-                this.saveToIDB(key, value);
+                console.warn(`[DataManager] LocalStorage quota exceeded for ${storageKey}. Saving to Fallbacks.`);
+                this.saveToIDB(storageKey, value);
                 this.saveData(key, value).catch(err => console.error('Async save error:', err));
                 return true; // Still success because we handled it
             }

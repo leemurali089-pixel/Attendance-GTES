@@ -1284,6 +1284,77 @@ a:hover {
     font-weight: 600;
 }
 
+/* Striped tables: opening balance / period rows must stay readable (Bootstrap stripe vars fight .table-secondary). */
+[data-theme="dark"] .table.table-dark.table-striped > tbody > tr.gtes-ledger-opening-row > td,
+[data-theme="dark"] .table.table-dark > tbody > tr.gtes-ledger-opening-row > td {
+    color: #f8fafc !important;
+    background-color: rgba(71, 85, 105, 0.55) !important;
+    --bs-table-accent-bg: transparent;
+    --bs-table-striped-bg: transparent;
+}
+
+[data-theme="dark"] .table.table-dark > tbody > tr.gtes-ledger-opening-row td strong,
+[data-theme="dark"] .table.table-dark > tbody > tr.gtes-ledger-opening-row .text-end {
+    color: #f8fafc !important;
+}
+
+/* Business Analytics — alert list: body text on colored Bootstrap alerts (dark red bg + default muted = invisible). */
+[data-theme="dark"] .gtes-analytics-alert.alert-danger {
+    background-color: rgba(127, 29, 29, 0.65) !important;
+    border-color: rgba(248, 113, 113, 0.35) !important;
+    color: #fecaca !important;
+}
+
+[data-theme="dark"] .gtes-analytics-alert.alert-danger .gtes-analytics-alert-msg,
+[data-theme="dark"] .gtes-analytics-alert.alert-danger small,
+[data-theme="dark"] .gtes-analytics-alert.alert-danger .text-muted {
+    color: #fecaca !important;
+}
+
+[data-theme="dark"] .gtes-analytics-alert.alert-warning {
+    background-color: rgba(120, 53, 15, 0.55) !important;
+    border-color: rgba(251, 191, 36, 0.4) !important;
+    color: #fef3c7 !important;
+}
+
+[data-theme="dark"] .gtes-analytics-alert.alert-warning .gtes-analytics-alert-msg,
+[data-theme="dark"] .gtes-analytics-alert.alert-warning small {
+    color: #fef3c7 !important;
+}
+
+/* Business Analytics — clickable summary cards */
+.gtes-analytics-summary-card {
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+}
+
+.gtes-analytics-summary-card:hover {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45);
+    transform: translateY(-1px);
+}
+
+.gtes-analytics-summary-card--active {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.75);
+}
+
+.gtes-alert-clickable {
+    cursor: pointer;
+}
+
+.gtes-alert-clickable:hover {
+    filter: brightness(1.08);
+}
+
+.gtes-scroll-flash {
+    animation: gtesScrollFlash 1.2s ease-out 1;
+}
+
+@keyframes gtesScrollFlash {
+    0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.8); }
+    40% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.35); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
 /* Filter Attendance Sticky Header */
 .filter-attendance-sticky-header {
     position: sticky;
@@ -2579,8 +2650,19 @@ footer p {
     color: #cbd5e1 !important;
 }
 
-[data-theme="dark"] #analyticsView .gtes-analytics-alert .gtes-analytics-alert-msg {
-    color: #1e293b !important;
+/* Do NOT use dark slate (#1e293b) on alert-danger / alert-warning — it hid item names under "Out of Stock". */
+[data-theme="dark"] #analyticsView .gtes-analytics-alert.alert-danger .gtes-analytics-alert-msg,
+[data-theme="dark"] #analyticsView .gtes-analytics-alert.alert-warning .gtes-analytics-alert-msg {
+    color: #fecaca !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-alert.alert-danger strong,
+[data-theme="dark"] #analyticsView .gtes-analytics-alert.alert-warning strong {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] #analyticsView .gtes-analytics-alert:not(.alert-danger):not(.alert-warning) .gtes-analytics-alert-msg {
+    color: #e2e8f0 !important;
 }
 
 [data-theme="light"] #analyticsView .gtes-analytics-alert .gtes-analytics-alert-msg {

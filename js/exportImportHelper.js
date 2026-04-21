@@ -521,7 +521,9 @@ const ExportImportHelper = {
 
                 await DataManager.saveData(DataManager.KEYS.EXPENSES, existingExpenses);
                 App.showNotification(`Successfully imported ${count} purchase invoices`, 'success');
-                if (window.DeliveryUI) DeliveryUI.loadPurchases();
+                if (window.InvoicesUI && typeof InvoicesUI.updatePurchasesTable === 'function' && document.getElementById('purchasesTableContainer')) {
+                    InvoicesUI.updatePurchasesTable();
+                }
                 break;
 
             case 'customers':

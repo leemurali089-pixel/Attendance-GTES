@@ -19,7 +19,9 @@ const UserManager = {
         MANAGE_SETTINGS: 'MANAGE_SETTINGS',
         MANAGE_USERS: 'MANAGE_USERS',
         MANAGE_HOLIDAYS: 'MANAGE_HOLIDAYS',
-        MANAGE_ADVANCES: 'MANAGE_ADVANCES'
+        MANAGE_ADVANCES: 'MANAGE_ADVANCES',
+        /** Gmail: Mail, PO Queue, Bank Mail (uses OAuth configured once in Admin). */
+        ACCESS_MAIL: 'ACCESS_MAIL'
     },
 
     // Initialize users
@@ -53,6 +55,20 @@ const UserManager = {
             if (updated) {
                 await this.saveUsers(users);
                 console.log('Migrated existing users to include VIEW_DASHBOARD permission');
+            }
+
+            // Migration: grant Mail / PO / Bank Mail access so behavior matches pre-permission builds
+            let mailMigrated = false;
+            for (const user of users) {
+                if (!user.permissions) continue;
+                if (!user.permissions.includes(this.PERMISSIONS.ACCESS_MAIL)) {
+                    user.permissions.push(this.PERMISSIONS.ACCESS_MAIL);
+                    mailMigrated = true;
+                }
+            }
+            if (mailMigrated) {
+                await this.saveUsers(users);
+                console.log('Migrated users to include ACCESS_MAIL (Gmail features)');
             }
         }
     },

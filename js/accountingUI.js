@@ -69,11 +69,16 @@ const AccountingUI = {
                     </div>
                     <!-- Purchases -->
                     <div class="col-md-4">
-                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="App.showView('purchases')" style="cursor:pointer">
-                             <div class="card-body text-center p-4">
+                        <div class="card bg-dark border-secondary h-100 hover-lift">
+                             <div class="card-body text-center p-4" onclick="App.showView('purchases')" style="cursor:pointer" role="button">
                                 <i class="bi bi-cart-check text-warning fs-1 mb-3"></i>
                                 <h4 class="card-title">Purchases</h4>
                                 <p class="text-muted small">Purchase Bills</p>
+                            </div>
+                            <div class="card-footer bg-transparent border-secondary pt-0 pb-3">
+                                <button type="button" class="btn btn-sm btn-success w-100" onclick="event.stopPropagation(); InvoicesUI.showCreateModal('purchase-gst');">
+                                    <i class="bi bi-plus-circle me-1"></i> Record purchase
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -94,16 +99,6 @@ const AccountingUI = {
                                 <i class="bi bi-truck text-primary fs-1 mb-3"></i>
                                 <h4 class="card-title">Challans</h4>
                                 <p class="text-muted small">DC & SC History</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Trial Balance/Reports -->
-                    <div class="col-md-4">
-                        <div class="card bg-dark border-secondary h-100 hover-lift" onclick="AccountingUI.showTrialBalance()" style="cursor:pointer">
-                             <div class="card-body text-center p-4">
-                                <i class="bi bi-calculator text-danger fs-1 mb-3"></i>
-                                <h4 class="card-title">Reports</h4>
-                                <p class="text-muted small">Trial Balance</p>
                             </div>
                         </div>
                     </div>
@@ -155,6 +150,8 @@ const AccountingUI = {
                 low(tx.v_type).includes('debit') && low(tx.v_type).includes('note') ||
                 low(tx.v_type).includes('purchase') && low(tx.v_type).includes('return')
             );
+            const isDcChallan = isInv && typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isDcStyleSalesInvoice === 'function'
+                && InvoiceManager.isDcStyleSalesInvoice(tx);
             const party = (() => {
                 if (isInv) {
                     const candidates = [tx.customerName, tx.accountName, tx.partyName, tx.customerAccountName, tx.customer];
@@ -169,10 +166,10 @@ const AccountingUI = {
                 return tx.customerName || tx.accountName || tx.partyName || tx.customerId;
             })();
             const badgeClass = isInv
-                ? (isCreditNote ? 'bg-secondary' : 'bg-primary')
+                ? (isCreditNote ? 'bg-secondary' : (isDcChallan ? 'bg-info' : 'bg-primary'))
                 : (isPur ? (isDebitNote ? 'bg-secondary' : 'bg-warning text-dark') : (tx.type === 'receipt' ? 'bg-success' : 'bg-danger'));
             const typeLabel = (isInv
-                ? (isCreditNote ? 'SALES RETURN' : 'INVOICE')
+                ? (isCreditNote ? 'SALES RETURN' : (isDcChallan ? 'DELIVERY CHALLAN' : 'INVOICE'))
                 : (isPur ? (isDebitNote ? 'PURCHASE RETURN' : 'PURCHASE') : (tx.type || 'Voucher').toUpperCase()));
             const amount = parseFloat(tx.total || tx.amount || 0).toFixed(2);
             const viewFunc = isInv ? `InvoicesUI.previewInvoice` : (isPur ? `InvoicesUI.previewPurchase` : `VouchersUI.previewVoucher`);

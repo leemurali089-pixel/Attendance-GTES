@@ -1118,6 +1118,16 @@ const MailUI = (() => {
         };
     }
 
+    async function canConfigureGmailOAuth() {
+        try {
+            if (typeof UserManager === 'undefined') return true;
+            return await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
+                await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_USERS);
+        } catch {
+            return false;
+        }
+    }
+
     async function openSettings() {
         if (!isGmailAvailable()) {
             App.showNotification('Gmail Settings are available in the desktop app only. Install the desktop build to connect Gmail.', 'info');
@@ -1127,17 +1137,16 @@ const MailUI = (() => {
         const status = await window.electronAPI.gmail.status();
         const s = status.data || {};
         const loaded = cur.data || {};
+        const canOAuth = await canConfigureGmailOAuth();
+
         const modal = document.createElement('div');
         modal.className = 'modal fade';
-        modal.innerHTML = `
-          <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content">
-              <div class="modal-header"><h5 class="modal-title"><i class="bi bi-gear"></i> Gmail Settings</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
-              <div class="modal-body">
+        const adminBlock = `
                 <div class="alert alert-info small">
-                  Create a <b>Desktop app</b> OAuth client at
+                  <strong>Administrator:</strong> Create a <b>Desktop app</b> OAuth client at
                   <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>,
-                  enable the <b>Gmail API</b>, add yourself as a Test user in the OAuth consent screen, then paste the Client ID and Secret below.
+                  enable the <b>Gmail API</b>, add test users on the OAuth consent screen, then paste <b>Client ID</b> and <b>Secret</b> here once.
+                  Other users with Mail access will <b>not</b> see these fields — they only use <b>Connect Gmail</b>.
                 </div>
                 <div class="mb-2"><label class="form-label">Client ID</label>
                   <input id="gClientId" class="form-control" value="${esc(loaded.client_id || '')}" placeholder="xxxxxxxxxx.apps.googleusercontent.com"></div>
@@ -1145,6 +1154,23 @@ const MailUI = (() => {
                   <input id="gClientSecret" type="password" class="form-control" placeholder="${loaded.has_client_secret ? '•••••••• (saved)' : ''}"></div>
                 <div class="d-flex gap-2 align-items-center mt-3">
                   <button class="btn btn-primary" id="gSaveCreds">Save credentials</button>
+                </div>`;
+        const userBlock = `
+                <div class="alert alert-secondary small mb-2">
+                  Gmail OAuth is configured by an <strong>administrator</strong> in <strong>Admin → Gmail Integration</strong>.
+                  You only need to click <b>Connect Gmail</b> to sign in with Google on this computer — no Client ID or Secret.
+                </div>
+                ${!s.hasCredentials ? `<div class="alert alert-warning small mb-0">
+                  OAuth is not set up on this PC yet. Ask an administrator to open <b>Admin</b>, paste the Google Client ID and Secret once, then you can connect.
+                </div>` : ''}`;
+
+        modal.innerHTML = `
+          <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header"><h5 class="modal-title"><i class="bi bi-gear"></i> Gmail</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+              <div class="modal-body">
+                ${canOAuth ? adminBlock : userBlock}
+                <div class="d-flex gap-2 align-items-center mt-3 flex-wrap">
                   <button class="btn btn-success" id="gLogin" ${s.hasCredentials ? '' : 'disabled'}><i class="bi bi-google"></i> Connect Gmail</button>
                   <button class="btn btn-outline-danger" id="gLogout" ${s.isLoggedIn ? '' : 'disabled'}>Disconnect</button>
                 </div>
@@ -1165,20 +1191,23 @@ const MailUI = (() => {
         m.show();
         modal.addEventListener('hidden.bs.modal', () => modal.remove());
 
-        modal.querySelector('#gSaveCreds').onclick = async () => {
-            const client_id = modal.querySelector('#gClientId').value.trim();
-            const secretInput = modal.querySelector('#gClientSecret').value;
-            const creds = { client_id };
-            if (secretInput) creds.client_secret = secretInput;
-            if (!client_id) { modal.querySelector('#gStatus').innerHTML = '<span class="text-danger">Client ID is required.</span>'; return; }
-            if (!secretInput && !loaded.has_client_secret) {
-                modal.querySelector('#gStatus').innerHTML = '<span class="text-danger">Please paste the Client Secret at least once.</span>';
-                return;
-            }
-            const r = await window.electronAPI.gmail.saveCredentials(creds);
-            modal.querySelector('#gStatus').textContent = r.success ? 'Credentials saved.' : ('Error: ' + r.error);
-            modal.querySelector('#gLogin').disabled = !r.success;
-        };
+        const saveBtn = modal.querySelector('#gSaveCreds');
+        if (saveBtn) {
+            saveBtn.onclick = async () => {
+                const client_id = modal.querySelector('#gClientId').value.trim();
+                const secretInput = modal.querySelector('#gClientSecret').value;
+                const creds = { client_id };
+                if (secretInput) creds.client_secret = secretInput;
+                if (!client_id) { modal.querySelector('#gStatus').innerHTML = '<span class="text-danger">Client ID is required.</span>'; return; }
+                if (!secretInput && !loaded.has_client_secret) {
+                    modal.querySelector('#gStatus').innerHTML = '<span class="text-danger">Please paste the Client Secret at least once.</span>';
+                    return;
+                }
+                const r = await window.electronAPI.gmail.saveCredentials(creds);
+                modal.querySelector('#gStatus').textContent = r.success ? 'Credentials saved.' : ('Error: ' + r.error);
+                modal.querySelector('#gLogin').disabled = !r.success;
+            };
+        }
         modal.querySelector('#gLogin').onclick = async () => {
             modal.querySelector('#gStatus').textContent = 'Opening Google consent in your browser…';
             const r = await window.electronAPI.gmail.login();

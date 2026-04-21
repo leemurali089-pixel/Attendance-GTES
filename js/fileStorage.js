@@ -54,31 +54,27 @@ const FileStorage = {
         const DM = window.DataManager;
         if (!DM || !DM.KEYS) return;
 
-        const watchKeys = [
-            DM.KEYS.ATTENDANCE,
-            DM.KEYS.EMPLOYEES,
-            'gtes_users'
-        ];
+        const watchKeys = typeof DM.getRealtimeWatchKeys === 'function'
+            ? DM.getRealtimeWatchKeys()
+            : [DM.KEYS.ATTENDANCE, DM.KEYS.EMPLOYEES, 'gtes_users'];
 
         const onRemote = (key, snap) => {
             try {
                 if (!snap.exists()) {
                     DM.invalidateDataCache(key);
-                    if (key === DM.KEYS.ATTENDANCE) {
-                        DM._cache[key] = [];
-                    } else if (key === DM.KEYS.EMPLOYEES) {
-                        DM._cache[key] = [];
-                    } else if (key === 'gtes_users') {
-                        DM._cache[key] = [];
+                    const arrKeys = typeof DM._keysStoredAsArrays === 'function' ? DM._keysStoredAsArrays() : null;
+                    let emptyMirror = null;
+                    if (key === 'gtes_users' || (arrKeys && arrKeys.has(key))) {
+                        emptyMirror = [];
                     } else {
-                        DM._cache[key] = null;
+                        emptyMirror = null;
                     }
+                    DM._cache[key] = emptyMirror;
                     DM._trustedCacheKeys.add(key);
                     if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
                         DM._clearAttendanceDerivedCaches();
                     }
                     DM._emitDataChangedEvent(key, 'firebase-listener');
-                    const emptyMirror = DM._cache[key];
                     if (window.electronAPI) {
                         const payload = emptyMirror == null ? {} : emptyMirror;
                         FileStorage.markMirrorWriteFromRtdb(key);
@@ -99,18 +95,19 @@ const FileStorage = {
                 // Do not invalidate before assigning: clearing the cache lets a concurrent loadData()
                 // fall through to Electron/local JSON and repopulate stale rows before this write lands.
                 const val = snap.val();
-                let toStore = val;
-                if (key === DM.KEYS.ATTENDANCE || key === DM.KEYS.EMPLOYEES) {
-                    toStore = typeof DM.coerceJsonArray === 'function' ? DM.coerceJsonArray(val) : val;
-                } else if (key === 'gtes_users' && typeof DM._normalizeGtesUsersPayload === 'function') {
-                    toStore = DM._normalizeGtesUsersPayload(val);
-                }
+                const toStore = typeof DM.coerceRealtimeSnapshotValue === 'function'
+                    ? DM.coerceRealtimeSnapshotValue(key, val)
+                    : val;
                 DM._cache[key] = toStore;
+                if (DM.KEYS && key === DM.KEYS.CHALLANS) {
+                    DM._cache['challans'] = toStore;
+                }
                 DM._trustedCacheKeys.add(key);
                 if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
                     DM._clearAttendanceDerivedCaches();
                 }
-                DM._emitDataChangedEvent(key, 'firebase-listener');
+                const emitKey = DM.KEYS && key === DM.KEYS.CHALLANS ? 'challans' : key;
+                DM._emitDataChangedEvent(emitKey, 'firebase-listener');
 
                 // Electron: keep local JSON in sync with RTDB so loadData() + file watcher never
                 // re-merge stale on-disk rows over fresher cloud edits from another device.

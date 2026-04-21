@@ -2463,6 +2463,19 @@ const VouchersUI = {
                 ? CustomerManager.resolvePartyId({ customerId, customerName: name })
                 : '');
 
+        if (!(name || '').toString().trim()) {
+            App.showNotification('Customer or vendor name is required.', 'error');
+            this._saveVoucherInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
+            return;
+        }
+        if (!found || !customerId) {
+            App.showNotification('Select a saved customer or vendor from the list (add them under Customers first).', 'error');
+            this._saveVoucherInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
+            return;
+        }
+
         const linkedJson = formData.get('linkedInvoicesJSON');
         const linkedInvoices = linkedJson ? JSON.parse(linkedJson) : [];
         const allocatedAmount = parseFloat(formData.get('amount')) || 0;
@@ -2485,6 +2498,7 @@ const VouchersUI = {
         const allocJson = formData.get('linkedAllocationsJSON');
         const allocations = allocJson ? JSON.parse(allocJson) : [];
 
+        const pm = String(formData.get('paymentMode') || 'cash').toLowerCase();
         const data = {
             id: formData.get('voucherId'),
             type: formData.get('type'),
@@ -2494,6 +2508,8 @@ const VouchersUI = {
             partyId: partyId || '',
             amount: allocatedAmount,
             paymentMode: formData.get('paymentMode'),
+            /** Book Keeper style: bank vouchers post to Bank A/Cs; cash to Cash-in-hand */
+            contraLedgerGroup: pm === 'bank' ? 'Bank A/Cs' : 'Cash-in-hand',
             referenceId: formData.get('refNo'),
             linkedInvoiceId: linkedInvoices.length > 0 ? linkedInvoices[0] : null, // Legacy support
             linkedInvoices: linkedInvoices, // New array support

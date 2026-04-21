@@ -6,7 +6,8 @@ const BookKeeperSync = {
     config: {
         autoSync: true,
         backupPath: null, // User selected path to .db file
-        syncInterval: 30000, // 30 seconds
+        /** Poll backup file mtime less often to avoid IPC + main-thread work competing with cloud sync / UI. */
+        syncInterval: 60000, // 60 seconds
         lastModified: 0
     },
 
@@ -81,6 +82,8 @@ const BookKeeperSync = {
 
     intervalId: null,
     _importInProgress: false,
+    /** One stat check at a time (interval does not await). */
+    _fileStatInFlight: false,
 
     init() {
         console.log('Initializing BookKeeper Sync Service...');
@@ -200,6 +203,14 @@ const BookKeeperSync = {
             console.warn('Sync requires Electron context');
             return;
         }
+        // While a full import runs, skip polling — avoids stacked IPC and keeps RTDB / other work smoother.
+        if (this._importInProgress) {
+            return;
+        }
+        if (this._fileStatInFlight) {
+            return;
+        }
+        this._fileStatInFlight = true;
 
         try {
             const result = await window.electronAPI.getExternalFileStats(this.config.backupPath);
@@ -226,7 +237,7 @@ const BookKeeperSync = {
                     if (typeof App !== 'undefined' && App.showNotification) {
                         App.showNotification('Book Keeper backup update detected. Syncing...', 'info');
                     }
-                    await this.triggerSync();
+                    await this.triggerSync({ background: true });
                 }
             } else if (result.error) {
                 // Only log once to avoid console spam in intervals
@@ -242,7 +253,26 @@ const BookKeeperSync = {
             }
         } catch (error) {
             console.error('[Sync] Unexpected error during file check:', error);
+        } finally {
+            this._fileStatInFlight = false;
         }
+    },
+
+    /**
+     * Let the current frame paint and give a short idle slice before heavy BK read + sqlite work.
+     * Manual / rehydrate syncs skip this so they start immediately.
+     */
+    async _deferBackgroundImportStart() {
+        await new Promise((resolve) => {
+            const go = () => {
+                if (typeof requestAnimationFrame === 'function') {
+                    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 220)));
+                } else {
+                    setTimeout(resolve, 220);
+                }
+            };
+            setTimeout(go, 0);
+        });
     },
 
     /**
@@ -370,7 +400,8 @@ const BookKeeperSync = {
     async _runImportFromFile(fileOrBuffer, sourceLabel = 'BookKeeper Backup') {
         if (this._importInProgress) return;
         this._importInProgress = true;
-        
+        let progThrottleTimer = null;
+
         if (typeof SyncManager !== 'undefined') {
             SyncManager.updateStatus('syncing', 'Syncing with Book Keeper...');
             if (typeof SyncManager.setSyncProgress === 'function') {
@@ -391,10 +422,28 @@ const BookKeeperSync = {
             
             // 2. PHASE TWO: Actual Import
             // runFullImport executes the full data mapping.
+            let lastProgPct = -999;
             const stats = await BookKeeperImport.runFullImport(fileOrBuffer, {
                 onProgress: (percent, stage) => {
-                    if (typeof SyncManager !== 'undefined' && typeof SyncManager.setSyncProgress === 'function') {
-                        SyncManager.setSyncProgress(percent, stage || 'Syncing with Book Keeper...');
+                    if (typeof SyncManager === 'undefined' || typeof SyncManager.setSyncProgress !== 'function') {
+                        return;
+                    }
+                    const p = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+                    const msg = stage || 'Syncing with Book Keeper...';
+                    const flush = () => {
+                        progThrottleTimer = null;
+                        lastProgPct = p;
+                        SyncManager.setSyncProgress(p, msg);
+                    };
+                    if (progThrottleTimer) {
+                        clearTimeout(progThrottleTimer);
+                        progThrottleTimer = null;
+                    }
+                    // Always show start/end and large jumps; coalesce small steps to cut main-thread churn.
+                    if (p <= 3 || p >= 97 || Math.abs(p - lastProgPct) >= 5) {
+                        flush();
+                    } else {
+                        progThrottleTimer = setTimeout(flush, 110);
                     }
                 }
             });
@@ -438,8 +487,9 @@ const BookKeeperSync = {
                 App.showNotification(`Book Keeper sync complete: ${totalTouched} records imported or updated.`, 'success');
             }
 
-            // Refresh dashboards if currently visible
-            if (typeof App !== 'undefined') {
+            // Defer heavy list/dashboard refreshes so RTDB listeners and layout aren’t starved on the same tick as import.
+            const runDeferredViewRefresh = async () => {
+                if (typeof App === 'undefined') return;
                 if (App.currentView === 'accounting' && typeof AccountingUI !== 'undefined') {
                     AccountingUI.renderDashboard();
                 } else if (App.currentView === 'invoices' && typeof InvoicesUI !== 'undefined') {
@@ -447,6 +497,11 @@ const BookKeeperSync = {
                 } else if (App.currentView === 'vouchers' && typeof VouchersUI !== 'undefined') {
                     await VouchersUI.load?.();
                 }
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(() => { void runDeferredViewRefresh(); }, { timeout: 2000 });
+            } else {
+                setTimeout(() => { void runDeferredViewRefresh(); }, 100);
             }
         } catch (e) {
             console.error('[Sync] Safe Import Error:', e);
@@ -461,6 +516,10 @@ const BookKeeperSync = {
                 App.showNotification('Book Keeper sync failed: ' + e.message, 'error');
             }
         } finally {
+            if (progThrottleTimer) {
+                clearTimeout(progThrottleTimer);
+                progThrottleTimer = null;
+            }
             this._importInProgress = false;
             if (typeof SyncManager !== 'undefined') {
                 SyncManager.suppressConflictPrompts = false;
@@ -473,8 +532,9 @@ const BookKeeperSync = {
 
     /**
      * Trigger the full import process from the configured local path (Electron Only)
+     * @param {{ background?: boolean }} [options] — if background, delay start slightly so UI / cloud sync are not starved.
      */
-    async triggerSync() {
+    async triggerSync(options = {}) {
         if (!window.electronAPI || !window.electronAPI.readFileBuffer) {
             // Background polling only works on Desktop via Electron
             return;
@@ -485,7 +545,18 @@ const BookKeeperSync = {
                 throw new Error('No backup file path configured');
             }
 
-            console.log('[Sync] Triggering background import from:', this.config.backupPath);
+            if (this._importInProgress) {
+                return;
+            }
+
+            if (options.background) {
+                await this._deferBackgroundImportStart();
+                if (this._importInProgress) {
+                    return;
+                }
+            }
+
+            console.log('[Sync] Triggering import from:', this.config.backupPath, options.background ? '(background)' : '');
 
             // Read file buffer via Electron IPC
             const result = await window.electronAPI.readFileBuffer(this.config.backupPath);

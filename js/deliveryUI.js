@@ -749,9 +749,31 @@ const DeliveryUI = {
         this.addItemRow();
     },
 
+    /** When Create Invoice (fullscreen) is open, Bootstrap stacks the customer modal under it — fix z-order once. */
+    _ensureCustomerModalStacksOverInvoice() {
+        if (this._customerModalZIndexFixBound) return;
+        const modalEl = document.getElementById('customerModal');
+        if (!modalEl) return;
+        this._customerModalZIndexFixBound = true;
+        modalEl.addEventListener('shown.bs.modal', () => {
+            if (!document.getElementById('createInvoiceModal')?.classList.contains('show')) return;
+            modalEl.style.zIndex = '10060';
+            requestAnimationFrame(() => {
+                const backs = document.querySelectorAll('.modal-backdrop');
+                const last = backs[backs.length - 1];
+                if (last) last.style.zIndex = '10055';
+            });
+        });
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            modalEl.style.zIndex = '';
+            document.querySelectorAll('.modal-backdrop').forEach((b) => { b.style.zIndex = ''; });
+        });
+    },
+
     // Customer Management
     // Customer Management
-    showCustomerModal(customerId = null) {
+    showCustomerModal(customerId = null, options = {}) {
+        this._ensureCustomerModalStacksOverInvoice();
         this.editingCustomerId = customerId;
         const modalTitle = document.querySelector('#customerModal .modal-title');
         const saveBtn = document.querySelector('#customerModal .modal-footer .btn-primary');
@@ -778,10 +800,18 @@ const DeliveryUI = {
             if (document.getElementById('customerAddress')) document.getElementById('customerAddress').value = customer.address || '';
             if (document.getElementById('customerEmail')) document.getElementById('customerEmail').value = customer.email || '';
             if (document.getElementById('customerDCNumber')) document.getElementById('customerDCNumber').value = customer.customerDCNumber || '';
+            if (document.getElementById('customerState')) document.getElementById('customerState').value = customer.state || '';
+            if (document.getElementById('customerPincode')) document.getElementById('customerPincode').value = customer.pincode || '';
+            if (document.getElementById('customerPAN')) document.getElementById('customerPAN').value = customer.pan || '';
+            const obEl = document.getElementById('customerOpeningBalance');
+            if (obEl) obEl.value = customer.openingBalance != null ? customer.openingBalance : (customer.balance != null ? customer.balance : '');
         } else {
             if (modalTitle) modalTitle.innerHTML = `<i class="bi bi-person-plus-fill me-2"></i>Add New ${currentLabel}`;
             if (saveBtn) saveBtn.innerHTML = `<i class="bi bi-check-circle me-1"></i>Add ${currentLabel}`;
             document.getElementById('customerForm')?.reset();
+            if (options.prefillName && document.getElementById('customerName')) {
+                document.getElementById('customerName').value = options.prefillName;
+            }
         }
 
         const modal = new bootstrap.Modal(document.getElementById('customerModal'));
@@ -835,14 +865,25 @@ const DeliveryUI = {
 
     async saveCustomer() {
         try {
+            const obRaw = document.getElementById('customerOpeningBalance')?.value?.trim();
+            const openingBalance = obRaw === '' || obRaw === undefined ? undefined : parseFloat(obRaw);
             const customerData = {
                 gstin: document.getElementById('customerGSTIN')?.value.trim(),
                 name: document.getElementById('customerName')?.value.trim(),
                 phone: document.getElementById('customerPhone')?.value.trim(),
                 address: document.getElementById('customerAddress')?.value.trim(),
                 email: document.getElementById('customerEmail')?.value.trim(),
-                customerDCNumber: document.getElementById('customerDCNumber')?.value.trim()
+                customerDCNumber: document.getElementById('customerDCNumber')?.value.trim(),
+                state: document.getElementById('customerState')?.value.trim(),
+                pincode: document.getElementById('customerPincode')?.value.trim(),
+                pan: document.getElementById('customerPAN')?.value.trim(),
+                accountType: this.currentCustomerType === 'Supplier' ? 'Supplier'
+                    : (this.currentCustomerType === 'Other' ? 'Other' : 'Customer')
             };
+            if (openingBalance !== undefined && !Number.isNaN(openingBalance)) {
+                customerData.openingBalance = openingBalance;
+                customerData.balance = openingBalance;
+            }
 
             if (!customerData.name) {
                 throw new Error('Customer name is required');
@@ -872,6 +913,14 @@ const DeliveryUI = {
                     input.dispatchEvent(new Event('input'));
                 }
             });
+
+            if (typeof InvoicesUI !== 'undefined' && typeof InvoicesUI.afterPartySavedFromInvoice === 'function') {
+                InvoicesUI.afterPartySavedFromInvoice(customer);
+            }
+            const pv = document.getElementById('purchaseVendor');
+            if (pv && document.getElementById('purchaseEntryModal')?.classList.contains('show') && customer?.name) {
+                pv.value = customer.name;
+            }
 
             this.editingCustomerId = null;
         } catch (error) {
@@ -1769,7 +1818,9 @@ const DeliveryUI = {
         }
 
         const dataType = this.historyFilters.dataType;
-        const needsInvoices = ['all', 'invoice-gst', 'invoice-non-gst'].includes(dataType);
+        const needsInvoiceSplit = ['all', 'invoice-gst', 'invoice-non-gst'].includes(dataType);
+        const needsDcChallanMerge = dataType === 'challan-dc';
+        const needsInvoices = needsInvoiceSplit || needsDcChallanMerge;
         const needsJobCards = ['all', 'job-cards'].includes(dataType);
         const needsVouchers = ['all', 'vouchers', 'vouchers-receipt', 'vouchers-payment'].includes(dataType);
         const needsPurchases = ['all', 'purchases'].includes(dataType);
@@ -1784,7 +1835,7 @@ const DeliveryUI = {
         if (needsInvoices && typeof InvoiceManager !== 'undefined') {
             allInvoicesRaw = InvoiceManager.getAllInvoices() || [];
             dcInvoicesRaw = allInvoicesRaw.filter(inv => InvoiceManager.isDcStyleSalesInvoice(inv));
-            invoices = allInvoicesRaw.filter(i => !InvoiceManager.isDcStyleSalesInvoice(i));
+            invoices = needsInvoiceSplit ? allInvoicesRaw.filter(i => !InvoiceManager.isDcStyleSalesInvoice(i)) : [];
             const linkedDcInvoiceIds = new Set(deliveryChallans.map(c => c.invoiceId).filter(Boolean));
             dcInvoicesForHistory = dcInvoicesRaw.filter(inv => !linkedDcInvoiceIds.has(inv.id));
         }
@@ -1823,8 +1874,11 @@ const DeliveryUI = {
                 ...purchases
             ];
         } else if (dataType === 'challan-dc') {
-            // Fast path: challan screen should stay responsive even with very large invoice datasets.
-            data = deliveryChallans.map(c => ({ ...c, _source: 'challan' }));
+            // Challan rows + DC-style sales invoices (e.g. GTES/26-27/DC03) that exist only as invoices or are unlinked.
+            data = [
+                ...deliveryChallans.map(c => ({ ...c, _source: 'challan' })),
+                ...dcInvoicesForHistory.map(i => ({ ...i, _source: 'dc-invoice' }))
+            ];
         } else if (dataType === 'challan-sc') {
             data = challans.filter(c => c.type === 'service').map(c => ({ ...c, _source: 'challan' }));
         } else if (dataType === 'invoice-gst') {
@@ -2237,18 +2291,14 @@ const DeliveryUI = {
 
         if (source === 'invoice') {
             const inv = InvoiceManager.getAllInvoices().find(i => i.id === id);
-            if (inv && inv.challanId) {
-                const choice = confirm(`Delete this invoice?\n\nClick OK to also delete the linked Delivery Challan (${inv.challanId}).\nClick Cancel to ONLY delete the invoice and unlink the challan.`);
-                // Note: Standard confirm is limited. Let's use a more explicit dual-confirm if the user cancels the first one.
-                if (choice) {
-                    deleteChallanToo = true;
-                } else {
-                    if (!confirm("Delete ONLY the invoice? (The Delivery Challan will remain)")) return;
-                    deleteChallanToo = false;
-                }
-            } else {
-                if (!confirm(`Delete this invoice?`)) return;
+            const linked = (typeof DeliveryManager !== 'undefined')
+                ? DeliveryManager.getAllChallans().filter(c => c.invoiceId === id || c.id === inv?.challanId)
+                : [];
+            let msg = 'Delete this invoice?';
+            if (linked.length) {
+                msg = `Delete this invoice and ${linked.length} linked challan(s) (${linked.map(c => c.id).join(', ')})?`;
             }
+            if (!confirm(msg)) return;
         } else if (source === 'jobcard') {
             const challans = DeliveryManager.getAllChallans();
             const invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
@@ -2277,7 +2327,7 @@ const DeliveryUI = {
 
         try {
             if (source === 'challan') await DeliveryManager.deleteChallan(id);
-            else if (source === 'invoice') await InvoiceManager.deleteInvoice(id, deleteChallanToo);
+            else if (source === 'invoice') await InvoiceManager.deleteInvoice(id);
             else if (source === 'jobcard') {
                 await JobCardManager.deleteJobCard(id);
                 if (deleteChallanToo) {
@@ -2289,7 +2339,7 @@ const DeliveryUI = {
                         const invoices = InvoiceManager.getAllInvoices();
                         const linkedInvoices = invoices.filter(i => i.jobCardId === id);
                         for (let inv of linkedInvoices) {
-                            await InvoiceManager.deleteInvoice(inv.id, false);
+                            await InvoiceManager.deleteInvoice(inv.id);
                         }
                     }
                 }
@@ -2707,7 +2757,6 @@ const DeliveryUI = {
         document.getElementById('deliveryInventorySection')?.classList.add('d-none');
         document.getElementById('deliveryVouchersSection')?.classList.add('d-none');
         document.getElementById('deliveryServicesSection')?.classList.add('d-none');
-        document.getElementById('deliveryPurchasesSection')?.classList.add('d-none');
     },
 
     showChallanMenu() {
@@ -2727,7 +2776,9 @@ const DeliveryUI = {
 
     viewChallanType(type) {
         if (type === 'purchase') {
-            this.showSection('purchases');
+            if (typeof App !== 'undefined' && App.showView) {
+                App.showView('purchases');
+            }
             return;
         }
         this.historyFilters.dataType = type === 'delivery' ? 'challan-dc' : 'challan-sc';
@@ -2750,7 +2801,6 @@ const DeliveryUI = {
         document.getElementById('deliveryInventorySection')?.classList.add('d-none');
         document.getElementById('deliveryVouchersSection')?.classList.add('d-none');
         document.getElementById('deliveryServicesSection')?.classList.add('d-none');
-        document.getElementById('deliveryPurchasesSection')?.classList.add('d-none');
 
         switch (section) {
             case 'create':
@@ -2792,10 +2842,6 @@ const DeliveryUI = {
             case 'services':
                 document.getElementById('deliveryServicesSection')?.classList.remove('d-none');
                 this.loadServices();
-                break;
-            case 'purchases':
-                document.getElementById('deliveryPurchasesSection')?.classList.remove('d-none');
-                this.loadPurchases();
                 break;
         }
     },
@@ -3735,24 +3781,21 @@ const DeliveryUI = {
     },
 
     async deleteInvoice(id) {
-        if (confirm('Are you sure you want to delete this invoice? This will also remove its link from any associated challans.')) {
-            try {
-                // CASCADING DELETE LOGIC:
-                // Find challans linked to this invoice and unlink them (or delete them if preferred by user,
-                // but usually unlinking is safer unless specified. However, the plan said "Cascading deletion for Challans").
-                // "Cascading deletion" means if invoice is gone, challan is gone.
-                const challans = DeliveryManager.getAllChallans().filter(c => c.invoiceId === id);
-                challans.forEach(c => {
-                    DeliveryManager.deleteChallan(c.id);
-                });
-
-                await InvoiceManager.deleteInvoice(id);
-                App.showNotification('Invoice and linked challans deleted', 'success');
-                this.loadInvoices(); // Changed from loadHistory() to loadInvoices() to match context
-            } catch (error) {
-                console.error(error);
-                App.showNotification(error.message, 'error');
-            }
+        const inv = typeof InvoiceManager !== 'undefined' ? InvoiceManager.getInvoice(id) : null;
+        const linked = DeliveryManager.getAllChallans().filter(c => c.invoiceId === id || c.id === inv?.challanId);
+        let msg = 'Delete this invoice?';
+        if (linked.length) {
+            msg = `Delete this invoice and ${linked.length} linked challan(s)?`;
+        }
+        if (!confirm(msg)) return;
+        try {
+            await InvoiceManager.deleteInvoice(id);
+            App.showNotification('Invoice and linked challans deleted', 'success');
+            this.loadInvoices();
+            this.loadHistory();
+        } catch (error) {
+            console.error(error);
+            App.showNotification(error.message, 'error');
         }
     },
 
@@ -3834,7 +3877,10 @@ const DeliveryUI = {
             return;
         }
 
-        const typeLabel = invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst' ? 'TAX INVOICE' : 'BILL OF SUPPLY';
+        const isDc = typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(invoice);
+        const typeLabel = isDc
+            ? 'DELIVERY CHALLAN'
+            : (invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst' ? 'TAX INVOICE' : 'BILL OF SUPPLY');
 
         if (typeof InvoicesUI === 'undefined' || !InvoicesUI.getInvoiceElement) {
             App.showNotification('Invoice preview unavailable', 'error');
@@ -4267,16 +4313,21 @@ const DeliveryUI = {
     },
 
     recordNewPurchase() {
+        if (typeof InvoicesUI !== 'undefined' && InvoicesUI.showCreateModal) {
+            InvoicesUI.showCreateModal('purchase-gst');
+            return;
+        }
         const modalHtml = `
             <div class="modal fade" id="purchaseEntryModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content glass-panel text-white">
-                        <div class="modal-header border-secondary">
+                <div class="modal-dialog modal-fullscreen">
+                    <div class="modal-content glass-panel text-white d-flex flex-column h-100">
+                        <div class="modal-header border-secondary flex-shrink-0">
                             <h5 class="modal-title text-success"><i class="bi bi-bag-plus me-2"></i>Record New Purchase (Inward)</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body p-4">
-                            <form id="purchaseEntryForm">
+                        <div class="modal-body p-4 d-flex flex-column overflow-hidden flex-grow-1" style="min-height:0;">
+                            <form id="purchaseEntryForm" class="d-flex flex-column flex-grow-1" style="min-height:0;">
+                                <div class="flex-shrink-0">
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-6">
                                         <label class="form-label small text-muted">Purchase Date</label>
@@ -4297,8 +4348,10 @@ const DeliveryUI = {
                                         <input type="text" class="form-control" id="purchasePoNumber" placeholder="e.g. 1105">
                                     </div>
                                 </div>
-                                <div class="table-responsive mb-3">
-                                    <table class="table table-dark table-sm table-bordered border-secondary" id="purchaseItemsTable">
+                                </div>
+                                <label class="form-label small text-muted flex-shrink-0">Line items</label>
+                                <div class="table-responsive border border-secondary rounded flex-grow-1 mb-2 gtes-purchase-items-scroll" style="min-height:140px;overflow-y:auto;">
+                                    <table class="table table-dark table-sm table-bordered border-secondary mb-0" id="purchaseItemsTable">
                                         <thead>
                                             <tr class="small">
                                                 <th style="width: 45%">Item Description</th>
@@ -4328,11 +4381,11 @@ const DeliveryUI = {
                                             </tr>
                                         </tbody>
                                     </table>
-                                    <button type="button" class="btn btn-sm btn-outline-success" onclick="DeliveryUI.addPurchaseItemRow()">
-                                        <i class="bi bi-plus"></i> Add Item
-                                    </button>
                                 </div>
-                                <div class="card bg-dark border-secondary">
+                                <button type="button" class="btn btn-sm btn-outline-success flex-shrink-0 mb-3 align-self-start" onclick="DeliveryUI.addPurchaseItemRow()">
+                                    <i class="bi bi-plus"></i> Add Item
+                                </button>
+                                <div class="card bg-dark border-secondary flex-shrink-0 mt-auto">
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between mb-1 small">
                                             <span>Subtotal:</span>
@@ -4351,7 +4404,7 @@ const DeliveryUI = {
                                 </div>
                             </form>
                         </div>
-                        <div class="modal-footer border-secondary">
+                        <div class="modal-footer border-secondary flex-shrink-0">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                             <button type="button" class="btn btn-success px-4" onclick="DeliveryUI.saveNewPurchase()">
                                 <i class="bi bi-check-circle me-1"></i> Save Purchase Record
@@ -4376,7 +4429,31 @@ const DeliveryUI = {
         const form = document.getElementById('purchaseEntryForm');
         form.addEventListener('input', () => this.recalcPurchaseTotal());
 
+        const vInp = document.getElementById('purchaseVendor');
+        if (vInp) {
+            vInp.addEventListener('blur', () => {
+                setTimeout(() => this.maybePromptNewVendorForPurchase(vInp), 280);
+            });
+        }
+
         modal.show();
+    },
+
+    maybePromptNewVendorForPurchase(input) {
+        if (!input || !document.getElementById('purchaseEntryModal')?.classList.contains('show')) return;
+        const val = (input.value || '').trim();
+        if (!val) return;
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
+        const hit = customers.find(c =>
+            c.name && c.name.toLowerCase() === val.toLowerCase()
+        );
+        if (hit) {
+            if (input.value !== hit.name) input.value = hit.name;
+            return;
+        }
+        if (!confirm(`"${val}" is not in your supplier list.\n\nCreate as a new supplier and enter details?`)) return;
+        this.currentCustomerType = 'Supplier';
+        this.showCustomerModal(null, { prefillName: val });
     },
 
     addPurchaseItemRow() {
@@ -4434,6 +4511,15 @@ const DeliveryUI = {
 
         if (!vendor || !date) {
             App.showNotification('Please fill vendor name and date', 'error');
+            return;
+        }
+
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        const supplierHit = customers.find(c =>
+            (c.name || '').trim().toLowerCase() === vendor.trim().toLowerCase()
+        );
+        if (!supplierHit) {
+            App.showNotification('Vendor must be a saved supplier. Add them under Customers (Supplier) or pick from your list.', 'error');
             return;
         }
 
@@ -4995,67 +5081,12 @@ const DeliveryUI = {
     },
 
     loadPurchases() {
-        const container = document.getElementById('purchasesContainer');
-        if (!container) return;
-
-        const allExpenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
-        const purchases = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase'));
-
-        container.innerHTML = `
-            <div class="card glass-panel border-0 mb-4">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h4 class="mb-0 text-success"><i class="bi bi-bag-check me-2"></i>Purchase Records (Inward)</h4>
-                        <button class="btn btn-success" onclick="DeliveryUI.recordNewPurchase()">
-                            <i class="bi bi-plus-circle me-1"></i> Record New Purchase
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="table-responsive">
-                <table class="table table-dark table-hover table-sm border-secondary align-middle">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Vendor / Description</th>
-                            <th>Total Amount</th>
-                            <th>Items</th>
-                            <th>Source</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${purchases.length === 0 ? '<tr><td colspan="6" class="text-center p-5 text-muted">No purchase records found. Imports from BookKeeper will appear here.</td></tr>' :
-                purchases.sort((a, b) => new Date(b.date) - new Date(a.date)).map(p => {
-                    const vendor = p.description.split(':')[0] || 'Unknown Vendor';
-                    return `
-                                <tr>
-                                    <td>${DataManager.formatDateDisplay(p.date)}</td>
-                                    <td>
-                                        <div class="fw-bold text-success">${vendor}</div>
-                                        <small class="text-muted">${p.description}</small>
-                                    </td>
-                                    <td class="fw-bold">₹${(p.amount || 0).toFixed(2)}</td>
-                                    <td>
-                                        ${p.items && p.items.length > 0 ? `<span class="badge bg-secondary">${p.items.length} items</span>` : '<span class="text-muted small">No item detail</span>'}
-                                    </td>
-                                    <td><span class="badge bg-dark border border-secondary">${p.source === 'bookkeeper' ? 'BK Import' : 'Local'}</span></td>
-                                    <td class="text-end">
-                                        <button class="btn btn-sm btn-outline-info" onclick="DeliveryUI.viewPurchaseDetails('${p.id}')">
-                                            <i class="bi bi-eye"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-danger" onclick="DeliveryUI.deleteGenericRecord('expense', '${p.id}')">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                            `;
-                }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+        if (typeof App !== 'undefined' && App.showView) {
+            App.showView('purchases');
+        }
+        if (typeof InvoicesUI !== 'undefined' && InvoicesUI.renderPurchasesList) {
+            InvoicesUI.renderPurchasesList();
+        }
     },
 
 };

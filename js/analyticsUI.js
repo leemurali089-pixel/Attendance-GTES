@@ -8,6 +8,15 @@ const AnalyticsUI = {
     currentSection: 'dashboard',
     selectedYear: new Date().getFullYear(),
     selectedMonth: new Date().getMonth(),
+    /** 'month' = calendar month, 'fy' = full Indian financial year (Apr–Mar) */
+    dashboardMode: 'month',
+    /** Indian FY start year (April), e.g. 2025 for FY 2025–26 — used when dashboardMode === 'fy' */
+    selectedFyStart: null,
+
+    /** Due Reminders: when set, only that bucket's table is shown (cards stay to switch). */
+    _reminderFilter: null,
+    /** Stock Reports: filter full table — all | low | out | value (sort by value). */
+    _stockFilter: null,
 
     /** Full analytics sub-nav (same markup as former index.html block). */
     _SUB_NAV_HTML: `<ul class="nav nav-pills mb-4 flex-wrap gap-2 p-2 rounded-3 border border-secondary border-opacity-25 bg-dark bg-opacity-25" id="analyticsTabs" role="tablist" aria-label="Business analytics sections">
@@ -20,7 +29,113 @@ const AnalyticsUI = {
 </ul>`,
 
     init() {
+        if (typeof DataManager !== 'undefined' && DataManager.getFinancialYear) {
+            this.selectedFyStart = DataManager.getFinancialYear(new Date(), true).startYear;
+        } else {
+            const t = new Date();
+            this.selectedFyStart = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+        }
         console.log('AnalyticsUI initialized');
+    },
+
+    _ensureDashboardFyDefault() {
+        if (this.selectedFyStart != null) return;
+        if (typeof DataManager !== 'undefined' && DataManager.getFinancialYear) {
+            this.selectedFyStart = DataManager.getFinancialYear(new Date(), true).startYear;
+        } else {
+            const t = new Date();
+            this.selectedFyStart = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+        }
+    },
+
+    setDashboardMode(mode) {
+        this.dashboardMode = mode === 'fy' ? 'fy' : 'month';
+        this.renderDashboard();
+    },
+
+    onDashboardPeriodInput() {
+        const container = document.getElementById('analyticsContainer');
+        if (!container) return;
+        const modeEl = container.querySelector('[data-gtes-dashboard-mode]');
+        const monthEl = container.querySelector('[data-gtes-dashboard-month]');
+        const yearEl = container.querySelector('[data-gtes-dashboard-year]');
+        const fyEl = container.querySelector('[data-gtes-dashboard-fy-start]');
+        if (modeEl) this.dashboardMode = modeEl.value === 'fy' ? 'fy' : 'month';
+        if (monthEl) this.selectedMonth = parseInt(monthEl.value, 10);
+        if (yearEl) this.selectedYear = parseInt(yearEl.value, 10);
+        if (fyEl) this.selectedFyStart = parseInt(fyEl.value, 10);
+        this.renderDashboard();
+    },
+
+    _bindDashboardAlertClicks(container) {
+        const root = container.querySelector('[data-gtes-dashboard-alerts]');
+        if (!root || root.dataset.gtesAlertsBound === '1') return;
+        root.dataset.gtesAlertsBound = '1';
+        const open = (el) => {
+            const raw = el.getAttribute('data-gtes-invoice-id');
+            if (raw == null || raw === '') return;
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.previewInvoice) {
+                InvoicesUI.previewInvoice(raw);
+            }
+        };
+        root.addEventListener('click', (e) => {
+            const el = e.target.closest('[data-gtes-invoice-id]');
+            if (!el) return;
+            e.preventDefault();
+            open(el);
+        });
+        root.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const el = e.target.closest('[data-gtes-invoice-id]');
+            if (!el) return;
+            e.preventDefault();
+            open(el);
+        });
+    },
+
+    /** Re-run the active Business Analytics section after cloud/local data changes. */
+    refreshCurrentSection() {
+        const fn = {
+            dashboard: 'renderDashboard',
+            gst: 'renderGSTReports',
+            ledger: 'renderCustomerLedger',
+            stock: 'renderStockReports',
+            reminders: 'renderDueReminders',
+            import: 'renderDataImport'
+        }[this.currentSection || 'dashboard'];
+        if (fn && typeof this[fn] === 'function') {
+            try {
+                this[fn]();
+            } catch (e) {
+                console.warn('[AnalyticsUI] refreshCurrentSection:', e && e.message);
+            }
+        }
+    },
+
+    setReminderFilter(bucket) {
+        if (bucket && this._reminderFilter === bucket) {
+            this._reminderFilter = null;
+        } else {
+            this._reminderFilter = bucket || null;
+        }
+        this.renderDueReminders();
+    },
+
+    setStockFilter(mode) {
+        if (mode && this._stockFilter === mode) {
+            this._stockFilter = null;
+        } else {
+            this._stockFilter = mode || null;
+        }
+        this.renderStockReports();
+    },
+
+    scrollToGstSection(anchorId) {
+        const node = document.getElementById(anchorId);
+        if (!node) return;
+        node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        node.classList.add('gtes-scroll-flash');
+        setTimeout(() => node.classList.remove('gtes-scroll-flash'), 1400);
     },
 
     /**
@@ -61,9 +176,60 @@ const AnalyticsUI = {
         const container = document.getElementById('analyticsContainer');
         if (!container) return;
 
-        const data = BusinessAnalytics.getDashboardData();
+        this._ensureDashboardFyDefault();
+        const dashOpts = {
+            mode: this.dashboardMode,
+            year: this.selectedYear,
+            month: this.selectedMonth,
+            fyStartYear: this.selectedFyStart
+        };
+        const data = BusinessAnalytics.getDashboardData(dashOpts);
+
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const yNow = new Date().getFullYear();
+        const yearOpts = [];
+        for (let y = yNow - 8; y <= yNow + 2; y++) yearOpts.push(y);
+        const monthOpts = monthNames.map((nm, i) =>
+            `<option value="${i}"${i === this.selectedMonth ? ' selected' : ''}>${nm}</option>`
+        ).join('');
+        const yearOptsHtml = yearOpts.map(y =>
+            `<option value="${y}"${y === this.selectedYear ? ' selected' : ''}>${y}</option>`
+        ).join('');
+        const fyOptsHtml = yearOpts.map(y =>
+            `<option value="${y}"${y === this.selectedFyStart ? ' selected' : ''}>FY ${y}–${String(y + 1).slice(-2)}</option>`
+        ).join('');
+        const periodToolbar = `
+            <div class="row g-2 mb-3 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small text-muted mb-0">View</label>
+                    <select class="form-select form-select-sm" data-gtes-dashboard-mode
+                        onchange="AnalyticsUI.setDashboardMode(this.value)">
+                        <option value="month"${this.dashboardMode === 'month' ? ' selected' : ''}>Calendar month</option>
+                        <option value="fy"${this.dashboardMode === 'fy' ? ' selected' : ''}>Financial year</option>
+                    </select>
+                </div>
+                <div class="col-auto" style="${this.dashboardMode === 'fy' ? 'display:none' : ''}">
+                    <label class="form-label small text-muted mb-0">Month</label>
+                    <select class="form-select form-select-sm" data-gtes-dashboard-month
+                        onchange="AnalyticsUI.onDashboardPeriodInput()">${monthOpts}</select>
+                </div>
+                <div class="col-auto" style="${this.dashboardMode === 'fy' ? 'display:none' : ''}">
+                    <label class="form-label small text-muted mb-0">Year</label>
+                    <select class="form-select form-select-sm" data-gtes-dashboard-year
+                        onchange="AnalyticsUI.onDashboardPeriodInput()">${yearOptsHtml}</select>
+                </div>
+                <div class="col-auto" style="${this.dashboardMode === 'fy' ? '' : 'display:none'}">
+                    <label class="form-label small text-muted mb-0">Financial year</label>
+                    <select class="form-select form-select-sm" data-gtes-dashboard-fy-start
+                        onchange="AnalyticsUI.onDashboardPeriodInput()">${fyOptsHtml}</select>
+                </div>
+                <div class="col text-muted small align-self-center pt-2">
+                    ${data.periodSummary ? this.escapeHtml(data.periodSummary) : ''}
+                </div>
+            </div>`;
 
         container.innerHTML = `
+            ${periodToolbar}
             <div class="row g-4 mb-4">
                 <!-- Revenue Card -->
                 <div class="col-md-3">
@@ -71,7 +237,7 @@ const AnalyticsUI = {
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start">
                                 <div>
-                                    <p class="text-muted small mb-1">This Month Revenue</p>
+                                    <p class="text-muted small mb-1">${data.revenueCardLabel || 'Revenue'}</p>
                                     <h3 class="mb-0 text-success">₹${this.formatCurrency(data.revenue.currentMonth)}</h3>
                                 </div>
                                 <div class="bg-success bg-opacity-25 rounded-circle p-3">
@@ -82,7 +248,7 @@ const AnalyticsUI = {
                                 <span class="badge bg-${data.revenue.trend === 'up' ? 'success' : 'danger'} me-2">
                                     <i class="bi bi-arrow-${data.revenue.trend}"></i> ${Math.abs(data.revenue.changePercent)}%
                                 </span>
-                                <small class="text-muted">vs last month</small>
+                                <small class="text-muted">${data.revenueCompareHint || 'vs last period'}</small>
                             </div>
                         </div>
                     </div>
@@ -94,7 +260,7 @@ const AnalyticsUI = {
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start">
                                 <div>
-                                    <p class="text-muted small mb-1">This Month Expenses</p>
+                                    <p class="text-muted small mb-1">${data.expenseCardLabel || 'Expenses'}</p>
                                     <h3 class="mb-0 text-danger">₹${this.formatCurrency(data.expenses.currentMonth)}</h3>
                                 </div>
                                 <div class="bg-danger bg-opacity-25 rounded-circle p-3">
@@ -157,6 +323,7 @@ const AnalyticsUI = {
                     <div class="card glass-panel border-0 h-100">
                         <div class="card-header bg-transparent border-secondary">
                             <h6 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Monthly Cash Flow — FY ${data.cashFlowFyLabel || this.selectedYear}</h6>
+                            ${data.cashFlowChartHint ? `<div class="small text-muted mt-1">${this.escapeHtml(data.cashFlowChartHint)}</div>` : ''}
                         </div>
                         <div class="card-body">
                             <div id="cashFlowChart" style="height: 300px;">
@@ -173,14 +340,16 @@ const AnalyticsUI = {
                             <h6 class="mb-0"><i class="bi bi-bell me-2"></i>Alerts</h6>
                             <span class="badge bg-danger">${data.alerts.length}</span>
                         </div>
-                        <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
+                        <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;" data-gtes-dashboard-alerts>
                             ${data.alerts.length > 0 ? data.alerts.map(alert => `
-                                <div class="alert alert-${alert.type} mb-0 rounded-0 border-start border-4 py-2 px-3 gtes-analytics-alert">
+                                <div class="alert alert-${alert.type} mb-0 rounded-0 border-start border-4 py-2 px-3 gtes-analytics-alert ${alert.invoiceId ? 'gtes-alert-clickable' : ''}"
+                                    ${alert.invoiceId ? `role="button" tabindex="0" title="View invoice" data-gtes-invoice-id="${String(alert.invoiceId).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>
                                     <div class="d-flex align-items-start">
                                         <i class="bi ${alert.icon} me-2 mt-1"></i>
                                         <div class="flex-grow-1">
                                             <strong class="small">${alert.title}</strong>
                                             <p class="mb-0 small gtes-analytics-alert-msg">${alert.message}</p>
+                                            ${alert.invoiceId ? '<p class="mb-0 mt-1 small text-primary"><i class="bi bi-eye"></i> Click to open</p>' : ''}
                                         </div>
                                     </div>
                                 </div>
@@ -263,6 +432,7 @@ const AnalyticsUI = {
                 </div>
             </div>
         `;
+        this._bindDashboardAlertClicks(container);
     },
 
     /**
@@ -716,29 +886,41 @@ const AnalyticsUI = {
         content.innerHTML = `
             <div class="row g-3 mb-4">
                 <div class="col-md-4">
-                    <div class="card gtes-gst-metric-card border-secondary h-100">
+                    <div class="card gtes-gst-metric-card border-secondary h-100 gtes-analytics-summary-card" role="button" tabindex="0"
+                        title="Show GSTR-1 sales summary below"
+                        onclick="AnalyticsUI.scrollToGstSection('gtes-gst-anchor-gstr1')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.scrollToGstSection('gtes-gst-anchor-gstr1');}">
                         <div class="card-body">
                             <h6 class="gtes-gst-section-title mb-2"><i class="bi bi-graph-up-arrow me-2 text-success"></i>Total sales (GST)</h6>
                             <p class="gtes-gst-metric-value mb-1">₹${this.formatCurrency(salesPur.totalSales)}</p>
                             <small class="gtes-gst-small">${salesPur.invoiceCount} GST invoice(s) · ${salesPur.period}</small>
+                            <div class="small text-primary mt-2 mb-0"><i class="bi bi-arrow-down-circle"></i> View GSTR-1</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card gtes-gst-metric-card border-secondary h-100">
+                    <div class="card gtes-gst-metric-card border-secondary h-100 gtes-analytics-summary-card" role="button" tabindex="0"
+                        title="Show purchase & GSTR-3B below"
+                        onclick="AnalyticsUI.scrollToGstSection('gtes-gst-anchor-gstr3b')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.scrollToGstSection('gtes-gst-anchor-gstr3b');}">
                         <div class="card-body">
                             <h6 class="gtes-gst-section-title mb-2"><i class="bi bi-bag-check me-2 text-warning"></i>Total purchase</h6>
                             <p class="gtes-gst-metric-value mb-1">₹${this.formatCurrency(salesPur.totalPurchase)}</p>
                             <small class="gtes-gst-small">${salesPur.purchaseBillCount} bill(s) from <strong>purchases</strong> book (ITC rules: Purchase category, BookKeeper, local, or GST on vendor bills)</small>
+                            <div class="small text-primary mt-2 mb-0"><i class="bi bi-arrow-down-circle"></i> View GSTR-3B / ITC</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="card gtes-gst-metric-card border-secondary h-100">
+                    <div class="card gtes-gst-metric-card border-secondary h-100 gtes-analytics-summary-card" role="button" tabindex="0"
+                        title="Show HSN-wise table"
+                        onclick="AnalyticsUI.scrollToGstSection('gtes-gst-anchor-hsn')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.scrollToGstSection('gtes-gst-anchor-hsn');}">
                         <div class="card-body">
                             <h6 class="gtes-gst-section-title mb-2"><i class="bi bi-upc-scan me-2 text-info"></i>HSN report</h6>
                             <p class="gtes-gst-metric-value mb-1">${hsnRep.rows.length} HSN line(s)</p>
                             <small class="gtes-gst-small">GST invoices only — see table below</small>
+                            <div class="small text-primary mt-2 mb-0"><i class="bi bi-arrow-down-circle"></i> View HSN table</div>
                         </div>
                     </div>
                 </div>
@@ -747,7 +929,7 @@ const AnalyticsUI = {
             <div class="row g-4">
                 <!-- GSTR-1 Summary -->
                 <div class="col-md-6">
-                    <div class="card gtes-gst-inner-card border-secondary">
+                    <div id="gtes-gst-anchor-gstr1" class="card gtes-gst-inner-card border-secondary">
                         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-file-text me-2"></i>GSTR-1 — GST invoices only</span>
                             <button class="btn btn-sm btn-light" onclick="BusinessAnalytics.exportGSTR1ToCSV(${calendarYear}, ${month})">
@@ -795,7 +977,7 @@ const AnalyticsUI = {
 
                 <!-- GSTR-3B Summary -->
                 <div class="col-md-6">
-                    <div class="card gtes-gst-inner-card border-secondary">
+                    <div id="gtes-gst-anchor-gstr3b" class="card gtes-gst-inner-card border-secondary">
                         <div class="card-header bg-success text-white">
                             <i class="bi bi-calculator me-2"></i>GSTR-3B Summary
                         </div>
@@ -845,7 +1027,7 @@ const AnalyticsUI = {
             </div>
 
             <!-- HSN-wise sales -->
-            <div class="card gtes-gst-inner-card border-secondary mt-4">
+            <div id="gtes-gst-anchor-hsn" class="card gtes-gst-inner-card border-secondary mt-4">
                 <div class="card-header border-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <h6 class="mb-0 gtes-gst-section-title"><i class="bi bi-list-columns-reverse me-2"></i>HSN-wise sales (GST invoices)</h6>
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="BusinessAnalytics.exportHSNWiseSalesToCSV(${calendarYear}, ${month})">
@@ -1044,8 +1226,22 @@ const AnalyticsUI = {
                             <label class="form-label small text-muted mb-1">Account group</label>
                             <select class="form-select bg-dark text-white border-secondary mb-2" id="ledgerAccountGroup"
                                 onchange="AnalyticsUI.populateLedgerAccountSelect()">
-                                <option value="customer">Customer (receivables)</option>
-                                <option value="vendor">Vendor / Supplier (payables)</option>
+                                <optgroup label="Receivables &amp; payables">
+                                    <option value="customer">Customer (receivables)</option>
+                                    <option value="vendor">Vendor / Supplier (payables)</option>
+                                </optgroup>
+                                <optgroup label="Income &amp; expense ledgers (Book Keeper)">
+                                    <option value="gl_direct_income">Direct Income</option>
+                                    <option value="gl_indirect_income">Indirect Income</option>
+                                    <option value="gl_direct_expense">Direct Expenses</option>
+                                    <option value="gl_indirect_expense">Indirect Expenses</option>
+                                    <option value="gl_duties_taxes">Duties &amp; Taxes</option>
+                                    <option value="gl_current_assets">Current Assets</option>
+                                    <option value="gl_bank">Bank Accounts</option>
+                                    <option value="gl_cash">Cash-in-hand</option>
+                                    <option value="gl_other">Other ledgers</option>
+                                    <option value="gl_all">All ledger accounts</option>
+                                </optgroup>
                             </select>
                             <label class="form-label small text-muted mb-1">Account</label>
                             <select class="form-select bg-dark text-white border-secondary mb-2" id="ledgerCustomer">
@@ -1064,7 +1260,10 @@ const AnalyticsUI = {
                             <button class="btn btn-primary w-100" onclick="AnalyticsUI.loadCustomerLedger()">
                                 <i class="bi bi-search"></i> View Ledger
                             </button>
-                            <p class="small text-muted mt-2 mb-0">Vendors need <strong>Account type = Supplier</strong> in Customers.</p>
+                            <p class="small text-muted mt-2 mb-0">
+                                <strong>AR / AP:</strong> Vendors need <strong>Account type = Supplier</strong>.
+                                <br><strong>General ledgers:</strong> Lines come from <strong>invoice / purchase ledger</strong> fields, GST components (CGST/SGST/IGST), credit notes to <strong>Sales Return</strong>, and round-off.
+                            </p>
                         </div>
                     </div>
 
@@ -1113,10 +1312,14 @@ const AnalyticsUI = {
         const sel = document.getElementById('ledgerCustomer');
         if (!gEl || !sel || typeof CustomerManager === 'undefined') return;
         const g = gEl.value || 'customer';
-        const customers = CustomerManager.getAllCustomers();
-        const list = g === 'vendor'
-            ? customers.filter(c => (c.accountType || '').toLowerCase() === 'supplier')
-            : customers.filter(c => (c.accountType || '').toLowerCase() !== 'supplier');
+        let list = [];
+        if (g === 'vendor') {
+            list = CustomerManager.getAllCustomers().filter(c => (c.accountType || '').toLowerCase() === 'supplier');
+        } else if (g === 'customer') {
+            list = CustomerManager.getAllCustomers().filter(c => (c.accountType || '').toLowerCase() !== 'supplier');
+        } else if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics.filterAccountsForLedgerGroup === 'function') {
+            list = BusinessAnalytics.filterAccountsForLedgerGroup(g);
+        }
         const prev = (sel.value || '').toString();
         const keyOf = (c) => ((c.id != null && c.id !== '') ? String(c.id) : String(c.name || '').trim());
         sel.innerHTML = '<option value="">-- Select account --</option>' +
@@ -1161,6 +1364,11 @@ const AnalyticsUI = {
         const ob = ledger.openingBalance;
         let oDr = 0;
         let oCr = 0;
+        if (ledger.accountGroup === 'ledger' || ledger.ledgerKind === 'general') {
+            if (ob >= 0) oDr = ob;
+            else oCr = -ob;
+            return { oDr, oCr };
+        }
         if (ledger.accountGroup === 'customer') {
             if (ob >= 0) oDr = ob;
             else oCr = -ob;
@@ -1354,16 +1562,22 @@ const AnalyticsUI = {
             ? `${this.formatDate(ledger.dateRange.start)} → ${this.formatDate(ledger.dateRange.end)}`
             : 'All dates';
 
-        const balLabel = ledger.accountGroup === 'vendor'
-            ? (ledger.summary.balance > 0 ? 'Payable' : 'Advance / Paid ahead')
-            : (ledger.summary.balance > 0 ? 'Due' : 'Credit');
+        const balLabel = ledger.accountGroup === 'ledger' || ledger.ledgerKind === 'general'
+            ? 'Ledger balance'
+            : ledger.accountGroup === 'vendor'
+                ? (ledger.summary.balance > 0 ? 'Payable' : 'Advance / Paid ahead')
+                : (ledger.summary.balance > 0 ? 'Due' : 'Credit');
+
+        const roleLine = ledger.accountGroup === 'ledger' || ledger.ledgerKind === 'general'
+            ? 'General ledger'
+            : ledger.accountGroup === 'vendor' ? 'Vendor' : 'Customer';
 
         const content = document.getElementById('ledgerContent');
         content.innerHTML = `
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h5 class="mb-1">${ledger.customer.name}</h5>
-                    <p class="text-muted small mb-1">${ledger.groupLabel} · ${ledger.accountGroup === 'vendor' ? 'Vendor' : 'Customer'}</p>
+                    <p class="text-muted small mb-1">${ledger.groupLabel} · ${roleLine}</p>
                     <p class="text-muted mb-0 small">${periodLine}</p>
                     <p class="text-muted mb-0">
                         ${ledger.customer.phone ? `<i class="bi bi-phone me-1"></i>${ledger.customer.phone}` : ''}
@@ -1409,7 +1623,7 @@ const AnalyticsUI = {
                     <tbody>
                         ${ledger.dateRange.start ? (() => {
             const { oDr, oCr } = this._openingBalanceColumns(ledger);
-            return `<tr class="table-secondary">
+            return `<tr class="table-secondary gtes-ledger-opening-row">
                                 <td>—</td>
                                 <td colspan="3"><strong>Opening balance</strong></td>
                                 <td>—</td>
@@ -1479,44 +1693,74 @@ const AnalyticsUI = {
         const stockReport = BusinessAnalytics.getStockReport();
         const lowStock = BusinessAnalytics.getLowStockAlerts();
         const fastMoving = BusinessAnalytics.getFastMovingItems();
+        const fastList = fastMoving.items || [];
+        const fastBasis = fastMoving.basis || 'out';
         const totalValue = BusinessAnalytics.getTotalInventoryValue();
+        const sf = this._stockFilter;
+        const outCount = stockReport.filter(i => i.currentStock === 0).length;
+
+        let filteredRows = stockReport.slice();
+        if (sf === 'low') filteredRows = filteredRows.filter(i => i.isLowStock);
+        else if (sf === 'out') filteredRows = filteredRows.filter(i => i.currentStock === 0);
+        else if (sf === 'value') filteredRows.sort((a, b) => b.stockValue - a.stockValue);
+
+        const stockCardCls = (active) => `card glass-panel border-0 text-center gtes-analytics-summary-card${active ? ' gtes-analytics-summary-card--active' : ''}`;
 
         container.innerHTML = `
+            ${sf ? `
+            <div class="alert alert-info py-2 d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <span><i class="bi bi-funnel me-2"></i>Table: <strong>${{ low: 'Low stock only', out: 'Out of stock only', value: 'Sorted by value (high → low)' }[sf] || sf}</strong></span>
+                <button type="button" class="btn btn-sm btn-outline-light" onclick="AnalyticsUI.setStockFilter(null)">Show all items</button>
+            </div>` : ''}
             <div class="row g-4 mb-4">
                 <!-- Summary Cards -->
                 <div class="col-md-3">
-                    <div class="card glass-panel border-0 text-center">
+                    <div class="${stockCardCls(!sf)}" role="button" tabindex="0"
+                        title="Show full stock table"
+                        onclick="AnalyticsUI.setStockFilter(null); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setStockFilter(null); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);}">
                         <div class="card-body">
                             <i class="bi bi-box-seam fs-1 text-info mb-2"></i>
                             <h3 class="mb-0">${stockReport.length}</h3>
                             <small class="text-muted">Total Items</small>
+                            <div class="small text-primary mt-1">All rows</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-0 text-center">
+                    <div class="${stockCardCls(sf === 'value')}" role="button" tabindex="0"
+                        title="Sort table by stock value"
+                        onclick="AnalyticsUI.setStockFilter('value'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setStockFilter('value'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);}">
                         <div class="card-body">
                             <i class="bi bi-currency-rupee fs-1 text-success mb-2"></i>
                             <h3 class="mb-0">₹${this.formatCurrency(totalValue)}</h3>
                             <small class="text-muted">Total Value</small>
+                            <div class="small text-primary mt-1">Sort by value</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-0 text-center">
+                    <div class="${stockCardCls(sf === 'low')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setStockFilter('low'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setStockFilter('low'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);}">
                         <div class="card-body">
                             <i class="bi bi-exclamation-triangle fs-1 text-warning mb-2"></i>
                             <h3 class="mb-0">${lowStock.length}</h3>
                             <small class="text-muted">Low Stock Items</small>
+                            <div class="small text-primary mt-1">Filter LOW</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-0 text-center">
+                    <div class="${stockCardCls(sf === 'out')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setStockFilter('out'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setStockFilter('out'); setTimeout(() => AnalyticsUI.scrollToGstSection('gtes-stock-anchor-table'), 50);}">
                         <div class="card-body">
                             <i class="bi bi-x-circle fs-1 text-danger mb-2"></i>
-                            <h3 class="mb-0">${stockReport.filter(i => i.currentStock === 0).length}</h3>
+                            <h3 class="mb-0">${outCount}</h3>
                             <small class="text-muted">Out of Stock</small>
+                            <div class="small text-primary mt-1">Filter OUT</div>
                         </div>
                     </div>
                 </div>
@@ -1549,18 +1793,19 @@ const AnalyticsUI = {
                 <div class="col-md-4">
                     <div class="card glass-panel border-0">
                         <div class="card-header bg-success text-white">
-                            <h6 class="mb-0"><i class="bi bi-lightning me-2"></i>Fast Moving (Last 30 Days)</h6>
+                            <h6 class="mb-0"><i class="bi bi-lightning me-2"></i>${fastBasis === 'in' ? 'Top receipts (last 30 days)' : 'Fast moving (last 30 days)'}</h6>
+                            ${fastBasis === 'in' ? '<small class="d-block text-white-50">No stock-out logged — showing purchase receipts</small>' : ''}
                         </div>
                         <div class="card-body p-0">
-                            ${fastMoving.length > 0 ? fastMoving.map((item, i) => `
+                            ${fastList.length > 0 ? fastList.map((item, i) => `
                                 <div class="d-flex justify-content-between align-items-center p-2 border-bottom border-secondary">
                                     <div>
                                         <span class="badge bg-primary me-2">${i + 1}</span>
                                         <strong>${item.name}</strong>
                                     </div>
-                                    <span class="text-success">${item.quantity} used</span>
+                                    <span class="text-success">${item.quantity} ${fastBasis === 'in' ? 'received' : 'used'}</span>
                                 </div>
-                            `).join('') : '<div class="p-3 text-center text-muted">No usage data</div>'}
+                            `).join('') : '<div class="p-3 text-center text-muted">No inventory movement in the last 30 days</div>'}
                         </div>
                     </div>
                 </div>
@@ -1587,9 +1832,10 @@ const AnalyticsUI = {
             </div>
 
             <!-- Full Stock Table -->
-            <div class="card glass-panel border-0 mt-4">
-                <div class="card-header bg-transparent border-secondary">
+            <div id="gtes-stock-anchor-table" class="card glass-panel border-0 mt-4">
+                <div class="card-header bg-transparent border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <h6 class="mb-0"><i class="bi bi-table me-2"></i>Complete Stock Report</h6>
+                    ${sf ? `<span class="badge bg-info">${filteredRows.length} row(s)</span>` : ''}
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -1605,7 +1851,9 @@ const AnalyticsUI = {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${stockReport.map(item => `
+                                ${filteredRows.length === 0 ? `
+                                    <tr><td colspan="6" class="text-center text-muted py-4">No rows match this filter.</td></tr>
+                                ` : filteredRows.map(item => `
                                     <tr>
                                         <td>${item.name}</td>
                                         <td class="text-center">${item.currentStock} ${item.unit}</td>
@@ -1639,63 +1887,87 @@ const AnalyticsUI = {
         if (!container) return;
 
         const reminders = BusinessAnalytics.getDueReminders();
+        const f = this._reminderFilter;
+        const cardCls = (active) => `card glass-panel border-0 text-center gtes-analytics-summary-card${active ? ' gtes-analytics-summary-card--active' : ''}`;
+
+        const sections = [];
+        const push = (key, title, items, color, showOverdue) => {
+            if (f && f !== key) return;
+            sections.push(this.renderReminderSection(title, items, color, showOverdue, { forceShow: !!f }));
+        };
+        push('overdue', 'Overdue Invoices', reminders.overdue, 'danger', true);
+        push('dueToday', 'Due Today', reminders.dueToday, 'warning', false);
+        push('dueSoon', 'Due This Week', reminders.dueSoon, 'info', false);
+        push('upcoming', 'Upcoming (8-30 days)', reminders.upcoming, 'success', false);
 
         container.innerHTML = `
+            ${f ? `
+            <div class="alert alert-info py-2 d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <span><i class="bi bi-funnel me-2"></i>Showing: <strong>${{ overdue: 'Overdue', dueToday: 'Due today', dueSoon: 'Due this week', upcoming: 'Upcoming' }[f] || f}</strong></span>
+                <button type="button" class="btn btn-sm btn-outline-light" onclick="AnalyticsUI.setReminderFilter(null)">Show all categories</button>
+            </div>` : ''}
             <div class="row g-4 mb-4">
                 <div class="col-md-3">
-                    <div class="card glass-panel border-danger border-0 text-center">
+                    <div class="${cardCls(f === 'overdue')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setReminderFilter('overdue')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setReminderFilter('overdue');}">
                         <div class="card-body">
                             <i class="bi bi-exclamation-octagon fs-1 text-danger mb-2"></i>
                             <h3 class="mb-0 text-danger">${reminders.overdue.length}</h3>
                             <small class="text-muted">Overdue</small>
+                            <div class="small text-primary mt-1">Click to filter</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-warning border-0 text-center">
+                    <div class="${cardCls(f === 'dueToday')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setReminderFilter('dueToday')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setReminderFilter('dueToday');}">
                         <div class="card-body">
                             <i class="bi bi-clock fs-1 text-warning mb-2"></i>
                             <h3 class="mb-0 text-warning">${reminders.dueToday.length}</h3>
                             <small class="text-muted">Due Today</small>
+                            <div class="small text-primary mt-1">Click to filter</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-info border-0 text-center">
+                    <div class="${cardCls(f === 'dueSoon')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setReminderFilter('dueSoon')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setReminderFilter('dueSoon');}">
                         <div class="card-body">
                             <i class="bi bi-calendar-week fs-1 text-info mb-2"></i>
                             <h3 class="mb-0 text-info">${reminders.dueSoon.length}</h3>
                             <small class="text-muted">Due This Week</small>
+                            <div class="small text-primary mt-1">Click to filter</div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="card glass-panel border-success border-0 text-center">
+                    <div class="${cardCls(f === 'upcoming')}" role="button" tabindex="0"
+                        onclick="AnalyticsUI.setReminderFilter('upcoming')"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();AnalyticsUI.setReminderFilter('upcoming');}">
                         <div class="card-body">
                             <i class="bi bi-calendar-month fs-1 text-success mb-2"></i>
                             <h3 class="mb-0 text-success">${reminders.upcoming.length}</h3>
                             <small class="text-muted">Upcoming</small>
+                            <div class="small text-primary mt-1">Click to filter</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Overdue Invoices -->
-            ${this.renderReminderSection('Overdue Invoices', reminders.overdue, 'danger', true)}
-            
-            <!-- Due Today -->
-            ${this.renderReminderSection('Due Today', reminders.dueToday, 'warning', false)}
-            
-            <!-- Due This Week -->
-            ${this.renderReminderSection('Due This Week', reminders.dueSoon, 'info', false)}
-            
-            <!-- Upcoming -->
-            ${this.renderReminderSection('Upcoming (8-30 days)', reminders.upcoming, 'success', false)}
+            ${sections.join('')}
         `;
     },
 
-    renderReminderSection(title, items, color, showOverdue) {
-        if (items.length === 0) return '';
+    renderReminderSection(title, items, color, showOverdue, opts = {}) {
+        const forceShow = opts.forceShow === true;
+        if (!forceShow && items.length === 0) return '';
+
+        const emptyRow = forceShow && items.length === 0
+            ? `<tr><td colspan="7" class="text-center text-muted py-4">No invoices in this list.</td></tr>`
+            : '';
 
         return `
             <div class="card glass-panel border-0 mb-4">
@@ -1717,6 +1989,7 @@ const AnalyticsUI = {
                                 </tr>
                             </thead>
                             <tbody>
+                                ${emptyRow}
                                 ${items.map(item => `
                                     <tr>
                                         <td>${item.invoiceId}</td>
@@ -1743,6 +2016,15 @@ const AnalyticsUI = {
     },
 
     // Helper functions
+    escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
     formatCurrency(value) {
         return parseFloat(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     },

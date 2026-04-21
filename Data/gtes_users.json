@@ -15,7 +15,8 @@
       "MANAGE_SETTINGS",
       "MANAGE_USERS",
       "MANAGE_HOLIDAYS",
-      "MANAGE_ADVANCES"
+      "MANAGE_ADVANCES",
+      "ACCESS_MAIL"
     ],
     "role": "admin",
     "username": "GTES67",
@@ -33,6 +34,7 @@
       "MANAGE_ADVANCES",
       "MANAGE_HOLIDAYS",
       "VIEW_REPORTS",
+      "ACCESS_MAIL",
       "VIEW_DASHBOARD"
     ],
     "role": "user",

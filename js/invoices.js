@@ -50,10 +50,47 @@ const InvoiceManager = {
     },
 
     /**
+     * Next purchase bill number (GST vs non-GST prefixes), from expenses only.
+     */
+    generatePurchaseBillNumber(isGst) {
+        const prefix = isGst ? 'PUR-WB' : 'PUR-NB';
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+        let maxNum = 0;
+        const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`^${esc}-(\\d+)$`, 'i');
+        expenses.forEach((exp) => {
+            const b = String(exp.billNo || exp.invoiceNo || '');
+            const m = b.match(re);
+            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+        });
+        const next = maxNum + 1;
+        return `${prefix}-${next.toString().padStart(4, '0')}`;
+    },
+
+    /**
      * Create new invoice
      */
     async createInvoice(invoiceData) {
         const invoices = DataManager.getData('invoices') || [];
+
+        const rawName = (invoiceData.customerName || '').trim();
+        if (!rawName) {
+            throw new Error('Customer or vendor name is required. Link the invoice to a saved account.');
+        }
+        const customers = DataManager.getData('customers') || [];
+        const cid = (invoiceData.customerId || '').toString().trim();
+        let party = cid ? customers.find(c => c.id === cid) : null;
+        if (!party) {
+            party = customers.find(c => (c.name || '').trim().toLowerCase() === rawName.toLowerCase());
+        }
+        if (!party) {
+            throw new Error('Invoice must be linked to a saved customer or vendor in your accounts list.');
+        }
+        invoiceData.customerId = party.id;
+        invoiceData.customerName = party.name;
+        if (!invoiceData.customerAddress && party.address) {
+            invoiceData.customerAddress = party.address;
+        }
 
         // Validate challan if provided
         if (invoiceData.challanId) {
@@ -101,6 +138,11 @@ const InvoiceManager = {
             narration: invoiceData.narration || null,
             dispatchDetails: invoiceData.dispatchDetails || null,
             items: invoiceData.items || [],
+            ledgerAccount: invoiceData.ledgerAccount || null,
+            dueDate: invoiceData.dueDate || null,
+            placeOfSupply: invoiceData.placeOfSupply || null,
+            taxScheme: invoiceData.taxScheme || null,
+            taxSupplyType: invoiceData.taxSupplyType || null,
 
             // Financials
             subtotal: invoiceData.subtotal || 0,
@@ -157,7 +199,15 @@ const InvoiceManager = {
      */
     getInvoice(invoiceId) {
         const invoices = DataManager.getData('invoices') || [];
-        return invoices.find(inv => inv.id === invoiceId);
+        const found = invoices.find(inv => inv.id === invoiceId);
+        if (found) return found;
+        if (invoiceId == null || invoiceId === '') return undefined;
+        const s = String(invoiceId);
+        return invoices.find(inv =>
+            String(inv.id) === s
+            || inv.invoiceNo === invoiceId
+            || String(inv.invoiceNo || '') === s
+        );
     },
 
     /**
@@ -186,31 +236,27 @@ const InvoiceManager = {
     isGSTType(type) {
         if (!type) return true; // Default to GST for safety if unknown
         const t = (type || '').toString().toLowerCase();
+        if (t.includes('non-gst') || t === 'without-bill' || t === 'non-gst-invoice' || t === 'purchase-non-gst') {
+            return false;
+        }
         return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
     },
 
     /**
-     * Delete invoice
+     * Delete invoice. Always removes linked delivery/service challans so History / View DC stay in sync.
+     * (Second arg kept for older call sites; ignored — challans are always deleted with the invoice.)
      */
-    async deleteInvoice(invoiceId, deleteChallanToo = false) {
+    async deleteInvoice(invoiceId, _deleteChallanTooLegacy = true) {
         const invoices = DataManager.getData('invoices') || [];
         const invoice = invoices.find(inv => inv.id === invoiceId);
 
         if (invoice) {
             if (typeof DeliveryManager !== 'undefined') {
-                // Robust check: find any challan that points to this invoiceId
                 const allChallans = DeliveryManager.getAllChallans();
                 const linkedChallans = allChallans.filter(c => c.invoiceId === invoiceId || (c.id === invoice.challanId));
 
                 for (const challan of linkedChallans) {
-                    if (deleteChallanToo) {
-                        await DeliveryManager.deleteChallan(challan.id);
-                    } else {
-                        await DeliveryManager.updateChallan(challan.id, {
-                            invoiceId: null,
-                            status: 'pending'
-                        });
-                    }
+                    await DeliveryManager.deleteChallan(challan.id);
                 }
             }
 
@@ -225,7 +271,9 @@ const InvoiceManager = {
         }
 
         const filtered = invoices.filter(inv => inv.id !== invoiceId);
-        await DataManager.saveData('invoices', filtered);
+        // skipPreSaveMerge: union-merge with cloud would re-add rows still present remotely (delete must win).
+        await DataManager.saveData('invoices', filtered, { skipPreSaveMerge: true });
+        this._balanceCache = null;
     },
 
     /**

@@ -43,7 +43,7 @@ const App = {
 
         this.showLoader();
 
-        console.log("%c🚀 MJS PrimeLogic v1.3.15 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
+        console.log("%c🚀 MJS PrimeLogic v1.3.17 Initializing...", "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
@@ -153,6 +153,108 @@ const App = {
         }, 8000);
     },
 
+    /**
+     * When RTDB or disk sync updates a dataset, refresh the open screen so web + desktop match (same idea as attendance).
+     */
+    async _refreshUIFromDataKey(key) {
+        if (!key || key === DataManager.KEYS.ATTENDANCE) return;
+        const v = this.currentView;
+        const K = DataManager.KEYS;
+        try {
+            if (key === K.EMPLOYEES && v === 'employees' && typeof EmployeesModule !== 'undefined') {
+                await EmployeesModule.load();
+                return;
+            }
+            if (key === K.HOLIDAYS && v === 'holidays' && typeof HolidaysModule !== 'undefined') {
+                await HolidaysModule.load();
+                return;
+            }
+            if (key === K.ADVANCES && v === 'advances' && typeof AdvancesModule !== 'undefined') {
+                await AdvancesModule.load();
+                return;
+            }
+            if (key === K.BONUS_PAYOUTS && v === 'bonus' && typeof BonusModule !== 'undefined') {
+                await BonusModule.load();
+                return;
+            }
+            if (key === K.EMAIL_LOGS && v === 'mail' && window.MailUI) {
+                await MailUI.load();
+                return;
+            }
+            if (key === 'gtes_tasks' && v === 'tasks' && window.TasksUI) {
+                await TasksUI.load();
+                return;
+            }
+            if (key === K.SETTINGS && v === 'admin' && typeof AdminModule !== 'undefined') {
+                await AdminModule.load();
+                return;
+            }
+            if (v === 'salary' && typeof SalaryModule !== 'undefined') {
+                if ([K.EMPLOYEES, K.SETTINGS, K.ATTENDANCE, K.ADVANCES, K.BONUS_PAYOUTS, K.HOLIDAYS].indexOf(key) !== -1) {
+                    await SalaryModule.load();
+                }
+                return;
+            }
+            if (v === 'invoices' && window.InvoicesUI) {
+                if (['invoices', 'customers', 'challans', 'inventory', K.SERVICES].indexOf(key) !== -1 || key === K.CHALLANS) {
+                    await InvoicesUI.load();
+                }
+                return;
+            }
+            if (v === 'challans' && window.DeliveryUI && (key === 'challans' || key === K.CHALLANS)) {
+                try {
+                    DeliveryUI.loadHistory();
+                } catch (e) { /* ignore */ }
+                return;
+            }
+            if (v === 'accounting' && window.AccountingUI) {
+                if (['invoices', 'vouchers', 'customers', 'purchases', K.ACCOUNTS, K.JOURNAL_ENTRIES].indexOf(key) !== -1) {
+                    await AccountingUI.load();
+                }
+                return;
+            }
+            if (v === 'vouchers' && window.VouchersUI) {
+                if (['vouchers', 'customers', 'invoices'].indexOf(key) !== -1) {
+                    await VouchersUI.load();
+                }
+                return;
+            }
+            if (v === 'payments' && window.PaymentsUI) {
+                if (['vouchers', 'invoices', 'customers', 'purchases'].indexOf(key) !== -1) {
+                    await PaymentsUI.load();
+                }
+                return;
+            }
+            if (v === 'poQueue' && window.POQueueUI) {
+                if ([K.PURCHASE_ORDERS, 'customers', 'invoices'].indexOf(key) !== -1) {
+                    await POQueueUI.load();
+                }
+                return;
+            }
+            if (v === 'bankMail' && window.BankMailUI) {
+                if ([K.BANK_ALIAS, 'vouchers', 'invoices', 'customers'].indexOf(key) !== -1) {
+                    await BankMailUI.load();
+                }
+                return;
+            }
+            const analyticsKeys = new Set([
+                'invoices', 'vouchers', 'customers', 'purchases', 'challans', K.CHALLANS, 'inventory', 'inventoryTransactions',
+                K.INVENTORY_ITEMS, K.SERVICES, K.WAREHOUSES, K.ACCOUNTS, 'gtes_expenses', K.EXPENSE_CATEGORIES,
+                K.ESTIMATES, K.PURCHASE_ORDERS, K.RECURRING_INVOICES, K.RECYCLE_BIN,
+                K.SETTINGS, K.EMPLOYEES
+            ]);
+            if (v === 'analytics' && analyticsKeys.has(key) && typeof AnalyticsUI !== 'undefined') {
+                AnalyticsUI.refreshCurrentSection();
+                return;
+            }
+            if (v === 'dashboard') {
+                await this.loadDashboard();
+            }
+        } catch (e) {
+            console.warn('[App] _refreshUIFromDataKey:', key, e && e.message);
+        }
+    },
+
     async checkLoginStatus() {
         const isLoggedIn = await UserManager.isLoggedIn();
         const loginOverlay = document.getElementById('loginOverlay');
@@ -225,6 +327,11 @@ const App = {
                         break;
                     case 'advances':
                         hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_ADVANCES);
+                        break;
+                    case 'mail':
+                    case 'poQueue':
+                    case 'bankMail':
+                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.ACCESS_MAIL);
                         break;
                     case 'admin': // Admin view is not typically in the main nav, but good to handle
                         hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
@@ -412,24 +519,26 @@ const App = {
                     return;
                 }
                 if (d.source !== 'firebase-listener') return;
-                if (d.key === 'gtes_employees' && v === 'employees' && typeof EmployeesModule !== 'undefined') {
-                    EmployeesModule.load().catch(() => {});
-                }
+                this._refreshUIFromDataKey(d.key).catch(() => {});
             } catch (_) { /* ignore */ }
         });
 
-        // Mirror TasksUI: external file / sync invalidation → pull attendance from cloud then refresh.
+        // Electron file watcher: disk changed → reload key from cloud and refresh the open view.
         window.addEventListener('gtes:remote-change', async (event) => {
             const key = event && event.detail && event.detail.key;
-            if (key !== 'gtes_attendance') return;
+            if (!key) return;
             try {
-                await DataManager.loadData(DataManager.KEYS.ATTENDANCE, { forceRefresh: true });
-                const v = this.currentView;
-                if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
-                else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
-                else if (v === 'dashboard') await this.loadDashboard();
+                await DataManager.loadData(key, { forceRefresh: true });
+                if (key === DataManager.KEYS.ATTENDANCE) {
+                    const v = this.currentView;
+                    if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
+                    else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
+                    else if (v === 'dashboard') await this.loadDashboard();
+                    return;
+                }
+                await this._refreshUIFromDataKey(key);
             } catch (e) {
-                console.warn('[App] attendance remote-change refresh:', e && e.message);
+                console.warn('[App] remote-change refresh:', e && e.message);
             }
         });
 
@@ -549,6 +658,11 @@ const App = {
                                 case 'advances':
                                     hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_ADVANCES);
                                     break;
+                                case 'mail':
+                                case 'poQueue':
+                                case 'bankMail':
+                                    hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.ACCESS_MAIL);
+                                    break;
                                 default:
                                     hasAccess = true;
                             }
@@ -610,6 +724,51 @@ const App = {
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => this.logout());
         }
+
+        this._setupBackspaceBackShortcut();
+    },
+
+    /**
+     * Backspace mirrors the main Back button when it is shown (same rules as updateBackButton).
+     * Disabled while typing in inputs, or when a modal/offcanvas is open, so editing is not disrupted.
+     * Works in the browser and in the Electron desktop shell (same UI bundle).
+     */
+    _setupBackspaceBackShortcut() {
+        if (this._backspaceBackShortcutBound) return;
+        this._backspaceBackShortcutBound = true;
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Backspace') return;
+            if (e.defaultPrevented) return;
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            if (this._shouldIgnoreBackspaceForNavigation(e)) return;
+            if (!this._canNavigateBackViaShortcut()) return;
+            if (document.querySelector('.modal.show')) return;
+            if (document.querySelector('.offcanvas.show')) return;
+            e.preventDefault();
+            this.goBack();
+        });
+    },
+
+    _shouldIgnoreBackspaceForNavigation(e) {
+        const t = e.target;
+        if (!t || t.nodeType !== Node.ELEMENT_NODE) return false;
+        if (t.isContentEditable) return true;
+        const tag = (t.tagName || '').toLowerCase();
+        if (tag === 'textarea') return true;
+        if (tag === 'select') return true;
+        if (tag === 'input') {
+            const type = (t.type || '').toLowerCase();
+            if (['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'color', 'range'].includes(type)) {
+                return false;
+            }
+            if (t.readOnly || t.disabled) return true;
+            return true;
+        }
+        return false;
+    },
+
+    _canNavigateBackViaShortcut() {
+        return this.currentView !== 'dashboard' && this.currentView !== 'landing' && this.viewHistory.length > 1;
     },
 
     // Centralized Logout Logic
@@ -675,11 +834,8 @@ const App = {
             this.showView('analytics');
         } else if (moduleName === 'accounting') {
             if (nav) nav.style.display = 'flex';
-            if (typeof AccountingUI !== 'undefined') {
-                AccountingUI.renderDashboard();
-            } else {
-                this.showView('accounting');
-            }
+            // Must use showView so viewHistory includes 'accounting' (Back returns here before dashboard).
+            this.showView('accounting');
         }
     },
 
@@ -772,7 +928,7 @@ const App = {
                 case 'mail':
                 case 'poQueue':
                 case 'bankMail':
-                    hasPermission = true;
+                    requiredPermission = UserManager.PERMISSIONS.ACCESS_MAIL;
                     break;
                 default:
                     hasPermission = true;
@@ -871,20 +1027,21 @@ const App = {
     },
 
     goBack() {
-        // Remove current view from history
         if (this.viewHistory.length > 1) {
-            this.viewHistory.pop(); // Remove current view
+            this.viewHistory.pop();
             const previousView = this.viewHistory[this.viewHistory.length - 1];
-            // Temporarily set flag to prevent adding to history when going back
             this._isGoingBack = true;
             this.showView(previousView);
             this._isGoingBack = false;
-        } else {
-            // If no history, go to dashboard
-            this._isGoingBack = true;
-            this.showView('dashboard');
-            this._isGoingBack = false;
+            return;
         }
+        // Stack is only the root screen — do not skip intermediate pages elsewhere; nothing to pop.
+        if (this.currentView === 'dashboard' || this.currentView === 'landing') {
+            return;
+        }
+        this._isGoingBack = true;
+        this.showView('dashboard');
+        this._isGoingBack = false;
     },
 
     updateBackButton() {

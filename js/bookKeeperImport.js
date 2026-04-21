@@ -73,9 +73,22 @@ const BookKeeperImport = {
         }
     },
 
-    /** Lets the UI repaint between heavy import phases (import still runs in main thread, but feels responsive). */
+    /** Lets the UI repaint between heavy import phases (main-thread import; yields paint + idle slices). */
     async _yieldToUI() {
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise((resolve) => {
+            const finish = () => resolve();
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => {
+                    if (typeof requestIdleCallback === 'function') {
+                        requestIdleCallback(finish, { timeout: 48 });
+                    } else {
+                        setTimeout(finish, 20);
+                    }
+                });
+            } else {
+                setTimeout(finish, 0);
+            }
+        });
     },
 
     /**

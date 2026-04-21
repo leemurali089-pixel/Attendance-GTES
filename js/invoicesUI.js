@@ -4,6 +4,402 @@
  * Integrated with Synced Data (Customers, Inventory)
  */
 const InvoicesUI = {
+    /** Indian states / UT for Place of Supply (Book Keeper style). */
+    INDIAN_POS_OPTIONS: [
+        'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
+        'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
+        'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
+        'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+        'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+        'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'
+    ],
+
+    _getPlaceOfSupplyOptionsHtml(selected = '') {
+        const sel = (selected || '').trim();
+        const opts = this.INDIAN_POS_OPTIONS.map((s) =>
+            `<option value="${String(s).replace(/"/g, '&quot;')}" ${sel === s ? 'selected' : ''}>${String(s).replace(/</g, '&lt;')}</option>`
+        ).join('');
+        return `<option value="">— Select —</option>${opts}`;
+    },
+
+    /** GST first-two-digit state codes (common + UT); used for Local vs Interstate. */
+    _STATE_NAME_TO_GST_CODE: {
+        'jammu and kashmir': '01', 'himachal pradesh': '02', 'punjab': '03', 'chandigarh': '04',
+        'uttarakhand': '05', 'haryana': '06', 'delhi': '07', 'rajasthan': '08',
+        'uttar pradesh': '09', 'bihar': '10', 'sikkim': '11', 'arunachal pradesh': '12',
+        'nagaland': '13', 'manipur': '14', 'mizoram': '15', 'tripura': '16', 'meghalaya': '17',
+        'assam': '18', 'west bengal': '19', 'jharkhand': '20', 'odisha': '21', 'chhattisgarh': '22',
+        'madhya pradesh': '23', 'gujarat': '24', 'dadra and nagar haveli and daman and diu': '26',
+        'maharashtra': '27', 'andhra pradesh': '37', 'karnataka': '29', 'goa': '30',
+        'lakshadweep': '31', 'kerala': '32', 'tamil nadu': '33', 'puducherry': '34',
+        'andaman and nicobar islands': '35', 'telangana': '36', 'ladakh': '38',
+        'other territory': '97'
+    },
+
+    _normalizePartyKey(name) {
+        return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    },
+
+    /** Sales: customers (exclude pure suppliers). Purchase: suppliers/creditors only. Dedupes by normalized name. */
+    _getPartiesForInvoiceSheet(isSales, customers) {
+        const list = customers || [];
+        const seen = new Set();
+        const out = [];
+        for (const c of list) {
+            if (!c || !c.name || !String(c.name).trim()) continue;
+            const t = String(c.accountType || c.type || '').toLowerCase();
+            const g = String(c.accountGroup || '').toLowerCase();
+            if (isSales) {
+                if (t === 'supplier' && !g.includes('debtor')) continue;
+            } else {
+                const isSup = t.includes('supplier') || t.includes('vendor') || t.includes('creditor')
+                    || g.includes('creditor') || g.includes('sundry creditor');
+                if (!isSup) continue;
+            }
+            const key = this._normalizePartyKey(c.name);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(c);
+        }
+        out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        return out;
+    },
+
+    _gstStateCodeFromGstin(gstin) {
+        const g = String(gstin || '').replace(/\s/g, '').toUpperCase();
+        if (g.length >= 2 && /^[0-9]{2}/.test(g)) return g.slice(0, 2);
+        return '';
+    },
+
+    _companyGstStateCode() {
+        const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || {};
+        const g = settings.gstin || (DataManager.COMPANY_PROFILE && DataManager.COMPANY_PROFILE.gstin) || '';
+        return this._gstStateCodeFromGstin(g);
+    },
+
+    _inferStateCodeFromAddressText(addr) {
+        if (!addr) return '';
+        const low = String(addr).toLowerCase();
+        for (const st of this.INDIAN_POS_OPTIONS) {
+            if (low.includes(st.toLowerCase())) {
+                const code = this._STATE_NAME_TO_GST_CODE[st.toLowerCase()];
+                if (code) return code;
+            }
+        }
+        return '';
+    },
+
+    _partyEffectiveStateCode(party) {
+        if (!party) return '';
+        let c = this._gstStateCodeFromGstin(party.gstin);
+        if (c) return c;
+        c = this._inferStateCodeFromAddressText(party.address || '');
+        if (c) return c;
+        if (party.state && String(party.state).length <= 2 && /^[0-9]{2}$/.test(String(party.state))) return String(party.state);
+        return this._inferStateCodeFromAddressText(String(party.state || ''));
+    },
+
+    /** Debounced party datalist — avoids huge &lt;option&gt; lists (lag while typing). */
+    _partyDlTimer: null,
+    _refreshPartyDatalist(query, isSales) {
+        const dl = document.getElementById('invCustomerList');
+        if (!dl) return;
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        dl.innerHTML = this._buildInvPartyDatalistOptionsHtml(isSales, customers, query, null);
+    },
+
+    _buildLedgerAccountSelectOptions(isPurchase) {
+        const esc = (str) => String(str || '').replace(/"/g, '&quot;');
+        const presets = isPurchase
+            ? ['Purchase A/C', 'Direct Expenses', 'Indirect Expenses', 'Import Purchase', 'Local Purchase @ 18%']
+            : ['Sales A/C', 'Direct Income', 'Indirect Income', 'Service Income'];
+        const gtes = DataManager.getData(DataManager.KEYS.ACCOUNTS) || DataManager.getData('gtes_accounts') || [];
+        const cust = DataManager.getData('customers') || [];
+        const extra = cust.filter((c) => {
+            const n = String(c.name || '').toLowerCase();
+            const t = String(c.accountType || '').toLowerCase();
+            if (isPurchase) {
+                return t === 'other' || c.isOtherAccount || /expense|purchase/i.test(n);
+            }
+            return t === 'other' || c.isOtherAccount || /income|sales/i.test(n);
+        });
+        const seen = new Set();
+        let html = '<option value="">— Select ledger —</option>';
+        const add = (label) => {
+            const v = String(label || '').trim();
+            if (!v || seen.has(v)) return;
+            seen.add(v);
+            html += `<option value="${esc(v)}">${esc(v)}</option>`;
+        };
+        presets.forEach(add);
+        gtes.forEach((a) => add(a.name));
+        extra.forEach((c) => add(c.name));
+        return html;
+    },
+
+    /** Book Keeper–style direct expense heads for the Other charges line. */
+    OTHER_CHARGES_DIRECT_PRESETS: [
+        'BASIC SALARY A/C',
+        'CARTAGE A/C',
+        'DISCOUNT GIVEN A/C',
+        'DISCOUNT ON SALE A/C',
+        'HOUSE RENT ALLOWANCE - HRA A/C',
+        'OVERTIME ALLOWANCE - OA A/C',
+        'TRAVELLING ALLOWANCE - TA A/C',
+        'Salary',
+        'Incentive',
+        'Rajmohan',
+        'Cartage charged'
+    ],
+    OTHER_CHARGES_INDIRECT_PRESETS: [
+        'PACKING & FORWARDING A/C',
+        'Forex Gain',
+        'Interest received',
+        'Shipping',
+        'Transport Charges',
+        'Discount On Purchase',
+        'Discount received'
+    ],
+
+    /**
+     * Dropdown options for other charges: Direct / Indirect expense ledgers (presets + gtes_accounts by group).
+     * Stored value remains `otherCharges.label` (account name) for backward compatibility.
+     */
+    _buildOtherChargesAccountSelectOptions(selected = '') {
+        const esc = (str) => String(str || '').replace(/"/g, '&quot;');
+        const sel = String(selected || '').trim();
+        const gtes = DataManager.getData(DataManager.KEYS.ACCOUNTS) || DataManager.getData('gtes_accounts') || [];
+        const customers = DataManager.getData('customers') || [];
+        const extraDirect = [];
+        const extraIndirect = [];
+        const pushByGroup = (a) => {
+            const n = String(a.name || '').trim();
+            if (!n) return;
+            const g = String(a.accountGroup || a.group || '').toLowerCase();
+            if (g.includes('direct') && g.includes('expense')) extraDirect.push(n);
+            else if (g.includes('indirect') && g.includes('expense')) extraIndirect.push(n);
+        };
+        gtes.forEach(pushByGroup);
+        customers.forEach(pushByGroup);
+        const mergeOrdered = (presets, extras) => {
+            const seen = new Set();
+            const out = [];
+            const add = (n) => {
+                const v = String(n || '').trim();
+                const k = v.toLowerCase();
+                if (!v || seen.has(k)) return;
+                seen.add(k);
+                out.push(v);
+            };
+            presets.forEach(add);
+            [...new Set(extras)].sort((a, b) => a.localeCompare(b)).forEach(add);
+            return out;
+        };
+        const directList = mergeOrdered(this.OTHER_CHARGES_DIRECT_PRESETS, extraDirect);
+        const indirectList = mergeOrdered(this.OTHER_CHARGES_INDIRECT_PRESETS, extraIndirect);
+        const opt = (name) => {
+            const v = esc(name);
+            const picked = sel === name ? ' selected' : '';
+            return `<option value="${v}"${picked}>${v}</option>`;
+        };
+        let html = `<option value="">${esc('— Select account —')}</option>`;
+        html += `<optgroup label="Direct Expenses">${directList.map(opt).join('')}</optgroup>`;
+        html += `<optgroup label="Indirect Expenses">${indirectList.map(opt).join('')}</optgroup>`;
+        return html;
+    },
+
+    /** Built-in + Admin → Tax scheme groups (`gtes_tax_schemes`). */
+    _buildTaxSchemeSelectHtml(selected = '') {
+        const esc = (str) => String(str || '').replace(/"/g, '&quot;');
+        const sel = String(selected || '').trim();
+        const builtins = [
+            { value: 'DEFAULT', label: 'DEFAULT' },
+            { value: 'GST18', label: 'GST 18%' },
+            { value: 'GST12', label: 'GST 12%' },
+            { value: 'GST5', label: 'GST 5%' }
+        ];
+        const custom = DataManager.getData(DataManager.KEYS.TAX_SCHEMES) || [];
+        let html = '';
+        builtins.forEach((b) => {
+            html += `<option value="${esc(b.value)}"${sel === b.value ? ' selected' : ''}>${esc(b.label)}</option>`;
+        });
+        custom.forEach((t) => {
+            const v = String(t.code || '').trim();
+            if (!v) return;
+            const lab = t.name || t.label || v;
+            html += `<option value="${esc(v)}"${sel === v ? ' selected' : ''}>${esc(lab)}</option>`;
+        });
+        return html;
+    },
+
+    /**
+     * Quick-add a ledger for other charges (Book Keeper style).
+     * Stored as a customer row with accountGroup Direct/Indirect Expenses.
+     * Uses a Bootstrap modal — Electron does not support window.prompt()/confirm().
+     */
+    _ensureAddChargeAccountModal() {
+        let el = document.getElementById('gtesAddChargeAccountModal');
+        if (el) return el;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div class="modal fade" id="gtesAddChargeAccountModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content bg-dark text-white border-secondary">
+                        <div class="modal-header border-secondary">
+                            <h5 class="modal-title"><i class="bi bi-plus-circle me-2 text-warning"></i>Add charge account</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <label class="form-label small text-white-50" for="gtesChargeAccountNameInp">Account name</label>
+                            <input type="text" class="form-control bg-dark text-white border-secondary" id="gtesChargeAccountNameInp"
+                                placeholder="e.g. Transport Charges, Loading" autocomplete="off">
+                            <div class="mt-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="gtesChargeExpType" id="gtesChargeIndirect" value="indirect" checked>
+                                    <label class="form-check-label" for="gtesChargeIndirect">Indirect Expenses</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="gtesChargeExpType" id="gtesChargeDirect" value="direct">
+                                    <label class="form-check-label" for="gtesChargeDirect">Direct Expenses</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer border-secondary">
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-warning" id="gtesChargeAccountSaveBtn">
+                                <i class="bi bi-check-lg me-1"></i>Add account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`);
+        el = document.getElementById('gtesAddChargeAccountModal');
+        const onSave = async () => {
+            const nameInp = document.getElementById('gtesChargeAccountNameInp');
+            const name = (nameInp?.value || '').trim();
+            if (!name) {
+                if (typeof App !== 'undefined') App.showNotification('Enter an account name', 'warning');
+                return;
+            }
+            const isIndirect = document.getElementById('gtesChargeIndirect')?.checked !== false;
+            const accountGroup = isIndirect ? 'Indirect Expenses' : 'Direct Expenses';
+            try {
+                if (typeof CustomerManager === 'undefined' || !CustomerManager.addCustomer) {
+                    throw new Error('CustomerManager is not available');
+                }
+                await CustomerManager.addCustomer({
+                    name,
+                    accountType: 'Customer',
+                    accountGroup,
+                    isOtherAccount: true,
+                    address: ''
+                });
+                const sel = document.querySelector('#createInvoiceForm select[name="otherChargesLabel"]');
+                if (sel) {
+                    sel.innerHTML = InvoicesUI._buildOtherChargesAccountSelectOptions(name);
+                    sel.value = name;
+                }
+                bootstrap.Modal.getInstance(el)?.hide();
+                if (typeof App !== 'undefined') App.showNotification(`Added to ${accountGroup}: ${name}`, 'success');
+            } catch (e) {
+                const msg = e && e.message ? e.message : String(e);
+                if (typeof App !== 'undefined') App.showNotification(msg, 'error');
+                else console.error(e);
+            }
+        };
+        document.getElementById('gtesChargeAccountSaveBtn')?.addEventListener('click', onSave);
+        document.getElementById('gtesChargeAccountNameInp')?.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                void onSave();
+            }
+        });
+        el.addEventListener('hidden.bs.modal', () => {
+            const nameInp = document.getElementById('gtesChargeAccountNameInp');
+            if (nameInp) nameInp.value = '';
+        });
+        el.addEventListener('shown.bs.modal', () => {
+            document.getElementById('gtesChargeAccountNameInp')?.focus();
+        });
+        return el;
+    },
+
+    promptAddOtherChargeAccount() {
+        const el = this._ensureAddChargeAccountModal();
+        const nameInp = document.getElementById('gtesChargeAccountNameInp');
+        if (nameInp) nameInp.value = '';
+        const ind = document.getElementById('gtesChargeIndirect');
+        const dir = document.getElementById('gtesChargeDirect');
+        if (ind) ind.checked = true;
+        if (dir) dir.checked = false;
+        bootstrap.Modal.getOrCreateInstance(el).show();
+    },
+
+    _applyAutoTaxSupplyFromParty() {
+        const form = document.getElementById('createInvoiceForm');
+        if (!form) return;
+        const typeInput = form.querySelector('[name="type"]');
+        const isGST = typeInput && (typeof InvoiceManager !== 'undefined' && InvoiceManager.isGSTType
+            ? InvoiceManager.isGSTType(typeInput.value)
+            : String(typeInput.value || '').includes('gst'));
+        if (!isGST) return;
+        const cid = (form.querySelector('input[name="customerId"]')?.value || '').trim();
+        const customers = DataManager.getData('customers') || [];
+        const party = cid ? customers.find((c) => c.id === cid) : null;
+        if (!party) return;
+        const shipSame = document.getElementById('shipSameAsBilling')?.checked !== false;
+        let shipAddr = '';
+        if (!shipSame) {
+            shipAddr = (form.querySelector('[name="shipToAddress"]')?.value || '').trim();
+        }
+        const partyCode = shipSame || !shipAddr
+            ? this._partyEffectiveStateCode(party)
+            : this._inferStateCodeFromAddressText(shipAddr) || this._partyEffectiveStateCode(party);
+        const co = this._companyGstStateCode();
+        const localRadio = document.getElementById('gtesTaxLocal');
+        const interRadio = document.getElementById('gtesTaxInter');
+        if (!localRadio || !interRadio) return;
+        if (co && partyCode) {
+            if (co !== partyCode) {
+                interRadio.checked = true;
+            } else {
+                localRadio.checked = true;
+            }
+        }
+        const pos = form.querySelector('[name="placeOfSupply"]');
+        if (pos && partyCode) {
+            const match = this.INDIAN_POS_OPTIONS.find((st) =>
+                (this._STATE_NAME_TO_GST_CODE[st.toLowerCase()] || '') === partyCode
+            );
+            if (match) pos.value = match;
+        }
+        this.calculateTotals();
+    },
+
+    scheduleApplyAutoTax() {
+        clearTimeout(this._autoTaxTimer);
+        this._autoTaxTimer = setTimeout(() => this._applyAutoTaxSupplyFromParty(), 150);
+    },
+
+    onShipSameToggle() {
+        const cb = document.getElementById('shipSameAsBilling');
+        const block = document.getElementById('shipToBlock');
+        if (cb && block) block.style.display = cb.checked ? 'none' : 'block';
+        if (cb && cb.checked) {
+            const ta = document.querySelector('#createInvoiceForm [name="shipToAddress"]');
+            if (ta) ta.value = '';
+        }
+        this._applyAutoTaxSupplyFromParty();
+    },
+
+    toggleOtherCharges() {
+        const cb = document.getElementById('otherChargesToggle');
+        const sec = document.getElementById('otherChargesSection');
+        if (cb && sec) {
+            sec.style.display = cb.checked ? 'block' : 'none';
+            this.calculateTotals();
+        }
+    },
+
     currentMode: 'gst', // 'gst' or 'non-gst'
 
     escapePdfHtml(str) {
@@ -516,11 +912,18 @@ const InvoicesUI = {
     // },
 
     showCreateModal(type = 'sales-gst') {
-        const isSales = !type.includes('purchase');
+        const UI = InvoicesUI;
+        const isPurchase = String(type).includes('purchase');
+        const isSales = !isPurchase;
+        UI._createInvoicePartyIsSales = isSales;
         const isGST = type === 'sales-gst' || type === 'purchase-gst';
-        const title = isGST ? 'Tax Invoice (GST)' : 'Plain Invoice (Non-GST)';
+        const title = isPurchase
+            ? (isGST ? 'Purchase (GST)' : 'Purchase (Non-GST)')
+            : (isGST ? 'Tax Invoice (GST)' : 'Plain Invoice (Non-GST)');
         const partyLabel = isSales ? 'Customer/Cash' : 'Supplier/Cash';
         const accountLabel = isSales ? 'Sales Account' : 'Purchase Account';
+        const docNoLabel = isPurchase ? 'Purchase No' : 'Invoice #';
+        const submitBtnText = isPurchase ? 'CREATE PURCHASE' : 'CREATE INVOICE';
 
         const customers = CustomerManager ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
         const inventory = InventoryManager ? InventoryManager.getAllMaterials() : (DataManager.getData('inventory') || []);
@@ -534,19 +937,27 @@ const InvoicesUI = {
         // Helper to escape quotes for HTML attributes
         const esc = (str) => String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-        // Generate datalists
-        const customerOptions = customers
-            .filter(c => {
-                if (!c.name) return false;
-                const category = isSales ? 'customer' : 'supplier';
-                const actual = String(c.accountType || c.type || c.accountGroup || 'customer').toLowerCase();
-                // Extremely permissive filter: match category, standard party types, or default to showing if type is ambiguous
-                return actual.includes(category) || actual.includes('debtor') || actual.includes('creditor') || 
-                       actual.includes('regular') || actual.includes('party') || actual === 'customer' || actual === 'supplier' || 
-                       (!c.accountType && !c.type); // Show if type information is missing
-            })
-            .map(c => `<option value="${esc(c.name)}" data-id="${c.id}" data-address="${esc(c.address)}" data-gst="${esc(c.gstin)}" data-state="${esc(c.state)}" data-dc-number="${esc(c.customerDCNumber)}"></option>`)
-            .join('');
+        const ledgerSelOpts = typeof UI._buildLedgerAccountSelectOptions === 'function'
+            ? UI._buildLedgerAccountSelectOptions(isPurchase)
+            : '<option value="">— Select ledger —</option>';
+        const otherChargesOpts = typeof UI._buildOtherChargesAccountSelectOptions === 'function'
+            ? UI._buildOtherChargesAccountSelectOptions('')
+            : '<option value="">— Select account —</option>';
+        const taxSchemeOpts = typeof UI._buildTaxSchemeSelectHtml === 'function'
+            ? UI._buildTaxSchemeSelectHtml('')
+            : (() => {
+                const escOpt = (s) => String(s || '').replace(/"/g, '&quot;');
+                return [
+                    ['DEFAULT', 'DEFAULT'],
+                    ['GST18', 'GST 18%'],
+                    ['GST12', 'GST 12%'],
+                    ['GST5', 'GST 5%']
+                ].map(([v, lab]) => `<option value="${escOpt(v)}">${escOpt(lab)}</option>`).join('');
+            })();
+        // Slim party datalist (deduped + role-filtered); typing refreshes via debounce
+        const customerOptions = typeof UI._buildInvPartyDatalistOptionsHtml === 'function'
+            ? UI._buildInvPartyDatalistOptionsHtml(isSales, customers, '', esc)
+            : '';
 
         // Separate Inventory and Services
         const inventoryOptions = inventory
@@ -556,9 +967,19 @@ const InvoicesUI = {
         const serviceOptions = services.map(s => `<option value="${esc(s.name)}" data-type="service" data-rate="${s.rate || 0}" data-unit="${esc(s.unit || 'job')}" data-gst="${s.tax || 0}" data-hsn="${esc(s.hsn || s.hsnCode)}"> (Service)</option>`).join('');
         const allItemOptions = inventoryOptions + serviceOptions;
 
-        // Generate next Invoice/Voucher number
-        const nextNo = InvoiceManager ? InvoiceManager.generateInvoiceNumber(isGST ? 'with-bill' : 'without-bill') : '00001';
-        const dcLabel = isSales ? 'Customer DC / Ref No' : 'Supplier Bill No / Ref';
+        // Generate next document number
+        const nextNo = isPurchase
+            ? (InvoiceManager && InvoiceManager.generatePurchaseBillNumber
+                ? InvoiceManager.generatePurchaseBillNumber(isGST)
+                : (isGST ? 'PUR-WB-0001' : 'PUR-NB-0001'))
+            : (InvoiceManager ? InvoiceManager.generateInvoiceNumber(isGST ? 'with-bill' : 'without-bill') : '00001');
+        const dcLabel = isPurchase
+            ? 'Supplier Invoice No'
+            : (isSales ? 'Customer DC / Ref No' : 'Supplier Bill No / Ref');
+        const today = new Date().toISOString().split('T')[0];
+        const posOpts = typeof UI._getPlaceOfSupplyOptionsHtml === 'function'
+            ? UI._getPlaceOfSupplyOptionsHtml(settings.defaultPlaceOfSupply || 'Tamil Nadu')
+            : '<option value="">— Select —</option>';
         
         const modalHtml = `
             <div class="modal fade" id="createInvoiceModal" tabindex="-1">
@@ -606,12 +1027,21 @@ const InvoicesUI = {
                         color: #9ea1a4 !important; /* Increased placeholder visibility */
                         opacity: 0.7;
                     }
+                    .gtes-create-invoice-body {
+                        min-height: 0;
+                        flex: 1 1 auto;
+                        max-height: calc(100vh - 52px);
+                    }
+                    .gtes-invoice-items-scroll {
+                        min-height: 120px;
+                        -webkit-overflow-scrolling: touch;
+                    }
                 </style>
-                <div class="modal-dialog modal-fullscreen modal-dialog-scrollable" style="max-width: 100vw; margin: 0;">
-                    <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-dialog modal-fullscreen" style="max-width: 100vw; margin: 0;">
+                    <div class="modal-content bg-dark text-white border-secondary d-flex flex-column h-100">
                         <div class="modal-header border-secondary d-flex justify-content-between align-items-center">
                             <div>
-                                <span class="fw-bold fs-5 me-3"><i class="bi bi-receipt me-2 text-info"></i> ${title}</span>
+                                <span class="fw-bold fs-5 me-3"><i class="bi ${isPurchase ? 'bi-bag-check me-2 text-warning' : 'bi-receipt me-2 text-info'}"></i> ${title}</span>
                                 <button type="button" class="btn btn-sm btn-outline-info ms-2 py-0 px-2" onclick="InvoicesUI.toggleFullscreen()" title="Toggle Fullscreen">
                                     <i class="bi bi-arrows-fullscreen"></i>
                                 </button>
@@ -619,8 +1049,8 @@ const InvoicesUI = {
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
 
-                        <div class="modal-body p-4 bg-dark">
-                            <form id="createInvoiceForm" onsubmit="event.preventDefault(); InvoicesUI.saveInvoice(event)">
+                        <div class="modal-body p-4 bg-dark d-flex flex-column overflow-hidden gtes-create-invoice-body">
+                            <form id="createInvoiceForm" class="d-flex flex-column flex-grow-1" style="min-height:0;" onsubmit="event.preventDefault(); InvoicesUI.saveInvoice(event)">
                                 <datalist id="invCustomerList">${customerOptions}</datalist>
                                 <datalist id="invInventoryList">${inventoryOptions}</datalist>
                                 <datalist id="invServiceList">${serviceOptions}</datalist>
@@ -630,10 +1060,11 @@ const InvoicesUI = {
                                 <input type="hidden" name="customerAddress">
 
 
-                                <!-- Header Info -->
-                                <div class="row g-3 mb-4">
+                                <!-- Header + search (fixed top of form) -->
+                                <div class="flex-shrink-0 gtes-invoice-form-top">
+                                <div class="row g-3 mb-3">
                                     <div class="col-md-3">
-                                        <div class="bk-form-label">Invoice #</div>
+                                        <div class="bk-form-label">${docNoLabel}</div>
                                         <input type="text" class="bk-form-control w-100 highlight-input" name="invoiceNo" value="${nextNo}" required>
                                     </div>
                                     <div class="col-md-3">
@@ -641,19 +1072,73 @@ const InvoicesUI = {
                                         <input type="text" class="bk-form-control w-100" name="poNumber" placeholder="No.">
                                     </div>
                                     <div class="col-md-3">
-                                        <div class="bk-form-label">Date</div>
-                                        <input type="date" class="bk-form-control w-100" name="date" value="${new Date().toISOString().split('T')[0]}" required>
+                                        <div class="bk-form-label">Voucher Date</div>
+                                        <input type="date" class="bk-form-control w-100" name="date" value="${today}" required>
                                     </div>
                                     <div class="col-md-3">
                                         <div class="bk-form-label">${partyLabel} *</div>
                                         <div class="input-group input-group-sm">
                                             <span class="input-group-text bg-dark border-secondary text-info"><i class="bi bi-person-badge"></i></span>
                                             <input type="text" class="bk-form-control flex-grow-1" name="customerName" list="invCustomerList" 
-                                                onchange="InvoicesUI.onCustomerSelect(this)" placeholder="Search customer...">
-                                            <input type="hidden" name="customerId">
+                                                onchange="InvoicesUI.onCustomerSelect(this)" onblur="InvoicesUI.scheduleUnknownPartyCheck(this)" placeholder="${isPurchase ? 'Search supplier…' : 'Search customer…'}">
                                         </div>
                                         <div id="customerDetailsInfo" class="small text-muted mt-1" style="font-size: 11px; min-height: 15px;"></div>
+                                        <div id="partyBillingDetails" class="mt-2 p-2 rounded border border-secondary bg-dark" style="display:none;">
+                                            <div class="row g-2">
+                                                <div class="col-md-6">
+                                                    <div class="bk-form-label small mb-0">GSTIN</div>
+                                                    <div id="partyGstDisplay" class="text-info small">—</div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="bk-form-label small mb-0">Billing address</div>
+                                                    <div id="partyAddrDisplay" class="text-white-50 small" style="white-space:pre-wrap;">—</div>
+                                                </div>
+                                            </div>
+                                            <div class="form-check form-switch mt-2 mb-1">
+                                                <input class="form-check-input" type="checkbox" id="shipSameAsBilling" checked onchange="InvoicesUI.onShipSameToggle()">
+                                                <label class="form-check-label small" for="shipSameAsBilling">Ship to same as billing</label>
+                                            </div>
+                                            <div id="shipToBlock" style="display:none;">
+                                                <div class="bk-form-label small">Ship-to address</div>
+                                                <textarea class="bk-form-control w-100" name="shipToAddress" rows="2" placeholder="Delivery / consignee address" oninput="InvoicesUI.scheduleApplyAutoTax()"></textarea>
+                                                <div class="form-check mt-2 mb-0">
+                                                    <input class="form-check-input" type="checkbox" id="includeShipToOnPdf" name="includeShipToOnPdf" checked>
+                                                    <label class="form-check-label small" for="includeShipToOnPdf">Show delivery address on printed invoice / PDF</label>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
+                                </div>
+
+                                <div class="row g-3 mb-4 p-3 rounded border border-secondary" style="background: rgba(255,255,255,0.03);">
+                                    <div class="col-12 mb-1"><span class="text-white-50 small"><i class="bi bi-journal-text me-1"></i> Ledger &amp; tax (Book Keeper style)</span></div>
+                                    <div class="col-md-3">
+                                        <div class="bk-form-label">${accountLabel}</div>
+                                        <select class="bk-form-control w-100" name="ledgerAccount">${ledgerSelOpts}</select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="bk-form-label">Due Date</div>
+                                        <input type="date" class="bk-form-control w-100" name="dueDate" value="${today}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="bk-form-label">Place of Supply</div>
+                                        <select class="bk-form-control w-100" name="placeOfSupply">${posOpts}</select>
+                                    </div>
+                                    ${isGST ? `
+                                    <div class="col-md-2">
+                                        <div class="bk-form-label">Tax</div>
+                                        <div class="btn-group btn-group-sm w-100 flex-wrap" role="group">
+                                            <input type="radio" class="btn-check" name="taxSupplyType" id="gtesTaxLocal" value="local" checked onchange="InvoicesUI.calculateTotals()">
+                                            <label class="btn btn-outline-info" for="gtesTaxLocal">Local</label>
+                                            <input type="radio" class="btn-check" name="taxSupplyType" id="gtesTaxInter" value="interstate" onchange="InvoicesUI.calculateTotals()">
+                                            <label class="btn btn-outline-info" for="gtesTaxInter">Interstate</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="bk-form-label">Tax scheme</div>
+                                        <select class="bk-form-control w-100" name="taxScheme" onchange="InvoicesUI.calculateTotals()">${taxSchemeOpts}</select>
+                                    </div>
+                                    ` : '<div class="col-md-4"></div>'}
                                 </div>
 
                                 <!-- Search Panels -->
@@ -700,13 +1185,16 @@ const InvoicesUI = {
                                         </div>
                                     </div>
                                 </div>
+                                </div>
 
-                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                <!-- Middle: line items only (scrolls) -->
+                                <div class="d-flex flex-column flex-grow-1 mb-3 gtes-invoice-middle" style="min-height:0;">
+                                <div class="d-flex justify-content-between align-items-center mb-2 flex-shrink-0">
                                     <h6 class="mb-0 text-uppercase letter-spacing-1 fw-bold"><i class="bi bi-list-check me-2 text-info"></i>Selected Items</h6>
                                 </div>
 
                                 <!-- Items Table -->
-                                <div class="table-responsive border border-secondary rounded overflow-hidden mb-4" style="max-height: 380px; overflow-y: auto;">
+                                <div class="table-responsive border border-secondary rounded gtes-invoice-items-scroll flex-grow-1">
                                     <table class="table table-dark table-hover table-sm mb-0" id="invoiceItemsTable">
                                         <thead>
                                             <tr class="bg-black">
@@ -726,9 +1214,10 @@ const InvoicesUI = {
                                         </tbody>
                                     </table>
                                 </div>
+                                </div>
 
-                                <!-- Footer Section -->
-                                <div class="row g-4">
+                                <!-- Footer: dispatch, narration, totals (pinned to bottom of form) -->
+                                <div class="row g-4 flex-shrink-0 mt-auto gtes-invoice-form-footer">
                                     <div class="col-md-8">
                                         <div class="row g-3">
                                             <div class="col-md-12">
@@ -760,6 +1249,32 @@ const InvoicesUI = {
                                                 </div>
                                             </div>
                                             <div class="col-md-12">
+                                                <div class="form-check form-switch mb-2">
+                                                    <input class="form-check-input" type="checkbox" id="otherChargesToggle" onchange="InvoicesUI.toggleOtherCharges()">
+                                                    <label class="form-check-label fw-bold text-warning" for="otherChargesToggle">OTHER CHARGES</label>
+                                                </div>
+                                                <div id="otherChargesSection" style="display: none;" class="card glass-panel border-warning mb-3">
+                                                    <div class="card-body p-3">
+                                                        <div class="row g-3">
+                                                            <div class="col-md-6">
+                                                                <div class="bk-form-label">Charge account</div>
+                                                                <select class="bk-form-control w-100" name="otherChargesLabel" onchange="InvoicesUI.calculateTotals()">${otherChargesOpts}</select>
+                                                            </div>
+                                                            <div class="col-md-6">
+                                                                <div class="bk-form-label">Amount</div>
+                                                                <input type="number" class="bk-form-control w-100" name="otherChargesAmount" value="0" step="0.01" onchange="InvoicesUI.calculateTotals()">
+                                                            </div>
+                                                            <div class="col-12">
+                                                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="InvoicesUI.promptAddOtherChargeAccount()">
+                                                                    <i class="bi bi-plus-lg"></i> Add charge account
+                                                                </button>
+                                                                <span class="small text-white-50 ms-2">Creates a ledger under Direct or Indirect Expenses (saved in Accounts).</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-12">
                                                 <div class="bk-form-label">Narration</div>
                                                 <textarea class="bk-form-control w-100" name="narration" rows="2" placeholder="Enter remarks..."></textarea>
                                             </div>
@@ -773,15 +1288,27 @@ const InvoicesUI = {
                                                     <span class="fw-bold text-white" id="subTotal">0.00</span>
                                                 </div>
                                                 ${isGST ? `
+                                                <div id="gtesCgstSgstFooter">
                                                 <div class="d-flex justify-content-between mb-1">
-                                                    <span class="footer-label">CGST (9%):</span>
+                                                    <span class="footer-label">CGST:</span>
                                                     <span class="fw-bold text-white" id="cgstTotal">0.00</span>
                                                 </div>
                                                 <div class="d-flex justify-content-between mb-2">
-                                                    <span class="footer-label">SGST (9%):</span>
+                                                    <span class="footer-label">SGST:</span>
                                                     <span class="fw-bold text-white" id="sgstTotal">0.00</span>
                                                 </div>
+                                                </div>
+                                                <div id="gtesIgstFooter" class="d-none mb-2">
+                                                    <div class="d-flex justify-content-between mb-1">
+                                                        <span class="footer-label">IGST:</span>
+                                                        <span class="fw-bold text-white" id="igstTotalDisplay">0.00</span>
+                                                    </div>
+                                                </div>
                                                 ` : ''}
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <span class="footer-label">OTHER CHARGES:</span>
+                                                    <span class="fw-bold text-white" id="otherChargesDisplay">0.00</span>
+                                                </div>
                                                 <div class="d-flex justify-content-between align-items-center mb-3">
                                                     <span class="footer-label">ROUND OFF:</span>
                                                     <input type="number" class="bk-form-control text-end p-1" style="width: 100px; height: 30px;" 
@@ -797,7 +1324,7 @@ const InvoicesUI = {
                                         <div class="d-flex gap-2 mt-4">
                                             <button type="button" class="btn btn-outline-secondary flex-grow-1" data-bs-dismiss="modal">CANCEL</button>
                                             <button type="submit" class="btn btn-primary flex-grow-1 py-2 fw-bold">
-                                                <i class="bi bi-plus-circle me-2"></i>CREATE INVOICE
+                                                <i class="bi bi-plus-circle me-2"></i>${submitBtnText}
                                             </button>
                                         </div>
                                     </div>
@@ -813,69 +1340,224 @@ const InvoicesUI = {
         if (existing) existing.remove();
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('createInvoiceModal'));
+        const modalEl = document.getElementById('createInvoiceModal');
+        const modal = new bootstrap.Modal(modalEl);
         modal.show();
 
-        // Add first row
-        this.addItemRow();
-        this.activateCustomDatalists();
+        const onModalHidden = () => {
+            document.querySelectorAll('.gtes-fixed-datalist-popup').forEach((p) => {
+                if (typeof p._gtesPopupCleanup === 'function') p._gtesPopupCleanup();
+                p.remove();
+            });
+            modalEl.removeEventListener('hidden.bs.modal', onModalHidden);
+        };
+        modalEl.addEventListener('hidden.bs.modal', onModalHidden);
+
+        // Add first row (use UI so this works if showCreateModal is ever called unbound)
+        if (typeof UI.addItemRow === 'function') UI.addItemRow();
+        if (typeof UI.activateCustomDatalists === 'function') UI.activateCustomDatalists();
+        const cn = document.querySelector('#createInvoiceForm [name="customerName"]');
+        if (cn) {
+            cn.addEventListener('input', () => {
+                clearTimeout(UI._partyDlTimer);
+                const q = cn.value;
+                UI._partyDlTimer = setTimeout(() => {
+                    if (typeof UI._refreshPartyDatalist === 'function') {
+                        UI._refreshPartyDatalist(q, UI._createInvoicePartyIsSales !== false);
+                    }
+                }, 200);
+            });
+            if (typeof UI._refreshPartyDatalist === 'function') {
+                UI._refreshPartyDatalist('', UI._createInvoicePartyIsSales !== false);
+            }
+        }
+    },
+
+    _buildInvPartyDatalistOptionsHtml(isSales, customers, query, esc) {
+        const escFn = esc || ((str) => String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'));
+        const pool = this._getPartiesForInvoiceSheet(isSales, customers || []);
+        const q = this._normalizePartyKey(query || '');
+        const matches = q
+            ? pool.filter((c) => this._normalizePartyKey(c.name).includes(q))
+            : pool.slice(0, 80);
+        return matches.slice(0, 80).map((c) => {
+            const addr = escFn(c.address || '');
+            const gst = escFn(c.gstin || '');
+            const st = escFn(c.state || '');
+            return `<option value="${escFn(c.name)}" data-id="${escFn(c.id)}" data-address="${addr}" data-gst="${gst}" data-state="${st}" data-dc-number="${escFn(c.customerDCNumber || '')}"></option>`;
+        }).join('');
+    },
+
+    /** After saving a new party from DeliveryUI customer modal while invoice is open */
+    afterPartySavedFromInvoice(customer) {
+        if (!customer || !document.getElementById('createInvoiceForm')) return;
+        const dl = document.getElementById('invCustomerList');
+        const isSales = this._createInvoicePartyIsSales !== false;
+        const all = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        if (dl) {
+            dl.innerHTML = this._buildInvPartyDatalistOptionsHtml(isSales, all, '', null);
+        }
+        const nameInp = document.querySelector('#createInvoiceForm [name="customerName"]');
+        if (nameInp) {
+            nameInp.value = customer.name || '';
+            this.onCustomerSelect(nameInp);
+        }
+    },
+
+    scheduleUnknownPartyCheck(input) {
+        clearTimeout(this._unknownPartyTimer);
+        this._unknownPartyTimer = setTimeout(() => this.maybePromptNewPartyFromInvoice(input), 280);
+    },
+
+    /**
+     * @returns {boolean} true if the create-party modal was opened (caller should abort save).
+     */
+    maybePromptNewPartyFromInvoice(input) {
+        if (!input || !document.getElementById('createInvoiceModal')?.classList.contains('show')) return false;
+        const val = (input.value || '').trim();
+        if (!val) return false;
+        const form = document.getElementById('createInvoiceForm');
+        const type = form?.querySelector('[name="type"]')?.value || '';
+        const isSales = !String(type).includes('purchase');
+        const list = document.getElementById('invCustomerList');
+        if (!list) return false;
+        const opts = Array.from(list.querySelectorAll('option'));
+        const hit = opts.find(o => o.value && o.value.toLowerCase() === val.toLowerCase());
+        if (hit) {
+            if (input.value !== hit.value) input.value = hit.value;
+            this.onCustomerSelect(input);
+            return false;
+        }
+        const hid = form?.querySelector('input[name="customerId"]')?.value;
+        if (hid && hid.trim()) return false;
+
+        const label = isSales ? 'customer' : 'supplier';
+        if (!confirm(`"${val}" is not in your ${label} list.\n\nCreate as a new ${label} and fill in details?`)) return false;
+
+        if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.showCustomerModal === 'function') {
+            DeliveryUI.currentCustomerType = isSales ? 'Customer' : 'Supplier';
+            DeliveryUI.showCustomerModal(null, { prefillName: val });
+            return true;
+        }
+        App.showNotification('Open Customers to add this party first.', 'warning');
+        return false;
+    },
+
+    /**
+     * Invoices require a party that exists in Customers (matched by id or exact name).
+     * @returns {object|null} Customer row or null if blocked (notification shown).
+     */
+    assertResolvedPartyOrAbort(formData, opts = {}) {
+        const saveBtn = opts.saveBtn;
+        const type = formData.get('type') || '';
+        const isPurchase = String(type).includes('purchase');
+        const label = isPurchase ? 'supplier' : 'customer';
+        const rawName = (formData.get('customerName') || '').trim();
+        if (!rawName) {
+            App.showNotification(`Enter a ${label} name and choose a saved account from the list.`, 'error');
+            if (saveBtn) saveBtn.disabled = false;
+            return null;
+        }
+        const customers = DataManager.getData('customers') || [];
+        const hId = (formData.get('customerId') || '').toString().trim();
+        let party = hId ? customers.find(c => c.id === hId) : null;
+        if (party && rawName && (party.name || '').trim().toLowerCase() !== rawName.toLowerCase()) {
+            party = null;
+        }
+        if (!party) {
+            party = customers.find(c => (c.name || '').trim().toLowerCase() === rawName.toLowerCase());
+        }
+        if (!party) {
+            const nameInput = document.querySelector('#createInvoiceForm [name="customerName"]');
+            if (nameInput && this.maybePromptNewPartyFromInvoice(nameInput)) {
+                if (saveBtn) saveBtn.disabled = false;
+                return null;
+            }
+            App.showNotification(
+                `No saved ${label} matches "${rawName}". Add them under Customers / Suppliers first, then select from the list.`,
+                'error'
+            );
+            if (saveBtn) saveBtn.disabled = false;
+            return null;
+        }
+        return party;
     },
 
     activateCustomDatalists() {
         document.querySelectorAll('#createInvoiceModal input[list]').forEach(input => {
+            if (input.dataset.gtesDatalistBound === '1') return;
             const listId = input.getAttribute('list');
             const datalist = document.getElementById(listId);
             if (!datalist) return;
 
             input.removeAttribute('list');
-            
+            input.dataset.gtesDatalistBound = '1';
+
             const wrapper = document.createElement('div');
             wrapper.className = 'position-relative w-100 flex-grow-1';
             input.parentNode.insertBefore(wrapper, input);
             wrapper.appendChild(input);
 
             const popup = document.createElement('div');
-            popup.className = 'dropdown-menu w-100 bg-dark border-secondary shadow-lg custom-datalist-popup p-0';
-            popup.style.maxHeight = '250px';
+            popup.className = 'dropdown-menu bg-dark border-secondary shadow-lg custom-datalist-popup gtes-fixed-datalist-popup p-0';
+            popup.style.maxHeight = 'min(360px, calc(100vh - 120px))';
             popup.style.overflowY = 'auto';
-            popup.style.position = 'absolute';
-            popup.style.top = '100%';
-            popup.style.left = '0';
-            popup.style.zIndex = '2000';
+            popup.style.position = 'fixed';
             popup.style.display = 'none';
-            wrapper.appendChild(popup);
+            popup.style.zIndex = '20050';
+            popup.style.minWidth = '200px';
+            document.body.appendChild(popup);
 
-            const options = Array.from(datalist.options);
+            const positionPopup = () => {
+                if (popup.style.display === 'none' || popup.style.display === '') return;
+                const r = input.getBoundingClientRect();
+                const vw = window.innerWidth;
+                let w = Math.max(r.width, 280);
+                let left = r.left;
+                if (left + w > vw - 8) left = Math.max(8, vw - w - 8);
+                popup.style.left = `${left}px`;
+                popup.style.top = `${r.bottom + 2}px`;
+                popup.style.width = `${w}px`;
+                const spaceBelow = window.innerHeight - r.bottom - 8;
+                popup.style.maxHeight = `${Math.min(360, Math.max(120, spaceBelow))}px`;
+            };
+
+            const getOptions = () => Array.from(datalist.options);
             let selectedIndex = -1;
             let currentFiltered = [];
+
+            const hidePopup = () => {
+                popup.style.display = 'none';
+                popup.classList.remove('show');
+            };
 
             const filterOptions = () => {
                 const val = input.value.toLowerCase().trim();
                 popup.innerHTML = '';
                 selectedIndex = -1;
-                
-                currentFiltered = options.filter(opt => {
+
+                currentFiltered = getOptions().filter(opt => {
                     if (!val) return true;
                     return opt.value.toLowerCase().includes(val) || (opt.textContent && opt.textContent.toLowerCase().includes(val));
                 });
 
-                currentFiltered.forEach((opt, idx) => {
+                currentFiltered.forEach((opt) => {
                     const div = document.createElement('div');
                     div.className = 'dropdown-item text-white px-3 py-2 text-wrap';
                     div.style.cursor = 'pointer';
                     div.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
                     div.style.fontSize = '14px';
-                    
+
                     let displayHTML = opt.value;
                     if (opt.textContent) {
                         displayHTML += `<span class="text-secondary ms-1" style="font-size:12px">${opt.textContent}</span>`;
                     }
                     div.innerHTML = displayHTML;
 
-                    div.onmousedown = (e) => { 
-                        e.preventDefault(); 
+                    div.onmousedown = (e) => {
+                        e.preventDefault();
                         input.value = opt.value;
-                        popup.style.display = 'none';
+                        hidePopup();
                         input.dispatchEvent(new Event('change', { bubbles: true }));
                     };
                     div.onmouseover = () => {
@@ -887,9 +1569,9 @@ const InvoicesUI = {
                 if (currentFiltered.length > 0) {
                     popup.classList.add('show');
                     popup.style.display = 'block';
+                    positionPopup();
                 } else {
-                    popup.classList.remove('show');
-                    popup.style.display = 'none';
+                    hidePopup();
                 }
             };
 
@@ -899,7 +1581,7 @@ const InvoicesUI = {
                     if (i === index) {
                         items[i].classList.add('bg-primary');
                         items[i].classList.remove('text-white');
-                        items[i].classList.add('text-white'); 
+                        items[i].classList.add('text-white');
                         items[i].scrollIntoView({ block: 'nearest' });
                     } else {
                         items[i].classList.remove('bg-primary');
@@ -908,14 +1590,16 @@ const InvoicesUI = {
                 selectedIndex = index;
             };
 
+            const onScrollOrResize = () => positionPopup();
+            window.addEventListener('scroll', onScrollOrResize, true);
+            window.addEventListener('resize', onScrollOrResize);
+
             input.addEventListener('input', filterOptions);
             input.addEventListener('focus', filterOptions);
-            input.addEventListener('blur', () => { 
-                // Increased delay to ensure onmousedown of dropdown items fires first
+            input.addEventListener('blur', () => {
                 setTimeout(() => {
-                    popup.style.display = 'none';
-                    popup.classList.remove('show');
-                }, 250); 
+                    hidePopup();
+                }, 200);
             });
 
             input.addEventListener('keydown', (e) => {
@@ -935,19 +1619,23 @@ const InvoicesUI = {
                         e.preventDefault();
                         if (selectedIndex >= 0 && currentFiltered[selectedIndex]) {
                             input.value = currentFiltered[selectedIndex].value;
-                            popup.style.display = 'none';
+                            hidePopup();
                             input.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     }
                 } else if (e.key === 'Escape') {
-                    popup.style.display = 'none';
+                    hidePopup();
                 }
             });
-            
-            // Allow clicking to open the list
+
             input.addEventListener('click', () => {
                 if (popup.style.display === 'none') filterOptions();
             });
+
+            popup._gtesPopupCleanup = () => {
+                window.removeEventListener('scroll', onScrollOrResize, true);
+                window.removeEventListener('resize', onScrollOrResize);
+            };
         });
     },
 
@@ -981,7 +1669,9 @@ const InvoicesUI = {
         
         // Correctly read the type input which contains the actual invoice type
         const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-        const isGST = typeInput ? (typeof InvoiceManager !== 'undefined' ? InvoiceManager.isGSTType(typeInput.value) : typeInput.value.includes('gst')) : false;
+        const isGST = typeInput ? (typeof InvoiceManager !== 'undefined' && InvoiceManager.isGSTType
+            ? InvoiceManager.isGSTType(typeInput.value)
+            : (String(typeInput.value).includes('gst') && !String(typeInput.value).includes('non'))) : false;
         
         row.innerHTML = `
             <td class="ps-3 py-2">
@@ -1068,40 +1758,62 @@ const InvoicesUI = {
     },
 
     onCustomerSelect(input) {
-        const val = input.value;
+        const val = (input.value || '').trim();
         const list = document.getElementById('invCustomerList');
-        const option = Array.from(list.options).find(opt => opt.value === val);
+        let option = list ? Array.from(list.options).find(opt => opt.value === val) : null;
+        if (!option && val && list) {
+            option = Array.from(list.options).find(opt => opt.value && opt.value.toLowerCase() === val.toLowerCase());
+            if (option) input.value = option.value;
+        }
+        const customers = DataManager.getData('customers') || [];
         const infoDiv = document.getElementById('customerDetailsInfo');
         const form = document.getElementById('createInvoiceForm');
+        const panel = document.getElementById('partyBillingDetails');
+        const gstEl = document.getElementById('partyGstDisplay');
+        const addrEl = document.getElementById('partyAddrDisplay');
 
         if (option) {
-            const id = option.getAttribute('data-id');
-            const address = option.getAttribute('data-address');
-            const gstin = option.getAttribute('data-gst');
-            const state = option.getAttribute('data-state');
-            const poStr = option.getAttribute('data-dc-number');
+            let id = option.getAttribute('data-id');
+            let address = option.getAttribute('data-address') || '';
+            let gstin = option.getAttribute('data-gst') || '';
+            const full = id ? customers.find(c => c.id === id) : customers.find(c => (c.name || '').trim().toLowerCase() === val.toLowerCase());
+            if (full) {
+                id = full.id;
+                address = full.address || address;
+                gstin = full.gstin || gstin;
+            }
 
-            document.querySelector('input[name="customerId"]').value = (id && id !== 'undefined') ? id : '';
-            document.querySelector('input[name="customerAddress"]').value = address || '';
+            const idField = document.querySelector('#createInvoiceForm input[name="customerId"]');
+            if (idField) idField.value = (id && id !== 'undefined') ? id : '';
+            const hAddress = form?.querySelector('[name="customerAddress"]');
+            if (hAddress) hAddress.value = address || '';
 
-            // Fill Customer DC / Ref No if available 
-            const poField = form.querySelector('[name="poNumber"]');
-            if (poField && option.getAttribute('data-dc-number')) {
+            const poField = form?.querySelector('[name="poNumber"]');
+            if (poField && full && full.customerDCNumber) {
+                poField.value = full.customerDCNumber;
+            } else if (poField && option.getAttribute('data-dc-number')) {
                 poField.value = option.getAttribute('data-dc-number');
             }
 
-            const hAddress = form.querySelector('[name="customerAddress"]');
-            if (hAddress) hAddress.value = address || '';
-
-            // Show Feedback
             if (infoDiv) {
-                const displayAddress = address || '';
-                const displayGst = gstin || '';
-                infoDiv.innerHTML = `<span class="text-success"><i class="bi bi-geo-alt"></i> ${displayAddress.substring(0, 50)}${displayAddress.length > 50 ? '...' : ''}</span> 
-                                     ${displayGst ? `<span class="ms-2 text-info"><i class="bi bi-tag"></i> GST: ${displayGst}</span>` : ''}`;
+                infoDiv.innerHTML = `<span class="text-info"><i class="bi bi-check2-circle"></i> ${(full || {}).name || val}</span>`;
             }
+            if (panel) panel.style.display = 'block';
+            if (gstEl) gstEl.textContent = gstin || '—';
+            if (addrEl) addrEl.textContent = address || '—';
+
+            const shipSame = document.getElementById('shipSameAsBilling');
+            const shipTa = form?.querySelector('[name="shipToAddress"]');
+            if (shipSame && shipSame.checked && shipTa) shipTa.value = '';
+
+            this._applyAutoTaxSupplyFromParty();
         } else {
             if (infoDiv) infoDiv.innerHTML = '';
+            if (panel) panel.style.display = 'none';
+            if (gstEl) gstEl.textContent = '—';
+            if (addrEl) addrEl.textContent = '—';
+            const hidField = form?.querySelector('input[name="customerId"]');
+            if (hidField) hidField.value = '';
         }
     },
 
@@ -1151,7 +1863,9 @@ const InvoicesUI = {
         const rows = document.querySelectorAll('#invoiceItemsBody tr');
         
         const typeInput = document.querySelector('#createInvoiceForm [name="type"]');
-        const isGST = typeInput ? typeInput.value.includes('gst') : false;
+        const isGST = typeInput ? (typeof InvoiceManager !== 'undefined' && InvoiceManager.isGSTType
+            ? InvoiceManager.isGSTType(typeInput.value)
+            : (String(typeInput.value).includes('gst') && !String(typeInput.value).includes('non'))) : false;
         
         let subTotal = 0;
         let taxTotal = 0;
@@ -1166,8 +1880,15 @@ const InvoicesUI = {
             }
         });
 
-        const roundOff = parseFloat(document.getElementById('roundOff').value) || 0;
-        const grandTotal = Math.round(subTotal + taxTotal + roundOff);
+        const roundOff = parseFloat(document.getElementById('roundOff')?.value) || 0;
+        const otherToggle = document.getElementById('otherChargesToggle');
+        const otherEl = document.querySelector('#createInvoiceForm [name="otherChargesAmount"]');
+        const other = (otherToggle && otherToggle.checked && otherEl)
+            ? (parseFloat(otherEl.value) || 0)
+            : 0;
+        const otherDisp = document.getElementById('otherChargesDisplay');
+        if (otherDisp) otherDisp.textContent = other.toFixed(2);
+        const grandTotal = Math.round(subTotal + taxTotal + roundOff + other);
 
         const subTotalEl = document.getElementById('subTotal');
         const totalAmountEl = document.getElementById('totalAmountDisplay');
@@ -1175,10 +1896,25 @@ const InvoicesUI = {
         if (subTotalEl) subTotalEl.textContent = subTotal.toFixed(2);
         
         if (isGST) {
+            const interstate = document.querySelector('#createInvoiceForm input[name="taxSupplyType"]:checked')?.value === 'interstate';
+            const cgstBlock = document.getElementById('gtesCgstSgstFooter');
+            const igstBlock = document.getElementById('gtesIgstFooter');
+            const igstEl = document.getElementById('igstTotalDisplay');
             const cgstEl = document.getElementById('cgstTotal');
             const sgstEl = document.getElementById('sgstTotal');
-            if (cgstEl) cgstEl.textContent = (taxTotal / 2).toFixed(2);
-            if (sgstEl) sgstEl.textContent = (taxTotal / 2).toFixed(2);
+            if (interstate) {
+                if (cgstBlock) cgstBlock.classList.add('d-none');
+                if (igstBlock) igstBlock.classList.remove('d-none');
+                if (igstEl) igstEl.textContent = taxTotal.toFixed(2);
+                if (cgstEl) cgstEl.textContent = '0.00';
+                if (sgstEl) sgstEl.textContent = '0.00';
+            } else {
+                if (cgstBlock) cgstBlock.classList.remove('d-none');
+                if (igstBlock) igstBlock.classList.add('d-none');
+                if (cgstEl) cgstEl.textContent = (taxTotal / 2).toFixed(2);
+                if (sgstEl) sgstEl.textContent = (taxTotal / 2).toFixed(2);
+                if (igstEl) igstEl.textContent = '0.00';
+            }
         }
 
         if (totalAmountEl) totalAmountEl.textContent = grandTotal.toFixed(2);
@@ -1201,9 +1937,21 @@ const InvoicesUI = {
             return;
         }
 
+        const nameInpSync = form.querySelector('[name="customerName"]');
+        if (nameInpSync) this.onCustomerSelect(nameInpSync);
         const formData = new FormData(form);
         const type = formData.get('type') || '';
-        const isGST = type.includes('gst-invoice');
+        const isGST = (typeof InvoiceManager !== 'undefined' && InvoiceManager.isGSTType)
+            ? InvoiceManager.isGSTType(type)
+            : (String(type).includes('gst') && !String(type).includes('non'));
+
+        const party = this.assertResolvedPartyOrAbort(formData, { saveBtn });
+        if (!party) {
+            this._saveInvoiceInProgress = false;
+            if (saveBtn) saveBtn.disabled = false;
+            return;
+        }
+
         const items = [];
         const total = parseFloat(document.getElementById('totalAmountDisplay').textContent);
 
@@ -1233,31 +1981,109 @@ const InvoicesUI = {
             }
         });
 
-        const cgstAmount = isGST ? (parseFloat(document.getElementById('cgstTotal')?.textContent) || 0) : 0;
-        const sgstAmount = isGST ? (parseFloat(document.getElementById('sgstTotal')?.textContent) || 0) : 0;
+        const interstate = (formData.get('taxSupplyType') || 'local') === 'interstate';
+        let cgstAmount = 0;
+        let sgstAmount = 0;
+        let igstAmount = 0;
+        if (isGST) {
+            if (interstate) {
+                igstAmount = parseFloat(document.getElementById('igstTotalDisplay')?.textContent) || 0;
+            } else {
+                cgstAmount = parseFloat(document.getElementById('cgstTotal')?.textContent) || 0;
+                sgstAmount = parseFloat(document.getElementById('sgstTotal')?.textContent) || 0;
+            }
+        }
 
-        const hId = formData.get('customerId');
+        const isPurchaseFlow = String(type).includes('purchase');
+        const hId = party.id;
+        const acctType = isPurchaseFlow ? 'Supplier' : 'Customer';
         const resolvedPartyId = (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
-            ? CustomerManager.resolvePartyId({ customerId: hId, customerName: formData.get('customerName'), accountType: 'customer' })
-            : '';
+            ? CustomerManager.resolvePartyId({ customerId: hId, customerName: party.name, accountType: acctType })
+            : (party.partyId || '');
+        const addrFromForm = (formData.get('customerAddress') || '').trim();
+
+        if (isPurchaseFlow) {
+            const purchaseData = {
+                billNo: formData.get('invoiceNo'),
+                date: formData.get('date'),
+                dueDate: formData.get('dueDate') || null,
+                vendor: party.name,
+                vendorName: party.name,
+                vendorId: party.id,
+                customerId: party.id,
+                partyId: resolvedPartyId || '',
+                category: 'Purchase Material',
+                description: ((formData.get('narration') || '').trim() || 'Purchase'),
+                poNumber: formData.get('poNumber') || '',
+                supplierBillNo: formData.get('poNumber') || '',
+                amount: total,
+                total: total,
+                subtotal: parseFloat(document.getElementById('subTotal').textContent),
+                cgst: cgstAmount,
+                sgst: sgstAmount,
+                igst: igstAmount,
+                roundOff: parseFloat(document.getElementById('roundOff')?.value) || 0,
+                items,
+                billType: isGST ? 'gst' : 'plain',
+                ledgerAccount: (formData.get('ledgerAccount') || '').trim(),
+                placeOfSupply: (formData.get('placeOfSupply') || '').trim(),
+                taxScheme: (formData.get('taxScheme') || '').trim() || 'DEFAULT',
+                taxSupplyType: (formData.get('taxSupplyType') || 'local').trim(),
+                narration: (formData.get('narration') || '').trim(),
+                dispatchDetails: {
+                    via: formData.get('dispatchVia') || '',
+                    lrNo: formData.get('lrNo') || '',
+                    vehicleNo: formData.get('vehicleNo') || '',
+                    date: formData.get('dispatchDate') || ''
+                },
+                otherCharges: {
+                    label: (formData.get('otherChargesLabel') || '').trim(),
+                    amount: (document.getElementById('otherChargesToggle')?.checked ? (parseFloat(formData.get('otherChargesAmount')) || 0) : 0)
+                },
+                shipSameAsBilling: document.getElementById('shipSameAsBilling')?.checked !== false,
+                shipToAddress: (document.getElementById('shipSameAsBilling')?.checked ? '' : (formData.get('shipToAddress') || '').trim()),
+                includeShipToOnPdf: document.getElementById('shipSameAsBilling')?.checked ? false : (document.getElementById('includeShipToOnPdf')?.checked !== false),
+                status: 'pending',
+                source: 'local'
+            };
+            try {
+                await ExpenseManager.saveExpense(purchaseData);
+                bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal'))?.hide();
+                App.showNotification('Purchase recorded successfully.', 'success');
+                queueMicrotask(() => {
+                    if (App.currentView === 'purchases' && typeof this.updatePurchasesTable === 'function') {
+                        this.updatePurchasesTable();
+                    }
+                });
+            } catch (err) {
+                console.error(err);
+                App.showNotification('Error saving purchase: ' + (err.message || err), 'error');
+            } finally {
+                this._saveInvoiceInProgress = false;
+                if (saveBtn) saveBtn.disabled = false;
+            }
+            return;
+        }
+
         const invoiceData = {
             id: formData.get('invoiceNo'),
             invoiceNo: formData.get('invoiceNo'), // Also store explicitly for table display
             type: isGST ? 'gst-invoice' : 'non-gst-invoice',
-            customerName: formData.get('customerName'),
-            customerAddress: formData.get('customerAddress'),
-            customerId: hId || ('CUST-' + Date.now()),
+            customerName: party.name,
+            customerAddress: addrFromForm || party.address || '',
+            customerId: hId,
             partyId: resolvedPartyId || '',
             date: formData.get('date'),
             poNumber: formData.get('poNumber'),
             items: items,
             subtotal: parseFloat(document.getElementById('subTotal').textContent),
             gst: {
-                cgst: cgstAmount,
-                sgst: sgstAmount,
-                igst: 0
+                cgst: interstate ? 0 : cgstAmount,
+                sgst: interstate ? 0 : sgstAmount,
+                igst: interstate ? igstAmount : 0
             },
             total: total,
+            roundOff: parseFloat(document.getElementById('roundOff')?.value) || 0,
             narration: formData.get('narration'),
             dispatchDetails: {
                 via: formData.get('dispatchVia') || '',
@@ -1266,58 +2092,75 @@ const InvoicesUI = {
                 date: formData.get('dispatchDate') || ''
             },
             status: 'pending',
-            jobCardId: form.getAttribute('data-source-jc') || null
+            jobCardId: form.getAttribute('data-source-jc') || null,
+            ledgerAccount: (formData.get('ledgerAccount') || '').trim() || null,
+            dueDate: formData.get('dueDate') || null,
+            placeOfSupply: (formData.get('placeOfSupply') || '').trim() || null,
+            taxScheme: (formData.get('taxScheme') || '').trim() || null,
+            taxSupplyType: (formData.get('taxSupplyType') || 'local').trim(),
+            otherCharges: {
+                label: (formData.get('otherChargesLabel') || '').trim(),
+                amount: (document.getElementById('otherChargesToggle')?.checked ? (parseFloat(formData.get('otherChargesAmount')) || 0) : 0)
+            },
+            shipSameAsBilling: document.getElementById('shipSameAsBilling')?.checked !== false,
+            shipToAddress: (document.getElementById('shipSameAsBilling')?.checked ? '' : (formData.get('shipToAddress') || '').trim()),
+            includeShipToOnPdf: document.getElementById('shipSameAsBilling')?.checked ? false : (document.getElementById('includeShipToOnPdf')?.checked !== false)
         };
 
         console.log('Saving Invoice:', invoiceData.invoiceNo, invoiceData.id);
 
-        if (!hId) {
-            const customers = DataManager.getData('customers') || [];
-            const foundCust = customers.find(c => c.name === invoiceData.customerName);
-            if (foundCust) {
-                invoiceData.customerId = foundCust.id;
-                invoiceData.partyId = foundCust.partyId || invoiceData.partyId || '';
-            }
-        }
-
         try {
             const invoice = await InvoiceManager.createInvoice(invoiceData);
-            
-            // NEW: Automatically create Delivery/Service Challan
-            if (typeof DeliveryUI !== 'undefined') {
-                await DeliveryUI.createAutoChallanFromInvoice(invoice);
-            }
 
-            bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal')).hide();
-            this.updateTable();
+            // Immediate feedback — do not block on challan sync, PDF, or heavy list refreshes
+            bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal'))?.hide();
+            if (typeof App !== 'undefined') App.showNotification('Invoice created successfully!', 'success');
 
-            // NEW: Refresh DeliveryUI if active (go back to history view if we came from there)
-            if (typeof DeliveryUI !== 'undefined') {
-                if (typeof DeliveryUI.loadHistory === 'function') {
-                    DeliveryUI.loadHistory();
+            queueMicrotask(() => {
+                try {
+                    this.updateTable();
+                } catch (err) {
+                    console.error(err);
                 }
-                if (typeof DeliveryUI.showSection === 'function') {
-                    DeliveryUI.showSection('history'); // ensure we are heavily on history
-                }
-            }
+            });
 
-            // NEW: Update Job Card status if linked
-            if (invoiceData.jobCardId && typeof JobCardManager !== 'undefined') {
-                await JobCardManager.updateJobCard(invoiceData.jobCardId, {
-                    status: 'dispatched',
-                    invoiceId: invoice.id
+            // Challan sync + delivery lists in background (was awaited before and froze the UI)
+            if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.createAutoChallanFromInvoice === 'function') {
+                void Promise.resolve(DeliveryUI.createAutoChallanFromInvoice(invoice)).catch((err) => {
+                    console.error('Auto challan:', err);
+                });
+            }
+            if (typeof App !== 'undefined' && App.currentView === 'challans' && typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.loadHistory === 'function') {
+                queueMicrotask(() => {
+                    try {
+                        DeliveryUI.loadHistory();
+                    } catch (err) {
+                        console.error(err);
+                    }
                 });
             }
 
-            App.showNotification('Invoice created successfully!', 'success');
-            
-            // NEW: Auto-open the invoice preview/print
-            setTimeout(() => {
-                this.previewInvoice(invoice.id);
-            }, 300);
+            if (invoiceData.jobCardId && typeof JobCardManager !== 'undefined') {
+                void JobCardManager.updateJobCard(invoiceData.jobCardId, {
+                    status: 'dispatched',
+                    invoiceId: invoice.id
+                }).catch((err) => console.error('Job card update:', err));
+            }
+
+            // Open PDF after the next paint so the modal can close first
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    try {
+                        this.previewInvoice(invoice.id);
+                    } catch (err) {
+                        console.error(err);
+                    }
+                }, 50);
+            });
         } catch (e) {
             console.error(e);
-            alert('Error creating invoice: ' + e.message);
+            if (typeof App !== 'undefined') App.showNotification('Error creating invoice: ' + e.message, 'error');
+            else alert('Error creating invoice: ' + e.message);
         } finally {
             this._saveInvoiceInProgress = false;
             if (saveBtn) saveBtn.disabled = false;
@@ -1357,6 +2200,57 @@ const InvoicesUI = {
         setField('lrNo', invoice.dispatchDetails?.lrNo);
         setField('vehicleNo', invoice.dispatchDetails?.vehicleNo);
         setField('dispatchDate', invoice.dispatchDetails?.date);
+        const ledgerSel = form.querySelector('[name="ledgerAccount"]');
+        if (ledgerSel && invoice.ledgerAccount && !Array.from(ledgerSel.options).some((o) => o.value === invoice.ledgerAccount)) {
+            const opt = document.createElement('option');
+            opt.value = invoice.ledgerAccount;
+            opt.textContent = invoice.ledgerAccount;
+            ledgerSel.appendChild(opt);
+        }
+        setField('ledgerAccount', invoice.ledgerAccount);
+        setField('placeOfSupply', invoice.placeOfSupply);
+        const tsSel = form.querySelector('[name="taxScheme"]');
+        const tsVal = String(invoice.taxScheme || '').trim();
+        if (tsSel && tsVal && !Array.from(tsSel.options).some((o) => o.value === tsVal)) {
+            const opt = document.createElement('option');
+            opt.value = tsVal;
+            opt.textContent = tsVal;
+            tsSel.appendChild(opt);
+        }
+        setField('taxScheme', invoice.taxScheme);
+        if (invoice.taxSupplyType === 'interstate') {
+            const ir = form.querySelector('#gtesTaxInter');
+            if (ir) ir.checked = true;
+        } else if (invoice.taxSupplyType === 'local') {
+            const lr = form.querySelector('#gtesTaxLocal');
+            if (lr) lr.checked = true;
+        }
+        const oc = invoice.otherCharges;
+        if (oc && (oc.amount || 0) > 0) {
+            const ot = document.getElementById('otherChargesToggle');
+            if (ot) ot.checked = true;
+            const ocSel = form.querySelector('select[name="otherChargesLabel"]');
+            const lab = String(oc.label || '').trim();
+            if (ocSel && lab && !Array.from(ocSel.options).some((o) => o.value === lab)) {
+                const opt = document.createElement('option');
+                opt.value = lab;
+                opt.textContent = lab;
+                ocSel.appendChild(opt);
+            }
+            setField('otherChargesLabel', oc.label);
+            setField('otherChargesAmount', oc.amount);
+            this.toggleOtherCharges();
+        }
+        if (invoice.shipToAddress) {
+            const ss = document.getElementById('shipSameAsBilling');
+            if (ss) ss.checked = false;
+            this.onShipSameToggle();
+            setField('shipToAddress', invoice.shipToAddress);
+        }
+        const incPdf = document.getElementById('includeShipToOnPdf');
+        if (incPdf) incPdf.checked = invoice.includeShipToOnPdf !== false;
+        const nameInpSync = form.querySelector('[name="customerName"]');
+        if (nameInpSync) this.onCustomerSelect(nameInpSync);
 
         // Show customer details info if possible
         if (invoice.customerId) {
@@ -1400,8 +2294,13 @@ const InvoicesUI = {
         if (!form || !form.checkValidity()) { form?.reportValidity(); return; }
 
         const formData = new FormData(form);
+        const party = this.assertResolvedPartyOrAbort(formData);
+        if (!party) return;
+
         const type = formData.get('type') || '';
-        const isGST = type === 'sales-gst' || type === 'gst-invoice';
+        const isGST = (typeof InvoiceManager !== 'undefined' && InvoiceManager.isGSTType)
+            ? InvoiceManager.isGSTType(type)
+            : (String(type).includes('gst') && !String(type).includes('non'));
         const items = [];
         const total = parseFloat(document.getElementById('totalAmountDisplay')?.textContent) || 0;
 
@@ -1427,29 +2326,55 @@ const InvoicesUI = {
             }
         });
 
-        const cgstAmount = isGST ? (parseFloat(document.getElementById('cgstTotal')?.textContent) || 0) : 0;
-        const sgstAmount = isGST ? (parseFloat(document.getElementById('sgstTotal')?.textContent) || 0) : 0;
+        const interstate = isGST && (formData.get('taxSupplyType') || 'local') === 'interstate';
+        let cgstAmount = 0;
+        let sgstAmount = 0;
+        let igstAmount = 0;
+        if (isGST) {
+            if (interstate) {
+                igstAmount = parseFloat(document.getElementById('igstTotalDisplay')?.textContent) || 0;
+            } else {
+                cgstAmount = parseFloat(document.getElementById('cgstTotal')?.textContent) || 0;
+                sgstAmount = parseFloat(document.getElementById('sgstTotal')?.textContent) || 0;
+            }
+        }
 
+        const addrEd = (formData.get('customerAddress') || '').trim();
         const updates = {
             invoiceNo: formData.get('invoiceNo'),
             date: formData.get('date'),
-            customerName: formData.get('customerName'),
-            customerId: formData.get('customerId'),
+            customerName: party.name,
+            customerId: party.id,
             partyId: (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
-                ? CustomerManager.resolvePartyId({ customerId: formData.get('customerId'), customerName: formData.get('customerName'), accountType: 'customer' })
-                : '',
-            customerAddress: formData.get('customerAddress'),
+                ? CustomerManager.resolvePartyId({ customerId: party.id, customerName: party.name, accountType: 'customer' })
+                : (party.partyId || ''),
+            customerAddress: addrEd || party.address || '',
             poNumber: formData.get('poNumber'),
             narration: formData.get('narration'),
+            ledgerAccount: (formData.get('ledgerAccount') || '').trim() || null,
+            placeOfSupply: (formData.get('placeOfSupply') || '').trim() || null,
+            taxScheme: (formData.get('taxScheme') || '').trim() || null,
+            taxSupplyType: (formData.get('taxSupplyType') || 'local').trim(),
             dispatchDetails: {
                 via: formData.get('dispatchVia') || '',
                 lrNo: formData.get('lrNo') || '',
                 vehicleNo: formData.get('vehicleNo') || '',
                 date: formData.get('dispatchDate') || ''
             },
+            otherCharges: {
+                label: (formData.get('otherChargesLabel') || '').trim(),
+                amount: (document.getElementById('otherChargesToggle')?.checked ? (parseFloat(formData.get('otherChargesAmount')) || 0) : 0)
+            },
+            shipSameAsBilling: document.getElementById('shipSameAsBilling')?.checked !== false,
+            shipToAddress: (document.getElementById('shipSameAsBilling')?.checked ? '' : (formData.get('shipToAddress') || '').trim()),
+            includeShipToOnPdf: document.getElementById('shipSameAsBilling')?.checked ? false : (document.getElementById('includeShipToOnPdf')?.checked !== false),
             items,
             subtotal: parseFloat(document.getElementById('subTotal')?.textContent) || 0,
-            gst: { cgst: cgstAmount, sgst: sgstAmount, igst: 0 },
+            gst: {
+                cgst: interstate ? 0 : cgstAmount,
+                sgst: interstate ? 0 : sgstAmount,
+                igst: interstate ? igstAmount : 0
+            },
             total,
         };
 
@@ -1457,30 +2382,45 @@ const InvoicesUI = {
 
         try {
             const updatedInvoice = await InvoiceManager.updateInvoice(invoiceId, updates);
-            
-            // PERFORMANCE FIX: Non-blocking call to createAutoChallanFromInvoice
-            // This allows the UI to close immediately while sync happens in background
-            if (typeof DeliveryUI !== 'undefined') {
-                DeliveryUI.createAutoChallanFromInvoice(updatedInvoice);
+
+            if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.createAutoChallanFromInvoice === 'function') {
+                void Promise.resolve(DeliveryUI.createAutoChallanFromInvoice(updatedInvoice)).catch((err) => console.error('Auto challan:', err));
             }
 
-            bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal')).hide();
-            this.updateTable();
-            
-            // NEW: Refresh DeliveryUI if active
+            bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal'))?.hide();
+            if (typeof App !== 'undefined') App.showNotification('Invoice updated successfully!', 'success');
+
+            queueMicrotask(() => {
+                try {
+                    this.updateTable();
+                } catch (err) {
+                    console.error(err);
+                }
+            });
+
             if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.loadInvoices === 'function') {
-                DeliveryUI.loadInvoices();
+                queueMicrotask(() => {
+                    try {
+                        DeliveryUI.loadInvoices();
+                    } catch (err) {
+                        console.error(err);
+                    }
+                });
             }
 
-            App.showNotification('Invoice updated successfully!', 'success');
-
-            // NEW: Auto-open the invoice preview/print
-            setTimeout(() => {
-                this.previewInvoice(invoiceId);
-            }, 300);
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    try {
+                        this.previewInvoice(invoiceId);
+                    } catch (err) {
+                        console.error(err);
+                    }
+                }, 50);
+            });
         } catch (e) {
             console.error(e);
-            alert('Error updating invoice: ' + e.message);
+            if (typeof App !== 'undefined') App.showNotification('Error updating invoice: ' + e.message, 'error');
+            else alert('Error updating invoice: ' + e.message);
         }
     },
 
@@ -1520,6 +2460,7 @@ const InvoicesUI = {
 
         const isPlainPdf = invoice.type === 'non-gst-invoice' || invoice.type === 'without-bill';
         const isGstPdf = !isPlainPdf && (invoice.billType === 'gst' || invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst');
+        const isInterstateGst = isGstPdf && this._isInterstateSalesGst(invoice, customer, company.gstin);
 
         // Fetch Master Data for real-time HSN/Unit/Description lookup
         const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || [];
@@ -1552,10 +2493,39 @@ const InvoicesUI = {
                     <td style="${cell} text-align: right; font-weight: 700;">${details.amount.toFixed(2)}</td>
                 </tr>`;
             }
-            const cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
-            const sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
-            const cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
-            const sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            if (isInterstateGst) {
+                const { igstA, igstR } = this._resolveInterstateLineIgst(item, details);
+                return `
+                <tr style="page-break-inside: avoid;">
+                    <td style="${cell} text-align: center;">${idx + 1}</td>
+                    <td style="${cell} vertical-align: top;">
+                        <div style="font-weight: 700;">${nm}</div>
+                        ${ds ? `<div style="font-size: 9px; font-style: italic; color: #222; margin-top: 3px; line-height: 1.35; white-space: pre-line;">${ds}</div>` : ''}
+                    </td>
+                    <td style="${cell} text-align: center; word-break: break-all; max-width: 88px;">${this.escapePdfHtml(details.hsn)}</td>
+                    <td style="${cell} text-align: center;">${qtyCell}</td>
+                    <td style="${cell} text-align: right;">${details.rate.toFixed(2)}</td>
+                    <td style="${cell} text-align: center;">${this.escapePdfHtml(details.unit)}</td>
+                    <td style="${cell} text-align: right;">${item.discount || 0}%</td>
+                    <td style="${cell} text-align: right;">${igstR.toFixed(1)}%</td>
+                    <td style="${cell} text-align: right;">${igstA.toFixed(2)}</td>
+                    <td style="${cell} text-align: right; font-weight: 700;">${details.amount.toFixed(2)}</td>
+                </tr>`;
+            }
+            let cgstR = parseFloat(item.cgstRate) || details.cgstRate || 0;
+            let sgstR = parseFloat(item.sgstRate) || details.cgstRate || 0;
+            let cgstA = parseFloat(item.cgstAmount || (details.amount * cgstR / 100)) || 0;
+            let sgstA = parseFloat(item.sgstAmount || (details.amount * sgstR / 100)) || 0;
+            const igstA = parseFloat(item.igst) || parseFloat(item.igstAmount) || 0;
+            const igstR = parseFloat(String(item.igstRate || '').replace(/[^0-9.]/g, '')) || 0;
+            const gstWhole = parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) || 0;
+            if (igstA > 0.01 && Math.abs(cgstA + sgstA) < 0.01) {
+                cgstA = igstA / 2;
+                sgstA = igstA / 2;
+                const halfRate = igstR > 0 ? igstR / 2 : (gstWhole > 0 ? gstWhole / 2 : 9);
+                cgstR = halfRate;
+                sgstR = halfRate;
+            }
             return `
                 <tr style="page-break-inside: avoid;">
                     <td style="${cell} text-align: center;">${idx + 1}</td>
@@ -1578,21 +2548,29 @@ const InvoicesUI = {
 
         const totalQty = invoice.items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
         const subtotal = invoice.subtotal || invoice.items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-        const cgstAmount = invoice.gst?.cgst || invoice.items.reduce((sum, item) => {
-            const amt = parseFloat(item.amount) || 0;
-            const rate = (parseFloat(item.cgstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) / 2) || 0);
-            return sum + (amt * (rate / 100));
-        }, 0);
-        const sgstAmount = invoice.gst?.sgst || invoice.items.reduce((sum, item) => {
-            const amt = parseFloat(item.amount) || 0;
-            const rate = (parseFloat(item.sgstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) / 2) || 0);
-            return sum + (amt * (rate / 100));
-        }, 0);
-        const igstAmount = invoice.gst?.igst || invoice.items.reduce((sum, item) => {
-            const amt = parseFloat(item.amount) || 0;
-            const rate = (parseFloat(item.igstRate) || (parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) || 0));
-            return sum + (amt * (rate / 100));
-        }, 0);
+        let cgstAmount = 0;
+        let sgstAmount = 0;
+        let igstAmount = 0;
+        if (isInterstateGst) {
+            const inter = this._accumulateInterstateSalesPdfFooterTaxes(invoice.items || [], allMasterItems);
+            igstAmount = inter.igst;
+            if (!(invoice.items || []).length && invoice.gst) {
+                igstAmount = parseFloat(invoice.gst.igst) || 0;
+                if (igstAmount < 0.01) {
+                    igstAmount = (parseFloat(invoice.gst.cgst) || 0) + (parseFloat(invoice.gst.sgst) || 0);
+                }
+            }
+        } else {
+            const taxSum = this._accumulatePurchasePdfFooterTaxes(invoice.items || [], allMasterItems);
+            cgstAmount = taxSum.cgst;
+            sgstAmount = taxSum.sgst;
+            igstAmount = taxSum.igst;
+            if (!(invoice.items || []).length && invoice.gst) {
+                cgstAmount = parseFloat(invoice.gst.cgst) || 0;
+                sgstAmount = parseFloat(invoice.gst.sgst) || 0;
+                igstAmount = parseFloat(invoice.gst.igst) || 0;
+            }
+        }
 
         const roundOff = invoice.roundOff !== undefined ? invoice.roundOff : 0;
         const total = invoice.total != null ? invoice.total : (subtotal + cgstAmount + sgstAmount + igstAmount + roundOff);
@@ -1603,13 +2581,29 @@ const InvoicesUI = {
         const qrUrl = upiId ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${total}&cu=INR`)}` : '';
 
         const isCreditNote = this._isCreditNoteSalesDoc(invoice);
-        const docTitle = isCreditNote ? 'Credit Note / Sales Return' : (isPlainPdf ? 'Invoice' : 'Tax Invoice');
-        const docNoLabel = isCreditNote ? 'Credit Note No' : 'Invoice No';
+        const isDcDoc = typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(invoice);
+        const docTitle = isCreditNote ? 'Credit Note / Sales Return' : (isDcDoc ? 'Delivery Challan' : (isPlainPdf ? 'Invoice' : 'Tax Invoice'));
+        const docNoLabel = isCreditNote ? 'Credit Note No' : (isDcDoc ? 'Delivery Challan No' : 'Invoice No');
+        const shipToAddr = (invoice.shipToAddress || '').trim();
+        const showShipToPdf = !!shipToAddr && invoice.includeShipToOnPdf !== false;
+        const detailsRightTitle = isDcDoc ? 'Challan Details' : 'Invoice Details';
         const salesRefNo = this._inferSalesReferenceNo(invoice);
         const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
         const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
 
-        const gstTableHead = isGstPdf ? `
+        const gstTableHead = isGstPdf ? (isInterstateGst ? `
+                    <tr style="${theadStyle}">
+                        <th style="${thBase}">#</th>
+                        <th style="${thBase} text-align: left;">Description</th>
+                        <th style="${thBase}">HSN</th>
+                        <th style="${thBase}">Qty</th>
+                        <th style="${thBase}">Rate</th>
+                        <th style="${thBase}">Per</th>
+                        <th style="${thBase}">Disc</th>
+                        <th style="${thBase}">IGST Rate</th>
+                        <th style="${thBase}">IGST Amt</th>
+                        <th style="${thBase}">Amount</th>
+                    </tr>` : `
                     <tr style="${theadStyle}">
                         <th rowspan="2" style="${thBase} vertical-align: middle;">#</th>
                         <th rowspan="2" style="${thBase} text-align: left;">Description</th>
@@ -1627,7 +2621,7 @@ const InvoicesUI = {
                         <th style="${thBase}">Amt</th>
                         <th style="${thBase}">%</th>
                         <th style="${thBase}">Amt</th>
-                    </tr>` : `
+                    </tr>`) : `
                     <tr style="${theadStyle}">
                         <th style="${thBase}">#</th>
                         <th style="${thBase} text-align: left;">Description</th>
@@ -1639,7 +2633,23 @@ const InvoicesUI = {
                         <th style="${thBase}">Amount</th>
                     </tr>`;
 
-        const summaryBox = isGstPdf ? `
+        const summaryBox = isGstPdf ? (isInterstateGst ? `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${subtotal.toFixed(2)}</td></tr>
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">IGST Total</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">₹${igstAmount.toFixed(2)}</td></tr>
+                        <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Round Off</td>
+                            <td style="padding: 6px 10px 6px 8px; text-align: right;">${roundOff.toFixed(2)}</td></tr>
+                        <tr><td colspan="2" style="padding: 10px 8px 8px; background: #dfe3e8;">
+                            <table style="width: 100%; border-collapse: collapse; background: #fff; border: 2px solid #111;">
+                                <tr style="font-weight: bold; font-size: 17px;">
+                                    <td style="padding: 10px 8px; text-align: right;">Total Amount</td>
+                                    <td style="padding: 10px 12px 10px 8px; text-align: right;">₹${total.toFixed(2)}</td>
+                                </tr>
+                            </table>
+                        </td></tr>
+                    </table>` : `
                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
                         <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
                             <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${subtotal.toFixed(2)}</td></tr>
@@ -1659,7 +2669,7 @@ const InvoicesUI = {
                                 </tr>
                             </table>
                         </td></tr>
-                    </table>` : `
+                    </table>`) : `
                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
                         <tr><td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
                             <td style="padding: 6px 10px 6px 8px; text-align: right; font-weight: 600; min-width: 100px;">₹${subtotal.toFixed(2)}</td></tr>
@@ -1675,12 +2685,15 @@ const InvoicesUI = {
                         </td></tr>
                     </table>`;
 
-        const taxLeftBlock = isGstPdf ? `
+        const taxLeftBlock = isGstPdf ? (isInterstateGst ? `
+                    <div style="margin-bottom: 6px;"><strong>IGST Amt:</strong> ${igstAmount.toFixed(2)}</div>
+                    <div style="margin-bottom: 12px;"><strong>Total Tax:</strong> ${igstAmount.toFixed(2)}</div>
+                    <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>` : `
                     <div style="margin-bottom: 6px;"><strong>CGST Amt:</strong> ${cgstAmount.toFixed(2)}</div>
                     <div style="margin-bottom: 6px;"><strong>SGST Amt:</strong> ${sgstAmount.toFixed(2)}</div>
                     ${igstAmount > 0 ? `<div style="margin-bottom: 6px;"><strong>IGST Amt:</strong> ${igstAmount.toFixed(2)}</div>` : ''}
                     <div style="margin-bottom: 12px;"><strong>Total Tax:</strong> ${(cgstAmount + sgstAmount + igstAmount).toFixed(2)}</div>
-                    <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>` : `
+                    <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>`) : `
                     <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>`;
 
         element.innerHTML = `
@@ -1719,7 +2732,7 @@ const InvoicesUI = {
                     </td>
                     <td style="width: 50%; vertical-align: top; padding: 0 0 0 7px;">
                         <div style="border: 1px solid #000; padding: 10px; height: 100%;">
-                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Invoice Details</div>
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">${detailsRightTitle}</div>
                             <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 110px; color: #444;">PO / Ref No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.poNumber || '-')}</strong></td></tr>
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; color: #444;">Sales Invoice Ref:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(salesRefNo)}</strong></td></tr>
@@ -1734,6 +2747,19 @@ const InvoicesUI = {
                     </td>
                 </tr>
             </table>
+
+            ${showShipToPdf ? `
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 100%; vertical-align: top; padding: 0;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Details of Consignee (Shipped To)</div>
+                            <div style="font-size: 10px; line-height: 1.4; white-space: pre-wrap;">${this.escapePdfHtml(shipToAddr)}</div>
+                            ${invoice.shipToGstin ? `<div style="font-size: 10px; margin-top: 6px;"><strong>GSTIN:</strong> ${this.escapePdfHtml(invoice.shipToGstin)}</div>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            </table>` : ''}
 
             <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
                 <thead>${gstTableHead}</thead>
@@ -1750,7 +2776,9 @@ const InvoicesUI = {
                             2. Subject to Chennai Jurisdiction.
                         </div>
                         <div style="margin-top: 12px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
-                            We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
+                            ${isDcDoc
+                ? 'We declare that this delivery challan shows the actual quantity and description of goods and that all particulars are true and correct.'
+                : 'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.'}
                         </div>
                         ${invoice.narration ? `
                         <div style="margin-top: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;">
@@ -1796,7 +2824,9 @@ const InvoicesUI = {
             </td></tr></table>
 
             <div style="margin-top: 24px; text-align: center; font-size: 9px; color: #64748b; border-top: 1px solid #e5e7eb; padding-top: 10px;">
-                This is a computer generated invoice and does not require a physical signature.
+                ${isDcDoc
+            ? 'This is a computer generated delivery challan and does not require a physical signature.'
+            : 'This is a computer generated invoice and does not require a physical signature.'}
             </div>
         `;
         return element;
@@ -1879,22 +2909,21 @@ const InvoicesUI = {
     async deleteInvoice(id) {
         if (window.InvoiceManager && window.InvoiceManager.deleteInvoice) {
             const invoice = InvoiceManager.getInvoice(id);
-            if (invoice && invoice.challanId) {
-                if (confirm(`Delete both Invoice ${id} and linked DC ${invoice.challanId}?\n\n- Click OK to delete BOTH\n- Click CANCEL to see more options`)) {
-                    await InvoiceManager.deleteInvoice(id, true);
-                } else {
-                    if (confirm(`Keep DC ${invoice.challanId} and delete ONLY Invoice ${id}?`)) {
-                        await InvoiceManager.deleteInvoice(id, false);
-                    } else {
-                        return; // Cancelled
-                    }
-                }
-            } else {
-                if (!confirm('Are you sure you want to delete this invoice?')) return;
-                await InvoiceManager.deleteInvoice(id);
+            const linked = (typeof DeliveryManager !== 'undefined')
+                ? DeliveryManager.getAllChallans().filter(c => c.invoiceId === id || c.id === invoice?.challanId)
+                : [];
+            let msg = 'Are you sure you want to delete this invoice?';
+            if (linked.length) {
+                const ids = linked.map(c => c.id).join(', ');
+                msg = `Delete this invoice and ${linked.length} linked challan(s) (${ids})?\n\nThey will be removed from History and View DC, and moved to Recycle Bin.`;
             }
+            if (!confirm(msg)) return;
+            await InvoiceManager.deleteInvoice(id);
         }
         this.updateTable();
+        if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.loadHistory === 'function') {
+            try { DeliveryUI.loadHistory(); } catch (e) { /* ignore */ }
+        }
     },
 
     renderPurchasesList() {
@@ -1915,9 +2944,12 @@ const InvoicesUI = {
 
         view.innerHTML = `
             <div class="container-fluid">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="bi bi-cart-check text-warning me-2"></i> Purchase Bills</h2>
-                    <div>
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                    <h2 class="mb-0"><i class="bi bi-cart-check text-warning me-2"></i> Purchase Bills</h2>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-success btn-sm" onclick="InvoicesUI.showCreateModal('purchase-gst')">
+                            <i class="bi bi-plus-circle me-1"></i> Record purchase
+                        </button>
                          <button class="btn btn-outline-light btn-sm" onclick="App.showView('accounting')">
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
@@ -2213,6 +3245,8 @@ const InvoicesUI = {
         const purchaseRefNo = this._inferPurchaseReferenceNo(p);
         const purchaseDocTitle = isDebitNote ? 'Debit Note / Purchase Return' : 'Purchase Bill';
         const purchaseDocNoLabel = isDebitNote ? 'Debit Note No' : 'Bill No';
+        const purchaseShipAddr = (p.shipToAddress || p.deliveryAddress || '').trim();
+        const showPurchaseShipPdf = !!purchaseShipAddr && p.includeShipToOnPdf !== false;
 
         const masterInventory = DataManager.getData(DataManager.KEYS.INVENTORY) || DataManager.getData('gtes_inventory_items') || [];
         const masterServices = DataManager.getData(DataManager.KEYS.SERVICES || 'gtes_services') || DataManager.getData('gtes_services') || [];
@@ -2353,6 +3387,19 @@ const InvoicesUI = {
                     </td>
                 </tr>
             </table>
+
+            ${showPurchaseShipPdf ? `
+            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+                <tr>
+                    <td style="width: 100%; vertical-align: top; padding: 0;">
+                        <div style="border: 1px solid #000; padding: 10px;">
+                            <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Ship To / Delivery Address</div>
+                            <div style="font-size: 10px; line-height: 1.4; white-space: pre-wrap;">${this.escapePdfHtml(purchaseShipAddr)}</div>
+                            ${p.shipToGstin ? `<div style="font-size: 10px; margin-top: 6px;"><strong>GSTIN:</strong> ${this.escapePdfHtml(p.shipToGstin)}</div>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            </table>` : ''}
 
             <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
                 <thead>
@@ -2667,6 +3714,80 @@ const InvoicesUI = {
         if (sumAll > target + tol) return [cloneOne(best)];
         if (bestDiff <= tol * 3) return [cloneOne(best)];
         return items;
+    },
+
+    _normalizeGstStateCode(gstin) {
+        const s = (gstin || '').toString().replace(/\s/g, '');
+        if (s.length < 2) return '';
+        const d = s.slice(0, 2);
+        return /^\d{2}$/.test(d) ? d : '';
+    },
+
+    /**
+     * Different seller vs buyer / place-of-supply state → interstate supply (IGST only on PDF).
+     * Same state → intrastate (CGST + SGST).
+     */
+    _isInterstateSalesGst(invoice, customer, sellerGstin) {
+        const seller = this._normalizeGstStateCode(sellerGstin);
+        let buyer = this._normalizeGstStateCode(
+            (customer && customer.gstin) || invoice.customerGstin || invoice.billingGstin || invoice.shipToGstin
+        );
+        if (!buyer && invoice.placeOfSupply) {
+            const m = String(invoice.placeOfSupply).trim().match(/^(\d{2})/);
+            if (m) buyer = m[1];
+        }
+        if (!seller || !buyer) return false;
+        return seller !== buyer;
+    },
+
+    /**
+     * Interstate line: prefer stored IGST; else CGST+SGST; else taxable × rate when imports omit tax columns.
+     */
+    _resolveInterstateLineIgst(item, details) {
+        const taxable = parseFloat(details.amount) || 0;
+        let igstA = parseFloat(item.igst) || parseFloat(item.igstAmount) || 0;
+        const cgstA = parseFloat(item.cgstAmount) || 0;
+        const sgstA = parseFloat(item.sgstAmount) || 0;
+        if (igstA < 0.01 && Math.abs(cgstA + sgstA) > 0.01) {
+            igstA = cgstA + sgstA;
+        }
+
+        let igstR = parseFloat(String(item.igstRate || '').replace(/[^0-9.]/g, '')) || 0;
+        if (igstR < 0.01) {
+            const g = parseFloat(String(item.gstRate || '').replace(/[^0-9.]/g, '')) || 0;
+            if (g > 0.01) igstR = g;
+        }
+        if (igstR < 0.01) {
+            const cr = parseFloat(item.cgstRate) || 0;
+            const sr = parseFloat(item.sgstRate) || 0;
+            if (cr + sr > 0.01) igstR = cr + sr;
+        }
+        if (igstR < 0.01 && details) {
+            const fullG = parseFloat(details.gstRate) || 0;
+            if (fullG > 0.01) igstR = fullG;
+            else {
+                const half = parseFloat(details.cgstRate) || 0;
+                if (half > 0.01) igstR = half * 2;
+            }
+        }
+
+        if (igstA < 0.01 && taxable > 0.01 && igstR > 0.01) {
+            igstA = taxable * (igstR / 100);
+        }
+        return { igstA, igstR };
+    },
+
+    /** Interstate sales PDF: line IGST, or CGST+SGST combined when data was stored as intrastate split. */
+    _accumulateInterstateSalesPdfFooterTaxes(items, allMasterItems) {
+        let igst = 0;
+        let taxable = 0;
+        for (const item of items || []) {
+            const details = this.getItemDisplayDetails(item, allMasterItems, false);
+            taxable += details.amount;
+            const { igstA } = this._resolveInterstateLineIgst(item, details);
+            igst += igstA;
+        }
+        return { igst, taxable };
     },
 
     /** Match purchase PDF footer taxes to row rendering (including IGST shown as split CGST/SGST). */

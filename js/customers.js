@@ -179,10 +179,16 @@ const CustomerManager = {
             accountType: customerData.accountType || 'Customer',
             isOtherAccount: customerData.isOtherAccount || false,
             accountGroup: customerData.accountGroup || '',
-            balance: customerData.balance || 0,
+            balance: customerData.balance ?? customerData.openingBalance ?? 0,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
+
+        const extraKeys = ['state', 'pincode', 'pan', 'address2', 'country', 'openingBalance', 'creditLimit', 'creditPeriod', 'displayName', 'status'];
+        extraKeys.forEach((k) => {
+            const v = customerData[k];
+            if (v !== undefined && v !== null && v !== '') customer[k] = v;
+        });
 
         customers.push(customer);
         await DataManager.saveData('customers', customers);

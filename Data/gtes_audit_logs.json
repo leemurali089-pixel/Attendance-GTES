@@ -1,10 +1,17 @@
 [
   {
+    "id": "1776749564527",
+    "timestamp": "2026-04-21T05:32:44.527Z",
+    "user": "GTES67",
+    "action": "USER_UPDATE",
+    "details": "Updated user Ganesh"
+  },
+  {
+    "action": "USER_DELETE",
+    "details": "Deleted user ID 1775300846566",
     "id": "1776514053509",
     "timestamp": "2026-04-18T12:07:33.509Z",
-    "user": "GTES67",
-    "action": "USER_DELETE",
-    "details": "Deleted user ID 1775300846566"
+    "user": "GTES67"
   },
   {
     "action": "USER_CREATE",

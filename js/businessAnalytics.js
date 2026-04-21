@@ -81,7 +81,8 @@ const BusinessAnalytics = {
     },
 
     /**
-     * Get fast-moving items (most used in last 30 days)
+     * Fast-moving materials: prefers stock **out** (consumption) in the last N days.
+     * If there are no `out` transactions (common when only purchase receipts are logged), falls back to **in** (receipts).
      */
     getFastMovingItems(days = 30) {
         const transactions = DataManager.getData('inventoryTransactions') || [];
@@ -90,27 +91,34 @@ const BusinessAnalytics = {
         cutoffDate.setDate(cutoffDate.getDate() - days);
         const inventoryById = new Map(inventory.map(m => [m.id, m]));
 
-        const recentTxns = transactions.filter(t =>
-            new Date(t.date) >= cutoffDate && t.type === 'out'
-        );
+        const buildForType = (type) => {
+            const recentTxns = transactions.filter(t =>
+                new Date(t.date) >= cutoffDate && t.type === type
+            );
+            const usageMap = {};
+            recentTxns.forEach(t => {
+                if (!t.materialId) return;
+                usageMap[t.materialId] = (usageMap[t.materialId] || 0) + (parseFloat(t.quantity) || 0);
+            });
+            return Object.entries(usageMap)
+                .map(([materialId, quantity]) => {
+                    const material = inventoryById.get(materialId);
+                    return {
+                        materialId,
+                        name: material?.name || 'Unknown',
+                        quantity,
+                        value: quantity * (material?.rate || 0)
+                    };
+                })
+                .sort((a, b) => b.quantity - a.quantity);
+        };
 
-        const usageMap = {};
-        recentTxns.forEach(t => {
-            usageMap[t.materialId] = (usageMap[t.materialId] || 0) + t.quantity;
-        });
-
-        return Object.entries(usageMap)
-            .map(([materialId, quantity]) => {
-                const material = inventoryById.get(materialId);
-                return {
-                    materialId,
-                    name: material?.name || 'Unknown',
-                    quantity,
-                    value: quantity * (material?.rate || 0)
-                };
-            })
-            .sort((a, b) => b.quantity - a.quantity)
-            .slice(0, 10);
+        const outItems = buildForType('out');
+        if (outItems.length > 0) {
+            return { basis: 'out', items: outItems.slice(0, 10) };
+        }
+        const inItems = buildForType('in');
+        return { basis: 'in', items: inItems.slice(0, 10) };
     },
 
     /**
@@ -882,6 +890,443 @@ const BusinessAnalytics = {
         return entries;
     },
 
+    /** True when Analytics UI selected a Book Keeper–style ledger bucket (not AR/AP party ledgers). */
+    _isGeneralLedgerGroup(ag) {
+        const s = String(ag || '');
+        return s.startsWith('gl_') || s === 'ledger';
+    },
+
+    _normalizeLedgerName(s) {
+        return String(s || '')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .replace(/\u00a0/g, ' ')
+            .trim();
+    },
+
+    _ledgerNamesMatch(a, b) {
+        const x = this._normalizeLedgerName(a);
+        const y = this._normalizeLedgerName(b);
+        return Boolean(x && y && x === y);
+    },
+
+    _ledgerNameLooksLikeSalesReturn(name) {
+        return /\bsales\s*return\b/i.test(String(name || ''));
+    },
+
+    _inferLedgerNature(account) {
+        const g = String(account?.accountGroup || '').toLowerCase();
+        const n = String(account?.name || '').toLowerCase();
+        if (g.includes('direct') && g.includes('income')) return 'income';
+        if (g.includes('indirect') && g.includes('income')) return 'income';
+        if (g.includes('direct') && (g.includes('expense') || g.includes('expences'))) return 'expense';
+        if (g.includes('indirect') && (g.includes('expense') || g.includes('expences'))) return 'expense';
+        if (g.includes('duties') || g.includes('tax')) return 'liability';
+        if (g.includes('current') && g.includes('asset')) return 'asset';
+        if (g.includes('bank')) return 'asset';
+        if (g.includes('cash')) return 'asset';
+        if (/\b(sales\s*return)\b/i.test(n)) return 'contra_income';
+        if (/\bround\s*off\b/i.test(n)) return 'income';
+        if (/(cgst|sgst|igst)/.test(n) && /%/.test(n)) return 'liability';
+        if (/\b(input|itc|itc\s*receivable)\b/i.test(n)) return 'asset';
+        if (/\b(salary|cartage|allowance|rent|packing|forwarding)\b/i.test(n)) return 'expense';
+        return 'expense';
+    },
+
+    _isGstTaxLedgerName(name) {
+        const n = String(name || '').toLowerCase();
+        return (n.includes('cgst') || n.includes('sgst') || n.includes('igst')) && !/\b(input|itc)\b/.test(n);
+    },
+
+    _gstAmountFromInvoiceForLedger(inv, accountName) {
+        const n = String(accountName || '').toLowerCase();
+        const gst = inv.gst || {};
+        if (n.includes('igst')) return Math.abs(parseFloat(gst.igst) || 0);
+        if (n.includes('cgst')) return Math.abs(parseFloat(gst.cgst) || 0);
+        if (n.includes('sgst')) return Math.abs(parseFloat(gst.sgst) || 0);
+        return 0;
+    },
+
+    _gstAmountFromExpenseForLedger(exp, accountName) {
+        const n = String(accountName || '').toLowerCase();
+        if (n.includes('igst')) return Math.abs(parseFloat(exp.igst) || 0);
+        if (n.includes('cgst')) return Math.abs(parseFloat(exp.cgst) || 0);
+        if (n.includes('sgst')) return Math.abs(parseFloat(exp.sgst) || 0);
+        return 0;
+    },
+
+    _glRunningDelta(account, debit, credit) {
+        const nature = this._inferLedgerNature(account);
+        if (nature === 'income' || nature === 'contra_income') return credit - debit;
+        if (nature === 'expense') return debit - credit;
+        if (nature === 'asset') return debit - credit;
+        if (nature === 'liability') return credit - debit;
+        return debit - credit;
+    },
+
+    _getGlOpeningSigned(account) {
+        if (!account) return 0;
+        const openingRaw = (account.openingBalance !== undefined && account.openingBalance !== null)
+            ? account.openingBalance
+            : account.balance;
+        let parsed = this._toAmount(openingRaw);
+        if (typeof openingRaw === 'string') {
+            const low = openingRaw.toLowerCase();
+            if (/(^|\W)(cr|credit)(\W|$)/.test(low)) parsed = -Math.abs(parsed);
+            if (/(^|\W)(dr|debit)(\W|$)/.test(low)) parsed = Math.abs(parsed);
+        }
+        return parsed;
+    },
+
+    _sortGlLedgerEntries(entries) {
+        entries.sort((a, b) => {
+            const cd = this._compareLedgerDates(a.date, b.date);
+            if (cd !== 0) return cd;
+            return this._ledgerEntryTimestamp(a) - this._ledgerEntryTimestamp(b);
+        });
+    },
+
+    /**
+     * Find account row from Customers or gtes_accounts (for general ledger).
+     */
+    findLedgerAccountRecord(accountId) {
+        const raw = (accountId == null ? '' : String(accountId)).trim();
+        if (!raw) return null;
+        const requestedNorm = this._normalizePartyName(raw);
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        let a = customers.find(c => {
+            const idMatch = c.id != null && String(c.id) === raw;
+            const nameRawMatch = (c.name || '').toString().trim() === raw;
+            const nameNormMatch = requestedNorm && this._normalizePartyName(c.name) === requestedNorm;
+            return idMatch || nameRawMatch || nameNormMatch;
+        });
+        if (a) return { ...a, _ledgerSource: 'customer' };
+        const gtes = DataManager.getData(DataManager.KEYS.ACCOUNTS) || DataManager.getData('gtes_accounts') || [];
+        a = gtes.find(x => {
+            const id = x.id != null ? String(x.id) : '';
+            const nm = (x.name || '').toString().trim();
+            return (id && id === raw) || nm === raw || (requestedNorm && this._normalizePartyName(nm) === requestedNorm);
+        });
+        if (a) return { ...a, _ledgerSource: 'gtes' };
+        return null;
+    },
+
+    /**
+     * Which UI "Account group" bucket an account belongs to (Book Keeper groups + bank/cash).
+     */
+    inferLedgerUiGroupKey(account) {
+        const g = String(account?.accountGroup || '').toLowerCase();
+        const n = String(account?.name || '').toLowerCase();
+        if (g.includes('direct') && g.includes('income')) return 'gl_direct_income';
+        if (g.includes('indirect') && g.includes('income')) return 'gl_indirect_income';
+        if (g.includes('direct') && (g.includes('expense') || g.includes('expences'))) return 'gl_direct_expense';
+        if (g.includes('indirect') && (g.includes('expense') || g.includes('expences'))) return 'gl_indirect_expense';
+        if (g.includes('duties') || g.includes('tax')) return 'gl_duties_taxes';
+        if (g.includes('current') && g.includes('asset')) return 'gl_current_assets';
+        if (g.includes('bank')) return 'gl_bank';
+        if (g.includes('cash')) return 'gl_cash';
+        if (/%/.test(n) && (n.includes('cgst') || n.includes('sgst') || n.includes('igst'))) return 'gl_duties_taxes';
+        if (/\b(sales\s*return|round\s*off)\b/i.test(n)) return 'gl_indirect_income';
+        if (/\b(bank|hdfc|sbi|icici|axis|current\s*a\/?c)\b/i.test(n)) return 'gl_bank';
+        if (/\bcash\b/.test(n) && (n.includes('hand') || n.includes('in'))) return 'gl_cash';
+        if (/\b(salary|cartage|hra|allowance|ta|oa|packing|forwarding)\b/i.test(n)) return 'gl_direct_expense';
+        return 'gl_other';
+    },
+
+    /**
+     * Accounts listed in Customer Ledger sidebar for a given group key.
+     */
+    filterAccountsForLedgerGroup(groupKey) {
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        const gtes = DataManager.getData(DataManager.KEYS.ACCOUNTS) || DataManager.getData('gtes_accounts') || [];
+        const merged = [];
+        const seen = new Set();
+        const add = (row, src) => {
+            const name = String(row?.name || '').trim();
+            if (!name) return;
+            const key = `${src}:${name.toLowerCase()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            merged.push({ ...row, _ledgerSource: src });
+        };
+        customers.forEach(c => add(c, 'customer'));
+        gtes.forEach(a => add(a, 'gtes'));
+
+        if (groupKey === 'gl_all') return merged;
+
+        if (groupKey === 'customer') {
+            return merged.filter(a => (a.accountType || '').toLowerCase() !== 'supplier');
+        }
+        if (groupKey === 'vendor') {
+            return merged.filter(a => (a.accountType || '').toLowerCase() === 'supplier');
+        }
+
+        return merged.filter(a => {
+            if ((a.accountType || '').toLowerCase() === 'supplier') return false;
+            const k = this.inferLedgerUiGroupKey(a);
+            if (groupKey === 'gl_other') return k === 'gl_other';
+            return k === groupKey;
+        });
+    },
+
+    _collectGeneralLedgerRawEntries(account) {
+        const entries = [];
+        const accName = account.name;
+        const nature = this._inferLedgerNature(account);
+        const invoices = DataManager.getData('invoices') || [];
+        const expenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : (DataManager.getData(DataManager.KEYS.EXPENSES) || []);
+        const an = this._normalizeLedgerName(accName);
+
+        /** Sales-side document (not purchase bill stored as invoice). */
+        const isSalesDoc = (inv) => {
+            if (!inv) return false;
+            const t = String(inv.type || '').toLowerCase();
+            if (t.includes('purchase')) return false;
+            return true;
+        };
+
+        // --- GST component lines (Duties & Taxes) ---
+        if (nature === 'liability' && this._isGstTaxLedgerName(accName)) {
+            invoices.forEach(inv => {
+                if (!isSalesDoc(inv)) return;
+                const amt = this._gstAmountFromInvoiceForLedger(inv, accName);
+                if (amt <= 0) return;
+                const isCn = this._isCreditNoteInvoice(inv);
+                const invTs = new Date(inv.createdAt || inv.date || 0).getTime();
+                entries.push({
+                    date: inv.date,
+                    createdAt: inv.createdAt,
+                    _ledgerTs: isNaN(invTs) ? 0 : invTs,
+                    type: isCn ? 'Credit Note' : 'Invoice',
+                    vchType: isCn ? 'Credit Note' : 'Sales',
+                    reference: inv.id,
+                    invoiceNo: inv.invoiceNo || inv.id || '',
+                    refNo: inv.poNumber || inv.refNo || '',
+                    particulars: accName,
+                    description: isCn ? `GST (credit note) — ${accName}` : `GST on sales — ${accName}`,
+                    debit: isCn ? amt : 0,
+                    credit: isCn ? 0 : amt,
+                    status: inv.status || 'posted'
+                });
+            });
+            expenses.forEach(exp => {
+                const cat = String(exp.category || '').toLowerCase();
+                if (!cat.includes('purchase') && !cat.includes('expense')) return;
+                const amt = this._gstAmountFromExpenseForLedger(exp, accName);
+                if (amt <= 0) return;
+                const isDn = this._isDebitNotePurchase(exp);
+                const expTs = new Date(exp.createdAt || exp.date || 0).getTime();
+                entries.push({
+                    date: exp.date,
+                    createdAt: exp.createdAt,
+                    _ledgerTs: isNaN(expTs) ? 0 : expTs,
+                    type: isDn ? 'Debit Note' : 'Purchase',
+                    vchType: isDn ? 'Debit Note' : 'Purchase',
+                    reference: exp.id,
+                    invoiceNo: (exp.billNo || exp.vch_no || exp.id || '').toString(),
+                    refNo: exp.supplierInvoiceNo || exp.refNo || '',
+                    particulars: accName,
+                    description: isDn ? `GST (debit note) — ${accName}` : `GST on purchase (ITC) — ${accName}`,
+                    debit: isDn ? 0 : amt,
+                    credit: isDn ? amt : 0,
+                    status: exp.status || 'posted'
+                });
+            });
+            this._sortGlLedgerEntries(entries);
+            return entries;
+        }
+
+        // --- Invoice totals by ledgerAccount + Sales Return fallback on credit notes ---
+        invoices.forEach(inv => {
+            if (!isSalesDoc(inv)) return;
+            const la = this._normalizeLedgerName(inv.ledgerAccount);
+            const ledgerMatch = la && la === an;
+            const isCn = this._isCreditNoteInvoice(inv);
+            const creditNoteFallback = !la && isCn && this._ledgerNameLooksLikeSalesReturn(accName);
+            if (!ledgerMatch && !creditNoteFallback) return;
+
+            const amt = Math.abs(parseFloat(inv.total) || 0);
+            if (amt <= 0) return;
+            const invTs = new Date(inv.createdAt || inv.date || 0).getTime();
+
+            let debit = 0;
+            let credit = 0;
+            if (nature === 'income' || nature === 'contra_income') {
+                debit = isCn ? amt : 0;
+                credit = isCn ? 0 : amt;
+            } else if (nature === 'expense') {
+                debit = isCn ? 0 : amt;
+                credit = isCn ? amt : 0;
+            } else {
+                debit = isCn ? amt : 0;
+                credit = isCn ? 0 : amt;
+            }
+
+            entries.push({
+                date: inv.date,
+                createdAt: inv.createdAt,
+                _ledgerTs: isNaN(invTs) ? 0 : invTs,
+                type: isCn ? 'Credit Note' : 'Invoice',
+                vchType: isCn ? 'Credit Note' : 'Sales',
+                reference: inv.id,
+                invoiceNo: inv.invoiceNo || inv.id || '',
+                refNo: inv.poNumber || inv.refNo || '',
+                particulars: accName,
+                description: isCn ? `Credit note #${inv.invoiceNo || inv.id}` : `Sales #${inv.invoiceNo || inv.id}`,
+                debit,
+                credit,
+                status: inv.status || 'posted'
+            });
+        });
+
+        // --- Round off on invoices (Indirect income) ---
+        if (/\bround\s*off\b/i.test(accName)) {
+            invoices.forEach(inv => {
+                if (!isSalesDoc(inv)) return;
+                const ro = parseFloat(inv.roundOff);
+                if (!Number.isFinite(ro) || Math.abs(ro) < 1e-9) return;
+                const invTs = new Date(inv.createdAt || inv.date || 0).getTime();
+                const credit = ro > 0 ? ro : 0;
+                const debit = ro < 0 ? -ro : 0;
+                entries.push({
+                    date: inv.date,
+                    createdAt: inv.createdAt,
+                    _ledgerTs: isNaN(invTs) ? 0 : invTs,
+                    type: 'Invoice',
+                    vchType: 'Round off',
+                    reference: inv.id,
+                    invoiceNo: inv.invoiceNo || inv.id || '',
+                    refNo: inv.poNumber || '',
+                    particulars: accName,
+                    description: `Round off — ${inv.invoiceNo || inv.id}`,
+                    debit,
+                    credit,
+                    status: inv.status || 'posted'
+                });
+            });
+        }
+
+        // --- Purchases / expenses by ledgerAccount ---
+        expenses.forEach(exp => {
+            const el = this._normalizeLedgerName(exp.ledgerAccount);
+            if (!el || el !== an) return;
+            const amt = Math.abs(parseFloat(exp.amount || exp.totalAmount || exp.total) || 0);
+            if (amt <= 0) return;
+            const isDn = this._isDebitNotePurchase(exp);
+            const expTs = new Date(exp.createdAt || exp.date || 0).getTime();
+            let debit = 0;
+            let credit = 0;
+            if (nature === 'expense' || nature === 'asset') {
+                debit = isDn ? 0 : amt;
+                credit = isDn ? amt : 0;
+            } else {
+                debit = isDn ? 0 : amt;
+                credit = isDn ? amt : 0;
+            }
+            entries.push({
+                date: exp.date,
+                createdAt: exp.createdAt,
+                _ledgerTs: isNaN(expTs) ? 0 : expTs,
+                type: isDn ? 'Debit Note' : 'Purchase',
+                vchType: isDn ? 'Debit Note' : 'Purchase',
+                reference: exp.id,
+                invoiceNo: (exp.billNo || exp.vch_no || exp.id || '').toString(),
+                refNo: exp.supplierInvoiceNo || exp.refNo || '',
+                particulars: accName,
+                description: exp.description || exp.narration || 'Purchase',
+                debit,
+                credit,
+                status: exp.status || 'posted'
+            });
+        });
+
+        this._sortGlLedgerEntries(entries);
+        return entries;
+    },
+
+    _generalLedgerGroupLabel(account) {
+        const g = String(account?.accountGroup || '').trim();
+        if (g) return g;
+        const k = this.inferLedgerUiGroupKey(account);
+        const map = {
+            gl_direct_income: 'Direct Income',
+            gl_indirect_income: 'Indirect Income',
+            gl_direct_expense: 'Direct Expenses',
+            gl_indirect_expense: 'Indirect Expenses',
+            gl_duties_taxes: 'Duties & Taxes',
+            gl_current_assets: 'Current Assets',
+            gl_bank: 'Bank Accounts',
+            gl_cash: 'Cash-in-hand',
+            gl_other: 'Other Accounts'
+        };
+        return map[k] || 'General Ledger';
+    },
+
+    _getGeneralLedger(accountId, options = {}) {
+        const startDate = options.startDate ? this._ledgerNormalizeDate(options.startDate) : '';
+        const endDate = options.endDate ? this._ledgerNormalizeDate(options.endDate) : '';
+
+        const account = this.findLedgerAccountRecord(accountId);
+        if (!account) return null;
+
+        const raw = this._collectGeneralLedgerRawEntries(account);
+        const sign = (d, c) => this._glRunningDelta(account, d, c);
+
+        let openingBalance = this._getGlOpeningSigned(account);
+        const inPeriod = [];
+
+        raw.forEach(e => {
+            const ed = this._ledgerNormalizeDate(e.date);
+            const afterStart = !startDate || ed >= startDate;
+            const beforeEnd = !endDate || ed <= endDate;
+            const beforePeriod = startDate && ed < startDate;
+
+            if (beforePeriod) {
+                openingBalance += sign(e.debit, e.credit);
+            } else if ((!startDate && !endDate) || (afterStart && beforeEnd)) {
+                inPeriod.push({ ...e });
+            }
+        });
+
+        let running = openingBalance;
+        inPeriod.forEach(entry => {
+            running += sign(entry.debit, entry.credit);
+            entry.balance = running;
+        });
+
+        const totalDebit = inPeriod.reduce((s, e) => s + e.debit, 0);
+        const totalCredit = inPeriod.reduce((s, e) => s + e.credit, 0);
+        const closingBalance = inPeriod.length ? inPeriod[inPeriod.length - 1].balance : openingBalance;
+
+        const groupLabel = this._generalLedgerGroupLabel(account);
+
+        return {
+            accountGroup: 'ledger',
+            ledgerKind: 'general',
+            groupLabel,
+            customer: {
+                id: account.id || account.name,
+                name: account.name,
+                phone: account.phone || '',
+                email: account.email || '',
+                gstin: account.gstin || '',
+                pan: account.pan || '',
+                address: account.address || ''
+            },
+            dateRange: { start: startDate || null, end: endDate || null },
+            openingBalance,
+            entries: inPeriod,
+            summary: {
+                totalDebit,
+                totalCredit,
+                balance: closingBalance,
+                openingBalance,
+                transactionCount: inPeriod.length
+            },
+            generatedAt: new Date().toISOString()
+        };
+    },
+
     /**
      * Ledger for a customer (receivable) or vendor/supplier (payable).
      * @param {string} accountId - Customer / supplier ID
@@ -891,6 +1336,11 @@ const BusinessAnalytics = {
      * @param {string} [options.endDate] - YYYY-MM-DD inclusive
      */
     getAccountLedger(accountId, options = {}) {
+        const agOpt = options.accountGroup || 'customer';
+        if (this._isGeneralLedgerGroup(agOpt)) {
+            return this._getGeneralLedger(accountId, options);
+        }
+
         const accountGroup = options.accountGroup === 'vendor' ? 'vendor' : 'customer';
         const startDate = options.startDate ? this._ledgerNormalizeDate(options.startDate) : '';
         const endDate = options.endDate ? this._ledgerNormalizeDate(options.endDate) : '';
@@ -1115,28 +1565,299 @@ const BusinessAnalytics = {
 
     /**
      * Get complete dashboard data
+     * @param {{ mode?: 'month'|'fy', year?: number, month?: number, fyStartYear?: number }} [opts]
      */
-    getDashboardData() {
+    getDashboardData(opts = {}) {
         const today = new Date();
-        const currentMonth = today.getMonth();
-        const currentYear = today.getFullYear();
-        const fy = (typeof DataManager.getFinancialYear === 'function')
-            ? DataManager.getFinancialYear(today, true)
-            : { startYear: currentMonth >= 3 ? currentYear : currentYear - 1, label: '' };
+        const mode = opts.mode === 'fy' ? 'fy' : 'month';
+        const year = opts.year != null ? opts.year : today.getFullYear();
+        const month = opts.month != null ? opts.month : today.getMonth();
+
+        const fyFromDate = (d) => (typeof DataManager.getFinancialYear === 'function')
+            ? DataManager.getFinancialYear(d, true)
+            : { startYear: (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1), label: '' };
+
+        if (mode === 'fy') {
+            let fyStart = opts.fyStartYear;
+            if (fyStart == null || Number.isNaN(fyStart)) {
+                fyStart = fyFromDate(new Date(year, month, 1)).startYear;
+            }
+            const fyLabel = `${fyStart}-${(fyStart + 1).toString().slice(-2)}`;
+            return {
+                periodSummary: `Showing full financial year ${fyLabel} (April–March).`,
+                revenueCardLabel: `Revenue (FY ${fyLabel})`,
+                expenseCardLabel: `Expenses (FY ${fyLabel})`,
+                revenueCompareHint: 'vs previous FY',
+                cashFlowChartHint: 'Chart is always for the selected financial year (Apr–Mar).',
+                revenue: this.getRevenueMetricsForFY(fyStart),
+                expenses: this.getExpenseMetricsForFY(fyStart),
+                inventory: this.getInventoryMetrics(),
+                customers: this.getCustomerMetricsForPeriod('fy', fyStart),
+                cashFlow: this.getCashFlowData(fyStart),
+                cashFlowFyLabel: fyLabel,
+                recentActivity: this.getRecentActivityForDashboard({ mode: 'fy', fyStartYear: fyStart }),
+                alerts: this.getAlerts()
+            };
+        }
+
+        const ref = new Date(year, month, 1);
+        const fy = fyFromDate(ref);
         if (!fy.label && fy.startYear != null) {
             fy.label = `${fy.startYear}-${(fy.startYear + 1).toString().slice(-2)}`;
         }
-
+        const mn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month];
         return {
-            revenue: this.getRevenueMetrics(currentYear, currentMonth),
-            expenses: this.getExpenseMetrics(currentYear, currentMonth),
+            periodSummary: `Showing ${mn} ${year}. Cash flow chart uses FY ${fy.label} (Apr–Mar).`,
+            revenueCardLabel: `Revenue (${mn} ${year})`,
+            expenseCardLabel: `Expenses (${mn} ${year})`,
+            revenueCompareHint: 'vs last month',
+            cashFlowChartHint: '',
+            revenue: this.getRevenueMetrics(year, month),
+            expenses: this.getExpenseMetrics(year, month),
             inventory: this.getInventoryMetrics(),
-            customers: this.getCustomerMetrics(),
+            customers: this.getCustomerMetricsForPeriod('month', year, month),
             cashFlow: this.getCashFlowData(fy.startYear),
             cashFlowFyLabel: fy.label,
-            recentActivity: this.getRecentActivity(),
+            recentActivity: this.getRecentActivityForDashboard({ mode: 'month', year, month }),
             alerts: this.getAlerts()
         };
+    },
+
+    /**
+     * Revenue for a full Indian FY (April fyStartYear → March fyStartYear+1).
+     */
+    getRevenueMetricsForFY(fyStartYear) {
+        const invoices = DataManager.getData('invoices') || [];
+        const fyTag = typeof DataManager.getFinancialYear === 'function'
+            ? DataManager.getFinancialYear(new Date(fyStartYear, 3, 1))
+            : '';
+        const inFy = (inv) => !fyTag || DataManager.getFinancialYear(inv.date) === fyTag;
+        const fyInv = invoices.filter(inFy);
+        const total = fyInv.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
+
+        const prevTag = typeof DataManager.getFinancialYear === 'function'
+            ? DataManager.getFinancialYear(new Date(fyStartYear - 1, 3, 1))
+            : '';
+        const prevTotal = prevTag
+            ? invoices.filter(inv => DataManager.getFinancialYear(inv.date) === prevTag)
+                .reduce((s, inv) => s + (parseFloat(inv.total) || 0), 0)
+            : 0;
+
+        const changePercent = prevTotal > 0 ? ((total - prevTotal) / prevTotal * 100) : (total > 0 ? 100 : 0);
+        const pendingInvoices = invoices.filter(inv => inv.status === 'pending' || inv.status === 'unpaid');
+        const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
+
+        return {
+            currentMonth: total,
+            previousMonth: prevTotal,
+            changePercent: changePercent.toFixed(1),
+            trend: changePercent >= 0 ? 'up' : 'down',
+            pendingAmount,
+            pendingCount: pendingInvoices.length,
+            ytd: total,
+            invoiceCount: fyInv.length
+        };
+    },
+
+    /**
+     * Expense totals for an Indian FY (tag string from DataManager.getFinancialYear).
+     */
+    _collectExpenseTotalsForFYTag(fyTagString) {
+        const purchases = (typeof ExpenseManager !== 'undefined')
+            ? ExpenseManager.getAllExpenses()
+            : (DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('purchases') || []);
+        const petty = DataManager.getData('expenses') || [];
+        const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || DataManager.getData('gtes_settings') || {};
+
+        const inFy = (dateStr) =>
+            typeof DataManager.getFinancialYear === 'function'
+            && DataManager.getFinancialYear(dateStr) === fyTagString;
+
+        let total = 0;
+        let count = 0;
+        const byCategory = {};
+
+        purchases.forEach((r) => {
+            if (!inFy(r.date)) return;
+            const a = this._purchaseRowAmount(r);
+            total += a;
+            count++;
+            const cat = r.category || 'Purchase';
+            byCategory[cat] = (byCategory[cat] || 0) + a;
+        });
+
+        petty.forEach((r) => {
+            if (!inFy(r.date)) return;
+            const a = parseFloat(r.amount) || 0;
+            total += a;
+            count++;
+            const cat = r.category || 'Other';
+            byCategory[cat] = (byCategory[cat] || 0) + a;
+        });
+
+        const salaryPayouts = settings.salaryPayouts || {};
+        Object.entries(salaryPayouts).forEach(([key, rec]) => {
+            const parts = key.split('_');
+            if (parts.length < 2) return;
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            if (Number.isNaN(y) || Number.isNaN(m)) return;
+            const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+            if (!inFy(dateStr)) return;
+            let sal = parseFloat(rec.totalPaid) || 0;
+            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+            }
+            if (sal <= 0) return;
+            total += sal;
+            count++;
+            byCategory.Salary = (byCategory.Salary || 0) + sal;
+        });
+
+        return { total, byCategory, count };
+    },
+
+    getExpenseMetricsForFY(fyStartYear) {
+        const fyTag = typeof DataManager.getFinancialYear === 'function'
+            ? DataManager.getFinancialYear(new Date(fyStartYear, 3, 1))
+            : '';
+        const prevTag = typeof DataManager.getFinancialYear === 'function'
+            ? DataManager.getFinancialYear(new Date(fyStartYear - 1, 3, 1))
+            : '';
+
+        const cur = fyTag ? this._collectExpenseTotalsForFYTag(fyTag) : { total: 0, byCategory: {}, count: 0 };
+        const prev = prevTag ? this._collectExpenseTotalsForFYTag(prevTag) : { total: 0, byCategory: {}, count: 0 };
+
+        let changeVal = 0;
+        if (prev.total > 0) {
+            changeVal = ((cur.total - prev.total) / prev.total) * 100;
+        } else if (cur.total > 0) {
+            changeVal = 100;
+        }
+
+        return {
+            currentMonth: cur.total,
+            previousMonth: prev.total,
+            changePercent: changeVal.toFixed(1),
+            trend: changeVal >= 0 ? 'up' : 'down',
+            byCategory: cur.byCategory,
+            count: cur.count
+        };
+    },
+
+    /**
+     * Top customers for a calendar month or full FY.
+     */
+    getCustomerMetricsForPeriod(periodMode, yOrFyStart, monthOpt) {
+        if (periodMode === 'fy' && typeof DataManager.getFinancialYear !== 'function') {
+            return this.getCustomerMetrics();
+        }
+        const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
+        const invoices = DataManager.getData('invoices') || [];
+        const filtered = periodMode === 'fy'
+            ? invoices.filter(inv =>
+                typeof DataManager.getFinancialYear === 'function'
+                && DataManager.getFinancialYear(inv.date) === DataManager.getFinancialYear(new Date(yOrFyStart, 3, 1)))
+            : invoices.filter(inv => {
+                const d = new Date(inv.date);
+                return !isNaN(d.getTime()) && d.getFullYear() === yOrFyStart && d.getMonth() === monthOpt;
+            });
+
+        const customerRevenue = {};
+        filtered.forEach(inv => {
+            const key = inv.customerName || inv.customerId;
+            customerRevenue[key] = (customerRevenue[key] || 0) + (parseFloat(inv.total) || 0);
+        });
+
+        const topCustomers = Object.entries(customerRevenue)
+            .map(([name, revenue]) => ({ name, revenue }))
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, 5);
+
+        const outstanding = this.getOutstandingBalances();
+
+        return {
+            totalCustomers: customers.length,
+            activeCustomers: Object.keys(customerRevenue).length,
+            topCustomers,
+            totalOutstanding: outstanding.reduce((sum, c) => sum + c.outstandingBalance, 0),
+            customersWithDues: outstanding.length
+        };
+    },
+
+    /**
+     * Recent activity filtered to dashboard period (broader pools than getRecentActivity).
+     */
+    getRecentActivityForDashboard(opts) {
+        const mode = opts && opts.mode === 'fy' ? 'fy' : 'month';
+        if (mode === 'fy' && (!opts || opts.fyStartYear == null)) return this.getRecentActivity();
+        if (mode === 'fy' && typeof DataManager.getFinancialYear !== 'function') return this.getRecentActivity();
+        const invoices = DataManager.getData('invoices') || [];
+        const expenses = DataManager.getData('expenses') || [];
+        const purchases = (typeof ExpenseManager !== 'undefined')
+            ? ExpenseManager.getAllExpenses()
+            : (DataManager.getData(DataManager.KEYS.EXPENSES) || []);
+        const vouchers = DataManager.getData('vouchers') || [];
+
+        const inPeriod = (dateStr) => {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return false;
+            if (mode === 'month') {
+                return d.getFullYear() === opts.year && d.getMonth() === opts.month;
+            }
+            const tag = DataManager.getFinancialYear(new Date(opts.fyStartYear, 3, 1));
+            return DataManager.getFinancialYear(dateStr) === tag;
+        };
+
+        const activities = [];
+
+        invoices.filter(inv => inPeriod(inv.date)).slice(-40).forEach(inv => {
+            activities.push({
+                type: 'invoice',
+                icon: 'bi-receipt',
+                color: 'success',
+                title: `Invoice #${inv.id}`,
+                description: `${inv.customerName} - ₹${inv.total}`,
+                date: inv.date
+            });
+        });
+
+        vouchers.filter(v => inPeriod(v.date)).slice(-40).forEach(v => {
+            activities.push({
+                type: 'payment',
+                icon: 'bi-cash',
+                color: 'info',
+                title: `Payment Received`,
+                description: `${v.customerName} - ₹${v.amount}`,
+                date: v.date
+            });
+        });
+
+        purchases.filter(p => inPeriod(p.date)).slice(-40).forEach(p => {
+            activities.push({
+                type: 'expense',
+                icon: 'bi-bag-check',
+                color: 'danger',
+                title: `Purchase`,
+                description: `${p.vendor || p.vendorName || 'Vendor'} - ₹${this._purchaseRowAmount(p)}`,
+                date: p.date
+            });
+        });
+
+        expenses.filter(exp => inPeriod(exp.date)).slice(-40).forEach(exp => {
+            activities.push({
+                type: 'expense',
+                icon: 'bi-wallet2',
+                color: 'danger',
+                title: `Expense`,
+                description: `${exp.description || exp.category} - ₹${exp.amount}`,
+                date: exp.date
+            });
+        });
+
+        return activities
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 10);
     },
 
     /**
@@ -1187,40 +1908,87 @@ const BusinessAnalytics = {
         };
     },
 
+    /** Purchase / vendor bill amount (purchases book). */
+    _purchaseRowAmount(r) {
+        return parseFloat(r.total ?? r.amount ?? r.grandTotal ?? 0) || 0;
+    },
+
+    /**
+     * All cash expenses for dashboard: **purchases** book + optional petty `expenses` array + **salary** payouts marked in settings.
+     */
+    _collectExpenseTotalsForMonth(year, month) {
+        const purchases = (typeof ExpenseManager !== 'undefined')
+            ? ExpenseManager.getAllExpenses()
+            : (DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('purchases') || DataManager.getData('gtes_expenses') || []);
+        const petty = DataManager.getData('expenses') || [];
+
+        const inMonth = (dateStr) => {
+            const d = new Date(dateStr);
+            return !isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === month;
+        };
+
+        let total = 0;
+        let count = 0;
+        const byCategory = {};
+
+        purchases.forEach((r) => {
+            if (!inMonth(r.date)) return;
+            const a = this._purchaseRowAmount(r);
+            total += a;
+            count++;
+            const cat = r.category || 'Purchase';
+            byCategory[cat] = (byCategory[cat] || 0) + a;
+        });
+
+        petty.forEach((r) => {
+            if (!inMonth(r.date)) return;
+            const a = parseFloat(r.amount) || 0;
+            total += a;
+            count++;
+            const cat = r.category || 'Other';
+            byCategory[cat] = (byCategory[cat] || 0) + a;
+        });
+
+        const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || DataManager.getData('gtes_settings') || {};
+        const rec = settings.salaryPayouts && settings.salaryPayouts[`${year}_${month}`];
+        if (rec) {
+            let sal = parseFloat(rec.totalPaid) || 0;
+            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+            }
+            if (sal > 0) {
+                total += sal;
+                count++;
+                byCategory.Salary = (byCategory.Salary || 0) + sal;
+            }
+        }
+
+        return { total, byCategory, count };
+    },
+
     /**
      * Get expense metrics
      */
     getExpenseMetrics(year, month) {
-        const expenses = DataManager.getData('expenses') || [];
-
-        const currentMonthExpenses = expenses.filter(exp => {
-            const d = new Date(exp.date);
-            return d.getFullYear() === year && d.getMonth() === month;
-        });
-
+        const cur = this._collectExpenseTotalsForMonth(year, month);
         const prevMonth = month === 0 ? 11 : month - 1;
         const prevYear = month === 0 ? year - 1 : year;
-        const prevMonthExpenses = expenses.filter(exp => {
-            const d = new Date(exp.date);
-            return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
-        });
+        const prev = this._collectExpenseTotalsForMonth(prevYear, prevMonth);
 
-        const currentTotal = currentMonthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0);
-        const prevTotal = prevMonthExpenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0);
-
-        // Group by category
-        const byCategory = {};
-        currentMonthExpenses.forEach(exp => {
-            const cat = exp.category || 'Other';
-            byCategory[cat] = (byCategory[cat] || 0) + (parseFloat(exp.amount) || 0);
-        });
+        let changeVal = 0;
+        if (prev.total > 0) {
+            changeVal = ((cur.total - prev.total) / prev.total) * 100;
+        } else if (cur.total > 0) {
+            changeVal = 100;
+        }
 
         return {
-            currentMonth: currentTotal,
-            previousMonth: prevTotal,
-            changePercent: prevTotal > 0 ? ((currentTotal - prevTotal) / prevTotal * 100).toFixed(1) : 0,
-            byCategory,
-            count: currentMonthExpenses.length
+            currentMonth: cur.total,
+            previousMonth: prev.total,
+            changePercent: changeVal.toFixed(1),
+            trend: changeVal >= 0 ? 'up' : 'down',
+            byCategory: cur.byCategory,
+            count: cur.count
         };
     },
 
@@ -1279,8 +2047,12 @@ const BusinessAnalytics = {
      */
     getCashFlowData(fyStartYear) {
         const invoices = DataManager.getData('invoices') || [];
-        const expenses = DataManager.getData('expenses') || [];
+        const pettyExpenses = DataManager.getData('expenses') || [];
+        const purchases = (typeof ExpenseManager !== 'undefined')
+            ? ExpenseManager.getAllExpenses()
+            : (DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('purchases') || []);
         const vouchers = DataManager.getData('vouchers') || [];
+        const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || DataManager.getData('gtes_settings') || {};
 
         const ymKey = (y, m) => y * 12 + m;
         const revenueByYm = new Map();
@@ -1295,7 +2067,23 @@ const BusinessAnalytics = {
         };
 
         invoices.forEach(inv => addSum(revenueByYm, inv.date, parseFloat(inv.total) || 0));
-        expenses.forEach(exp => addSum(expenseByYm, exp.date, parseFloat(exp.amount) || 0));
+        purchases.forEach(p => addSum(expenseByYm, p.date, this._purchaseRowAmount(p)));
+        pettyExpenses.forEach(exp => addSum(expenseByYm, exp.date, parseFloat(exp.amount) || 0));
+        const salaryPayouts = settings.salaryPayouts || {};
+        Object.entries(salaryPayouts).forEach(([key, rec]) => {
+            const parts = key.split('_');
+            if (parts.length < 2) return;
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            if (Number.isNaN(y) || Number.isNaN(m)) return;
+            let sal = parseFloat(rec.totalPaid) || 0;
+            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+            }
+            if (sal <= 0) return;
+            const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+            addSum(expenseByYm, dateStr, sal);
+        });
         vouchers.forEach(v => addSum(collectedByYm, v.date, parseFloat(v.amount) || 0));
 
         const monthlyData = [];
@@ -1327,6 +2115,9 @@ const BusinessAnalytics = {
         const invoices = DataManager.getData('invoices') || [];
         const challans = DataManager.getData('challans') || [];
         const expenses = DataManager.getData('expenses') || [];
+        const purchases = (typeof ExpenseManager !== 'undefined')
+            ? ExpenseManager.getAllExpenses()
+            : (DataManager.getData(DataManager.KEYS.EXPENSES) || []);
         const vouchers = DataManager.getData('vouchers') || [];
 
         const activities = [];
@@ -1355,7 +2146,19 @@ const BusinessAnalytics = {
             });
         });
 
-        // Add recent expenses
+        // Add recent purchase bills
+        purchases.slice(-10).forEach(p => {
+            activities.push({
+                type: 'expense',
+                icon: 'bi-bag-check',
+                color: 'danger',
+                title: `Purchase`,
+                description: `${p.vendor || p.vendorName || 'Vendor'} - ₹${this._purchaseRowAmount(p)}`,
+                date: p.date
+            });
+        });
+
+        // Add recent petty expenses (if stored separately)
         expenses.slice(-10).forEach(exp => {
             activities.push({
                 type: 'expense',
@@ -1404,7 +2207,8 @@ const BusinessAnalytics = {
                 icon: 'bi-exclamation-triangle',
                 title: 'Overdue Invoice',
                 message: `Invoice #${inv.id} from ${inv.customerName} - ₹${inv.total}`,
-                action: 'Send Reminder'
+                action: 'View',
+                invoiceId: inv.id
             });
         });
 
@@ -1710,7 +2514,10 @@ Thank you for your business!
             ? `${ledger.dateRange.start || '…'} to ${ledger.dateRange.end || '…'}`
             : 'All dates';
 
-        let csv = `${ledger.accountGroup === 'vendor' ? 'Vendor' : 'Customer'} Ledger - ${ledger.customer.name}\n`;
+        const titleKind = ledger.accountGroup === 'vendor' ? 'Vendor'
+            : ledger.accountGroup === 'ledger' || ledger.ledgerKind === 'general' ? 'General Ledger'
+                : 'Customer';
+        let csv = `${titleKind} - ${ledger.customer.name}\n`;
         csv += `Group: ${ledger.groupLabel}\n`;
         csv += `Period: ${dr}\n`;
         csv += `Phone: ${ledger.customer.phone || 'N/A'}\n`;

@@ -235,18 +235,21 @@ const DeliveryManager = {
             // Restore items to inventory
             await this.adjustInventoryStock(challan.items, true);
 
-            // Move to Recycle Bin BEFORE removing
+            // Move to Recycle Bin BEFORE removing (avoid duplicate rows if delete runs twice)
             const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
-            bin.push({
-                ...challan,
-                _deletedAt: new Date().toISOString(),
-                _recordType: 'challan'
-            });
-            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
+            const already = bin.some(b => b.id === challanId && b._recordType === 'challan');
+            if (!already) {
+                bin.push({
+                    ...challan,
+                    _deletedAt: new Date().toISOString(),
+                    _recordType: 'challan'
+                });
+                await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin);
+            }
         }
 
         const filtered = challans.filter(c => c.id !== challanId);
-        await DataManager.saveData('challans', filtered);
+        await DataManager.saveData('challans', filtered, { skipPreSaveMerge: true });
     },
 
     /**

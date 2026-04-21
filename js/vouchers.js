@@ -45,6 +45,25 @@ const VoucherManager = {
     async createVoucher(data) {
         const vouchers = DataManager.getData('vouchers') || [];
 
+        const rawName = (data.customerName || '').trim();
+        if (!rawName) {
+            throw new Error('Customer or vendor name is required.');
+        }
+        const customers = DataManager.getData('customers') || [];
+        const cid = (data.customerId || '').toString().trim();
+        let party = cid ? customers.find(c => c.id === cid) : null;
+        if (!party) {
+            party = customers.find(c => (c.name || '').trim().toLowerCase() === rawName.toLowerCase());
+        }
+        if (!party) {
+            throw new Error('Voucher must be linked to a saved customer or vendor account.');
+        }
+        data.customerId = party.id;
+        data.customerName = party.name;
+        if (!data.customerAddress && party.address) {
+            data.customerAddress = party.address;
+        }
+
         // 1. Generate/Verify ID Uniqueness
         let id = data.id;
         const voucherMode = data.isPurchase ? 'purchase' : (data.hasGst === false ? 'non-gst' : 'gst');

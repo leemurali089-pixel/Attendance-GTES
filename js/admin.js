@@ -341,8 +341,35 @@ const AdminModule = {
                                         <button class="btn btn-sm btn-outline-primary" onclick="App.showView('poQueue')"><i class="bi bi-receipt"></i> PO Queue</button>
                                         <button class="btn btn-sm btn-outline-info" onclick="App.showView('bankMail')"><i class="bi bi-bank"></i> Bank Mail</button>
                                         <button class="btn btn-sm btn-outline-secondary" id="gmailAdminSync"><i class="bi bi-arrow-clockwise"></i> Sync now</button>
-                                        <button class="btn btn-sm btn-outline-secondary" id="gmailAdminSettings"><i class="bi bi-gear"></i> Settings</button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="gmailAdminSettings"><i class="bi bi-gear"></i> OAuth &amp; sync settings</button>
                                     </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-4" id="taxGroupsAdminCard">
+                                <div class="card-header bg-light">
+                                    <h5 class="mb-0"><i class="bi bi-percent"></i> Tax scheme groups (GST)</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small text-muted">Add Book Keeper–style groups (e.g. GST@18%, GST@12%). They appear in <strong>Tax scheme</strong> on GST sales/purchase invoices.</p>
+                                    <div class="row g-2 align-items-end mb-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label small mb-0">Display name</label>
+                                            <input type="text" class="form-control form-control-sm" id="taxGroupName" placeholder="e.g. GST@18%">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small mb-0">Code</label>
+                                            <input type="text" class="form-control form-control-sm" id="taxGroupCode" placeholder="GST18">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small mb-0">GST %</label>
+                                            <input type="number" class="form-control form-control-sm" id="taxGroupPct" placeholder="18" step="0.01" min="0">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <button type="button" class="btn btn-sm btn-primary" id="taxGroupAddBtn"><i class="bi bi-plus-lg"></i> Add group</button>
+                                        </div>
+                                    </div>
+                                    <div id="taxGroupsList" class="small">Loading…</div>
                                 </div>
                             </div>
 
@@ -400,7 +427,80 @@ const AdminModule = {
         this._ensureUserModal();
         await this.loadUsers();
         this._wireGmailAdminCard();
+        this._wireTaxGroupsCard();
         this._wireAppUpdateCard();
+    },
+
+    async _wireTaxGroupsCard() {
+        const listEl = document.getElementById('taxGroupsList');
+        const addBtn = document.getElementById('taxGroupAddBtn');
+        if (!listEl || !addBtn) return;
+
+        const render = async () => {
+            const rows = DataManager.getData(DataManager.KEYS.TAX_SCHEMES) || [];
+            if (!rows.length) {
+                listEl.innerHTML = '<p class="text-muted mb-0">No custom groups yet. Built-in DEFAULT / GST 18% / 12% / 5% still apply.</p>';
+                return;
+            }
+            listEl.innerHTML = `<div class="table-responsive"><table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Name</th><th>Code</th><th>GST %</th><th></th></tr></thead>
+                <tbody>${rows.map((r, i) => `
+                    <tr>
+                        <td>${String(r.name || r.label || '').replace(/</g, '&lt;')}</td>
+                        <td><code>${String(r.code || '').replace(/</g, '&lt;')}</code></td>
+                        <td>${r.gstPercent != null ? r.gstPercent : '—'}</td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger tax-group-del" data-i="${i}">Remove</button></td>
+                    </tr>`).join('')}</tbody></table></div>`;
+            listEl.querySelectorAll('.tax-group-del').forEach((btn) => {
+                btn.onclick = async () => {
+                    const arr = DataManager.getData(DataManager.KEYS.TAX_SCHEMES) || [];
+                    const idx = parseInt(btn.dataset.i, 10);
+                    if (Number.isNaN(idx) || !arr[idx]) return;
+                    arr.splice(idx, 1);
+                    await DataManager.saveData(DataManager.KEYS.TAX_SCHEMES, arr);
+                    await render();
+                    if (typeof App !== 'undefined') App.showNotification('Tax group removed.', 'success');
+                };
+            });
+        };
+
+        addBtn.onclick = async () => {
+            const name = (document.getElementById('taxGroupName')?.value || '').trim();
+            let code = (document.getElementById('taxGroupCode')?.value || '').trim();
+            const pctRaw = document.getElementById('taxGroupPct')?.value;
+            const pct = parseFloat(pctRaw);
+            if (!name) {
+                if (typeof App !== 'undefined') App.showNotification('Enter a display name.', 'warning');
+                return;
+            }
+            if (!code) {
+                code = 'TG_' + name.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toUpperCase().slice(0, 24);
+            }
+            const builtins = new Set(['DEFAULT', 'GST18', 'GST12', 'GST5']);
+            if (builtins.has(code.toUpperCase())) {
+                if (typeof App !== 'undefined') App.showNotification('That code is reserved. Use another code.', 'warning');
+                return;
+            }
+            const arr = DataManager.getData(DataManager.KEYS.TAX_SCHEMES) || [];
+            if (arr.some((x) => String(x.code || '').toLowerCase() === code.toLowerCase())) {
+                if (typeof App !== 'undefined') App.showNotification('Code already exists.', 'warning');
+                return;
+            }
+            arr.push({
+                name,
+                code,
+                gstPercent: Number.isFinite(pct) ? pct : null,
+                createdAt: new Date().toISOString()
+            });
+            await DataManager.saveData(DataManager.KEYS.TAX_SCHEMES, arr);
+            document.getElementById('taxGroupName').value = '';
+            document.getElementById('taxGroupCode').value = '';
+            document.getElementById('taxGroupPct').value = '';
+            await render();
+            if (typeof App !== 'undefined') App.showNotification('Tax group saved.', 'success');
+        };
+
+        await render();
     },
 
     async _wireAppUpdateCard() {
@@ -858,6 +958,13 @@ const AdminModule = {
                                                     <i class="bi bi-file-earmark-bar-graph text-secondary"></i> View Reports
                                                 </label>
                                                 <small class="d-block text-muted ms-4">Access reports</small>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input user-permission" type="checkbox" value="ACCESS_MAIL" id="permMail">
+                                                <label class="form-check-label fw-bold" for="permMail">
+                                                    <i class="bi bi-envelope text-primary"></i> Mail, PO Queue &amp; Bank Mail
+                                                </label>
+                                                <small class="d-block text-muted ms-4">Gmail inbox, purchase-order queue, and bank alerts (OAuth is configured once in Admin)</small>
                                             </div>
                                         </div>
                                     </div>
