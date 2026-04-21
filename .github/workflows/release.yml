@@ -13,10 +13,6 @@ name: Release Desktop App
 #      latest.yml to the GitHub Release that matches the tag.
 #   4. GH_TOKEN is provided by GitHub automatically; no secret to set.
 #
-# Auto-update: installed NSIS builds use electron-updater; they download
-# latest.yml + the Setup exe from this GitHub repo. Push a new v*.*.* tag
-# with a higher package.json version. Portable exe does not auto-update.
-#
 # NOTE on code signing:
 #   By default this workflow produces UNSIGNED builds. The current
 #   locally-built v1.3.5 is signed with the user's signtool cert, and

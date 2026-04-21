@@ -4,10 +4,6 @@
     "description": "MJS PrimeLogic - Attendance & Salary Management System",
     "main": "main.js",
     "author": "Murali D",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/leemurali089-pixel/Attendance-GTES.git"
-    },
     "scripts": {
         "start": "node node_modules/electron/cli.js .",
         "start:electron": "electron .",
