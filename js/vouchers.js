@@ -114,12 +114,14 @@ const VoucherManager = {
         vouchers.push(voucher);
         await DataManager.saveData('vouchers', vouchers);
 
-        // Update linked document statuses from allocations + linked invoice ids (id and bill/invoice no)
+        // Update linked document statuses in the background — can scan many invoices and block the UI if awaited
         const allocIds = (data.allocations || []).flatMap(a => [a.id, a.no, a.billNo, a.invoiceNo].filter(Boolean));
         const linkIds = data.linkedInvoices || [];
         const allLinked = [...new Set([...linkIds, ...allocIds])];
         if (allLinked.length > 0) {
-            await this.updateLinkedInvoices(allLinked, data.type);
+            void Promise.resolve(this.updateLinkedInvoices(allLinked, data.type)).catch((err) => {
+                console.error('[VoucherManager] updateLinkedInvoices:', err);
+            });
         }
 
         return voucher;

@@ -2563,44 +2563,47 @@ const VouchersUI = {
                 VoucherManager.recordUsedSerial(data.type, data.id);
             }
 
-            // If this voucher was started from a Bank Mail entry, patch the
-            // bank queue with the new voucher id so the Bank Mail view can
-            // now show "Voucher-ed" and the entry disappears from "Open".
-            try {
-                if (this._pendingBankMailLink && this._pendingBankMailLink.messageId
-                    && window.electronAPI && window.electronAPI.gmail
-                    && typeof window.electronAPI.gmail.queueUpdate === 'function') {
-                    const msgId = this._pendingBankMailLink.messageId;
-                    await window.electronAPI.gmail.queueUpdate({
-                        name: 'bank',
-                        messageId: msgId,
-                        patch: { linkedVoucherId: newVoucher && newVoucher.id ? newVoucher.id : data.id, status: 'linked' }
-                    });
-                    if (typeof App !== 'undefined' && App.showNotification) {
-                        App.showNotification(`Voucher ${data.id} linked to bank email.`, 'success');
-                    }
-                }
-            } catch (linkErr) {
-                console.warn('[vouchers] Bank mail link failed:', linkErr && linkErr.message);
-            } finally {
-                this._pendingBankMailLink = null;
-            }
-
             const modalEl = document.getElementById('createVoucherModal');
-            const modal = bootstrap.Modal.getInstance(modalEl);
-            
+            const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+
             if (modalEl) {
                 modalEl.addEventListener('hidden.bs.modal', () => {
                     this.updateTable();
                 }, { once: true });
-                modal.hide();
+                modal?.hide();
             } else {
-                this.updateTable();
+                queueMicrotask(() => this.updateTable());
             }
+
+            if (typeof App !== 'undefined') App.showNotification('Voucher saved successfully!', 'success');
+
+            // Bank Mail link: do not block closing the modal (Electron IPC can be slow)
+            void (async () => {
+                try {
+                    if (this._pendingBankMailLink && this._pendingBankMailLink.messageId
+                        && window.electronAPI && window.electronAPI.gmail
+                        && typeof window.electronAPI.gmail.queueUpdate === 'function') {
+                        const msgId = this._pendingBankMailLink.messageId;
+                        await window.electronAPI.gmail.queueUpdate({
+                            name: 'bank',
+                            messageId: msgId,
+                            patch: { linkedVoucherId: newVoucher && newVoucher.id ? newVoucher.id : data.id, status: 'linked' }
+                        });
+                        if (typeof App !== 'undefined' && App.showNotification) {
+                            App.showNotification(`Voucher ${data.id} linked to bank email.`, 'success');
+                        }
+                    }
+                } catch (linkErr) {
+                    console.warn('[vouchers] Bank mail link failed:', linkErr && linkErr.message);
+                } finally {
+                    this._pendingBankMailLink = null;
+                }
+            })();
 
         } catch (e) {
             console.error(e);
-            alert('Error creating voucher: ' + e.message);
+            if (typeof App !== 'undefined') App.showNotification('Error creating voucher: ' + e.message, 'error');
+            else alert('Error creating voucher: ' + e.message);
         } finally {
             this._saveVoucherInProgress = false;
             if (saveBtn) saveBtn.disabled = false;
@@ -3345,11 +3348,18 @@ const VouchersUI = {
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
 
-            this.updateTable();
-            App.showNotification('Voucher updated successfully!', 'success');
+            if (typeof App !== 'undefined') App.showNotification('Voucher updated successfully!', 'success');
+            queueMicrotask(() => {
+                try {
+                    this.updateTable();
+                } catch (err) {
+                    console.error(err);
+                }
+            });
         } catch (e) {
             console.error(e);
-            alert('Error updating voucher: ' + e.message);
+            if (typeof App !== 'undefined') App.showNotification('Error updating voucher: ' + e.message, 'error');
+            else alert('Error updating voucher: ' + e.message);
         }
     },
 };
