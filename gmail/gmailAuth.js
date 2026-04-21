@@ -27,66 +27,18 @@ function credsPath() {
     return path.join(app.getPath('userData'), 'gmail_credentials.json');
 }
 
-/** Same logic as main.js DATA_FOLDER — so OAuth client can be synced across PCs via OneDrive. */
-function getDataFolderPath() {
-    let globalBase;
-    if (process.env.OneDrive) {
-        globalBase = path.join(process.env.OneDrive, 'Attendance GTES');
-    } else {
-        globalBase = path.join(app.getPath('documents'), 'Attendance GTES');
-    }
-    if (!app.isPackaged) {
-        globalBase = path.join(__dirname, '..');
-    }
-    return path.join(globalBase, 'Data');
-}
-
-function sharedCredsPath() {
-    return path.join(getDataFolderPath(), 'gmail_credentials.json');
-}
-
-async function mirrorCredentialsToDataFolder(parsed) {
-    if (!parsed || !parsed.client_id || !parsed.client_secret) return;
-    const json = JSON.stringify(parsed, null, 2);
-    const target = sharedCredsPath();
-    try {
-        try {
-            const existing = await fs.readFile(target, 'utf8');
-            if (existing === json) return;
-        } catch (e) {
-            if (e.code !== 'ENOENT') throw e;
-        }
-        const dir = getDataFolderPath();
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(target, json, 'utf8');
-    } catch (e) {
-        console.warn('[gmailAuth] could not mirror credentials to Data folder:', e.message);
-    }
-}
-
 async function saveCredentials(creds) {
-    const json = JSON.stringify(creds, null, 2);
-    await fs.writeFile(credsPath(), json, 'utf8');
-    await mirrorCredentialsToDataFolder(creds);
+    await fs.writeFile(credsPath(), JSON.stringify(creds, null, 2), 'utf8');
 }
 
 async function loadCredentials() {
-    const tryRead = async (filePath) => {
-        const raw = await fs.readFile(filePath, 'utf8');
+    try {
+        const raw = await fs.readFile(credsPath(), 'utf8');
         return JSON.parse(raw);
-    };
-    for (const filePath of [credsPath(), sharedCredsPath()]) {
-        try {
-            const parsed = await tryRead(filePath);
-            if (filePath === credsPath()) {
-                void mirrorCredentialsToDataFolder(parsed);
-            }
-            return parsed;
-        } catch (e) {
-            if (e.code !== 'ENOENT') throw e;
-        }
+    } catch (e) {
+        if (e.code === 'ENOENT') return null;
+        throw e;
     }
-    return null;
 }
 
 async function saveTokens(tokens) {

@@ -657,7 +657,7 @@ const AdminModule = {
                 if (!pill || !detail) return;
                 if (!s.hasCredentials) {
                     pill.textContent = 'Not configured'; pill.className = 'badge bg-warning text-dark';
-                    detail.innerHTML = 'Paste your Google Cloud OAuth <b>Desktop app</b> client ID &amp; secret (see <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>). Saving also mirrors credentials into your shared <b>Data</b> folder (e.g. OneDrive) so other PCs pick them up.';
+                    detail.innerHTML = 'Paste your Google Cloud OAuth <b>Desktop app</b> client ID &amp; secret (see <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>).';
                 } else if (!s.isLoggedIn) {
                     pill.textContent = 'Disconnected'; pill.className = 'badge bg-warning text-dark';
                     detail.textContent = 'Credentials configured. Click Settings → Connect Gmail.';

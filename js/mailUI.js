@@ -1146,7 +1146,6 @@ const MailUI = (() => {
                   <strong>Administrator:</strong> Create a <b>Desktop app</b> OAuth client at
                   <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>,
                   enable the <b>Gmail API</b>, add test users on the OAuth consent screen, then paste <b>Client ID</b> and <b>Secret</b> here once.
-                  Credentials are saved on this PC and mirrored to the shared <b>Data</b> folder (e.g. OneDrive) so other computers pick them up automatically.
                   Other users with Mail access will <b>not</b> see these fields — they only use <b>Connect Gmail</b>.
                 </div>
                 <div class="mb-2"><label class="form-label">Client ID</label>
@@ -1156,16 +1155,14 @@ const MailUI = (() => {
                 <div class="d-flex gap-2 align-items-center mt-3">
                   <button class="btn btn-primary" id="gSaveCreds">Save credentials</button>
                 </div>`;
-        const userBlock = s.hasCredentials
-            ? `<div class="alert alert-info small mb-0">
-                  OAuth is set up on this computer. Click <b>Connect Gmail</b> and sign in with your Google account.
-                  You do not need the Client ID or Secret.
-                </div>`
-            : `<div class="alert alert-warning small mb-0">
-                  Gmail cannot connect yet — the Google <b>Desktop app</b> Client ID and Secret are not available on this PC.
-                  Ask an administrator to open <strong>Admin → Gmail Integration → OAuth &amp; sync settings</strong> (or Mail → Settings) and save them once.
-                  If you use a shared <b>Data</b> folder (e.g. OneDrive), credentials sync there after an admin saves; try again after sync completes.
-                </div>`;
+        const userBlock = `
+                <div class="alert alert-secondary small mb-2">
+                  Gmail OAuth is configured by an <strong>administrator</strong> in <strong>Admin → Gmail Integration</strong>.
+                  You only need to click <b>Connect Gmail</b> to sign in with Google on this computer — no Client ID or Secret.
+                </div>
+                ${!s.hasCredentials ? `<div class="alert alert-warning small mb-0">
+                  OAuth is not set up on this PC yet. Ask an administrator to open <b>Admin</b>, paste the Google Client ID and Secret once, then you can connect.
+                </div>` : ''}`;
 
         modal.innerHTML = `
           <div class="modal-dialog modal-lg modal-dialog-centered">
