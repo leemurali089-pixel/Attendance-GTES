@@ -1,3 +1,6 @@
+# Gmail OAuth client secret — may be mirrored under Data/ for OneDrive sync; do not commit
+Data/gmail_credentials.json
+
 # Backup files - contains sensitive employee data
 Backup/*.json
 Backup/*.crswap
