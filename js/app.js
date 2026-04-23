@@ -43,7 +43,7 @@ const App = {
 
         this.showLoader();
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.24';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.25';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -373,13 +373,10 @@ const App = {
             const backupDropdownParent = document.getElementById('backupDropdown')?.closest('.nav-item');
             if (backupDropdownParent) {
                 const isAdmin = await UserManager.isAdmin();
-                console.log('Backup visibility check - isAdmin:', isAdmin);
                 if (isAdmin) {
                     backupDropdownParent.style.display = '';
-                    console.log('Showing backup dropdown for admin');
                 } else {
                     backupDropdownParent.style.display = 'none';
-                    console.log('Hiding backup dropdown for non-admin');
                 }
             }
 
@@ -387,14 +384,12 @@ const App = {
             const themeToggleParent = document.getElementById('theme-toggle')?.closest('.nav-item');
             if (themeToggleParent) {
                 themeToggleParent.style.display = '';
-                console.log('Showing theme toggle');
             }
 
             // Ensure user info is visible when logged in
             const userInfoParent = document.getElementById('userInfo')?.closest('.nav-item');
             if (userInfoParent) {
                 userInfoParent.style.display = '';
-                console.log('Showing user info');
             }
 
             // Landing Page Specific Logic

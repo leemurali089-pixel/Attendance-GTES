@@ -23,10 +23,7 @@ const SyncManager = {
         // Initialize audit log from local storage if needed, or start fresh
         this.logSyncEvent('info', 'Application started');
 
-        if (!window.electronAPI) {
-            console.log('SyncManager: Not running in Electron, limited functionality');
-            // Still show UI for "Offline/Online" if requested
-        }
+        // Web / PWA: no Electron file IPC — BookKeeper file watcher is skipped (see bookKeeperSync).
 
         this.initStatusIndicators();
         this.createAuditModal();

@@ -1696,14 +1696,14 @@
 
     <!-- Application Scripts -->
     <script src="js/data.js?v=2.1"></script>
-    <script src="js/updateChecker.js?v=2.0"></script>
+    <script src="js/updateChecker.js?v=2.1"></script>
     <script src="js/userManager.js?v=1.2"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/appUpdater.js?v=1.0"></script>
 
     <!-- Book Keeper Integration (Load before SyncManager) -->
-    <script src="js/bookKeeperSync.js?v=1.7"></script>
-    <script src="js/syncManager.js?v=1.9"></script>
+    <script src="js/bookKeeperSync.js?v=1.8"></script>
+    <script src="js/syncManager.js?v=2.0"></script>
     
     <!-- Hidden input for web file import fallback -->
     <input type="file" id="bkImportFile" accept=".db,.sqlite,.sqlite3" style="display: none;">
@@ -1742,7 +1742,7 @@
     <script src="js/exportImportHelper.js?v=1.1"></script>
     <script src="js/bookKeeperImport.js?v=3.4"></script>
     <script src="js/seedData.js?v=1.1"></script>
-    <script src="js/app.js?v=2.8"></script>
+    <script src="js/app.js?v=2.9"></script>
 
     <!-- Employee Details Modal -->
     <div class="modal fade" id="employeeDetailsModal" tabindex="-1" aria-labelledby="employeeDetailsModalLabel"
@@ -1856,9 +1856,9 @@
         // Only register Service Worker on supported web protocols (not locally via file://)
         if ('serviceWorker' in navigator && location.protocol !== 'file:') {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js')
-                    .then(reg => console.log('Service Worker registered!'))
-                    .catch(err => console.log('Service Worker failed:', err));
+                navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
+                    .then((reg) => { console.log('Service worker active:', reg && reg.scope); })
+                    .catch((err) => { console.warn('Service worker not registered (offline or blocked):', err && err.message); });
             });
         } else {
             console.log('Running locally: Service worker registration bypassed.');

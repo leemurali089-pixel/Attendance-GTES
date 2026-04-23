@@ -84,8 +84,16 @@ const BookKeeperSync = {
     _importInProgress: false,
     /** One stat check at a time (interval does not await). */
     _fileStatInFlight: false,
+    _initDone: false,
+
+    /** True when file-based Book Keeper sync can run (desktop only). */
+    _isElectronFileContext() {
+        return !!(typeof window !== 'undefined' && window.electronAPI && window.electronAPI.getExternalFileStats);
+    },
 
     init() {
+        if (this._initDone) return;
+        this._initDone = true;
         console.log('Initializing BookKeeper Sync Service...');
 
         const savedConfig = localStorage.getItem('bk_sync_config');
@@ -101,7 +109,8 @@ const BookKeeperSync = {
             this.config.autoSync = true;
         }
 
-        if (this.config.backupPath && this.config.autoSync) {
+        // File watcher + mtime polling need Electron IPC — never start on web/PWA (avoids noisy warnings).
+        if (this._isElectronFileContext() && this.config.backupPath && this.config.autoSync) {
             this.startWatcher();
         }
 
@@ -158,13 +167,13 @@ const BookKeeperSync = {
         this.saveConfig();
         // meaningful change, restart watcher
         this.stopWatcher();
-        this.startWatcher();
+        if (this._isElectronFileContext()) this.startWatcher();
     },
 
     toggleAutoSync(enabled) {
         this.config.autoSync = enabled;
         this.saveConfig();
-        if (enabled) {
+        if (enabled && this._isElectronFileContext()) {
             this.startWatcher();
         } else {
             this.stopWatcher();
@@ -177,6 +186,7 @@ const BookKeeperSync = {
 
     startWatcher() {
         if (this.intervalId) return; // Already running
+        if (!this._isElectronFileContext()) return;
         if (!this.config.backupPath) return;
 
         console.log('Starting Book Keeper File Watcher on:', this.config.backupPath);
@@ -199,8 +209,7 @@ const BookKeeperSync = {
     },
 
     async checkFile() {
-        if (!window.electronAPI) {
-            console.warn('Sync requires Electron context');
+        if (!this._isElectronFileContext()) {
             return;
         }
         // While a full import runs, skip polling — avoids stacked IPC and keeps RTDB / other work smoother.
