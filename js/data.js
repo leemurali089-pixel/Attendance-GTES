@@ -469,9 +469,11 @@ const DataManager = {
             await this.saveData(this.KEYS.SETTINGS, this.DEFAULT_SETTINGS);
         }
 
-        // Run migrations that might affect the UI logic
-        await this.migrateEmployeesToV2();
-        await this.migrateToSalaryRevisions();
+        // Employee migrations can touch large ledgers; do not block login.
+        setTimeout(() => {
+            this.migrateEmployeesToV2().catch((e) => console.error('[DataManager] migrateEmployeesToV2', e));
+            this.migrateToSalaryRevisions().catch((e) => console.error('[DataManager] migrateToSalaryRevisions', e));
+        }, 0);
         
         // Asynchronous Second Phase: Heavy data loads (don't block UI boot)
         // This is deferred so the Login/Dashboard can appear immediately.
@@ -489,13 +491,9 @@ const DataManager = {
             }
             console.log("[DataManager]: Background data prefetch complete.");
 
-            // Initialize background automation and SyncManager
+            // Sunday automation — SyncManager is started from App (see _initDeferredModules) to avoid double init.
             this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
             this.scheduleSundayHolidayCheck();
-            
-            if (window.SyncManager) {
-                window.SyncManager.init();
-            }
         }, 100); // 100ms delay to let the UI breathe first
         })();
     },

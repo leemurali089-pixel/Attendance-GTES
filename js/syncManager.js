@@ -2,6 +2,7 @@
  * Sync Manager - Handles real-time updates and data integrity
  */
 const SyncManager = {
+    _initDone: false,
     status: 'synced', // 'synced', 'syncing', 'conflict', 'offline', 'changes'
     lastSyncTime: new Date(),
     hasUnsavedChanges: false,
@@ -17,6 +18,8 @@ const SyncManager = {
     _auditModalInstance: null,
 
     init() {
+        if (this._initDone) return;
+        this._initDone = true;
         // Initialize audit log from local storage if needed, or start fresh
         this.logSyncEvent('info', 'Application started');
 
