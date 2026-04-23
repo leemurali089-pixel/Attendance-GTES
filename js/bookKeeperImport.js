@@ -875,7 +875,19 @@ const BookKeeperImport = {
             };
 
             if (existingCustomer) {
-                existingCustomers[existingIndex] = { ...existingCustomer, ...customer };
+                const keepAppParty = existingCustomer.source === 'local' || existingCustomer.source === 'mjsprime';
+                existingCustomers[existingIndex] = keepAppParty
+                    ? {
+                        ...customer,
+                        ...existingCustomer,
+                        source: existingCustomer.source,
+                        id: existingCustomer.id,
+                        partyId: existingCustomer.partyId,
+                        name: existingCustomer.name,
+                        accountType: existingCustomer.accountType,
+                        isOtherAccount: existingCustomer.isOtherAccount
+                    }
+                    : { ...existingCustomer, ...customer };
                 skipped++;
             } else {
                 existingCustomers.push(customer);
@@ -1574,7 +1586,8 @@ const BookKeeperImport = {
                             name: bkCustomerName,
                             address: '',
                             phone: '',
-                            id: CustomerManager.generateCustomerId()
+                            id: CustomerManager.generateCustomerId(),
+                            source: 'bookkeeper'
                         });
                         customers.push(newCust);
                         customerId = newCust.id;
@@ -1999,7 +2012,7 @@ const BookKeeperImport = {
                 else {
                     try {
                         const newCust = await CustomerManager.addCustomer({
-                            name: bkCustomerName, id: CustomerManager.generateCustomerId()
+                            name: bkCustomerName, id: CustomerManager.generateCustomerId(), source: 'bookkeeper'
                         });
                         customers.push(newCust);
                         customerId = newCust.id;
@@ -3486,7 +3499,7 @@ const BookKeeperImport = {
      * Confirm and Clear All BookKeeper Data
      */
     async confirmClearData() {
-        if (confirm('Are you sure you want to delete ALL data imported from BookKeeper? \n\nThis will remove:\n- Invoices\n- Inventory Items\n- Customers\n- Expenses\n\nThis action cannot be undone.')) {
+        if (confirm('Delete all BookKeeper–imported data from this device?\n\nKeeps only parties and records created in this app (source = local).\n\nRemoves: BookKeeper-tagged customers/vendors, imported invoices, vouchers, purchases, inventory from import, challans, and related rows.\n\nRe-open and save any manual party in the app if it was created before the "local" tag was added, so it is kept on future resets.\n\nThis action cannot be undone.')) {
             await this.clearAllData();
         }
     },
@@ -3495,14 +3508,19 @@ const BookKeeperImport = {
         App.showNotification('Sweeping all BookKeeper Service & Inventory Data...', 'info');
         const noMerge = { skipPreSaveMerge: true };
 
-        // 1. Invoices
+        // 1. Invoices (drop BK + credit notes / sales return rows that often linger after import)
         const invoices = DataManager.getData('invoices') || [];
-        const cleanInvoices = invoices.filter(i => i.source !== 'bookkeeper' && i.source !== 'seed' && !i.bookkeeperId);
+        const cleanInvoices = invoices.filter((i) => {
+            if (i.source === 'bookkeeper' || i.source === 'seed' || i.bookkeeperId) return false;
+            const t = String(i.type || '').toLowerCase();
+            if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return false;
+            return true;
+        });
         await DataManager.saveData('invoices', cleanInvoices, noMerge);
 
         // 2. Vouchers (Transactions)
         const vouchers = DataManager.getData('vouchers') || [];
-        const cleanVouchers = vouchers.filter(v => v.source !== 'bookkeeper' && v.source !== 'seed');
+        const cleanVouchers = vouchers.filter((v) => v.source !== 'bookkeeper' && v.source !== 'seed');
         await DataManager.saveData('vouchers', cleanVouchers, noMerge);
 
         // 3. Inventory (Robust Cleanup for all import variants)
@@ -3533,18 +3551,57 @@ const BookKeeperImport = {
         const cleanTxn = txn.filter(t => !t.refId?.toString().includes('BK-') && t.source !== 'bookkeeper' && t.source !== 'seed');
         await DataManager.saveData('inventoryTransactions', cleanTxn, noMerge);
 
-        // 5. Customers
+        // 5. Customers — keep only parties created in MJS PrimeLogic (source local / mjsprime)
         const customers = DataManager.getData('customers') || [];
-        const cleanCustomers = customers.filter(c => c.source !== 'bookkeeper' && c.source !== 'seed');
+        const junkName = (name) => {
+            const s = String(name || '').toLowerCase();
+            return /\b(sales\s*return|basic\s*salary|round\s*off|tds\b|advance\s*tax|purchase\s*return|misc\.?\s*party)\b/.test(s);
+        };
+        const bookkeeperNameSuffix = (c) => /\s-\s[CS]\s*$/i.test(String(c.name || '').trim());
+        const keepLocalAppParty = (c) => {
+            if (junkName(c.name)) return false;
+            const src = String(c.source || '').toLowerCase();
+            if (src === 'bookkeeper' || src === 'seed' || src === 'bookkeeper_service_table') return false;
+            if (c.bookkeeperId || c.bookkeeperAccountId) return false;
+            if (src === 'local' || src === 'mjsprime') return true;
+            // Names like "Party - C" / "Party - S" are BookKeeper import disambiguation — drop on reset
+            if (bookkeeperNameSuffix(c)) return false;
+            // Legacy: no `source` — keep only if it does not look like an import duplicate
+            if (!src) return !bookkeeperNameSuffix(c);
+            return false;
+        };
+        const cleanCustomers = customers.filter(keepLocalAppParty);
         await DataManager.saveData('customers', cleanCustomers, noMerge);
 
-        // 6. Expenses
+        // 6. Expenses / purchase bills (remove BK + purchase/vendor bills + debit notes so Reset clears purchases)
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
-        const cleanExpenses = expenses.filter(e => !e.bookkeeperId && e.source !== 'bookkeeper' && e.source !== 'seed');
+        const isDebitNoteRow = (e) => {
+            const t = String(e.type || e.billType || e.v_type || '').toLowerCase();
+            if (t === 'debit-note' || t === 'debit_note' || (t.includes('debit') && t.includes('note'))) return true;
+            if (e.isDebitNote === true) return true;
+            const n = String(e.narration || e.description || e.remarks || '').toLowerCase();
+            if (n.includes('debit note') || n.includes('debit_note')) return true;
+            return false;
+        };
+        const cleanExpenses = expenses.filter((e) => {
+            if (e.bookkeeperId || e.source === 'bookkeeper' || e.source === 'seed') return false;
+            if (isDebitNoteRow(e)) return false;
+            const cat = String(e.category || '').toLowerCase();
+            const ptype = String(e.purchaseType || e.expenseType || '').toLowerCase();
+            if (cat.includes('purchase') || ptype === 'material' || ptype === 'purchase') return false;
+            if (cat.includes('supplier') || cat.includes('vendor') || cat.includes('inward') || cat.includes('itc')) return false;
+            if (String(e.purchaseType || '').toLowerCase() === 'material') return false;
+            return true;
+        });
         await DataManager.saveData(DataManager.KEYS.EXPENSES, cleanExpenses, noMerge);
 
         // 7. Additional BK generated collections
         await DataManager.saveData('challans', [], noMerge);
+        try {
+            await DataManager.saveData(DataManager.KEYS.CHALLANS, [], noMerge);
+        } catch (e) {
+            console.warn('[clearAllData] gtes_challans clear:', e && e.message);
+        }
         await DataManager.saveData(DataManager.KEYS.TAX_SCHEMES, [], noMerge);
         await DataManager.saveData(DataManager.KEYS.WAREHOUSES, [], noMerge);
         await DataManager.saveData(DataManager.KEYS.SERVICES, [], noMerge);
@@ -4114,7 +4171,8 @@ const BookKeeperImport = {
                         const newCust = await CustomerManager.addCustomer({
                             name: inv.customerName,
                             address: '',
-                            phone: ''
+                            phone: '',
+                            source: 'bookkeeper'
                         });
                         customers.push(newCust);
                         inv.customerId = newCust.id;
@@ -4192,7 +4250,8 @@ const BookKeeperImport = {
                         const newCust = await CustomerManager.addCustomer({
                             name: v.customerName,
                             address: '',
-                            phone: ''
+                            phone: '',
+                            source: 'bookkeeper'
                         });
                         customers.push(newCust);
                         v.customerId = newCust.id;

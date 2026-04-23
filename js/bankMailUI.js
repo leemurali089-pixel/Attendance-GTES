@@ -55,9 +55,19 @@ const BankMailUI = (() => {
             </div></div>
           </div>`;
 
+        try {
+            const next = sessionStorage.getItem('bankMail_nextFilter');
+            if (['open', 'credit', 'debit', 'voucher', 'all'].includes(next)) {
+                state.filter = next;
+                sessionStorage.removeItem('bankMail_nextFilter');
+            }
+        } catch {}
         document.querySelectorAll('#bankFilter button').forEach(b => b.onclick = () => {
             document.querySelectorAll('#bankFilter button').forEach(x => x.classList.remove('active'));
             b.classList.add('active'); state.filter = b.dataset.filter; render();
+        });
+        document.querySelectorAll('#bankFilter button').forEach(x => {
+            x.classList.toggle('active', x.dataset.filter === state.filter);
         });
         document.getElementById('bankSearch').oninput = (e) => { state.search = e.target.value.trim().toLowerCase(); render(); };
         document.getElementById('bankRefresh').onclick = async () => {

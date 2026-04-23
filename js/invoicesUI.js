@@ -4,6 +4,13 @@
  * Integrated with Synced Data (Customers, Inventory)
  */
 const InvoicesUI = {
+    /** `businessAnalytics.js` assigns `window.BusinessAnalytics`; use that so ledger works regardless of script tag order. */
+    _ba() {
+        if (typeof window !== 'undefined' && window.BusinessAnalytics) return window.BusinessAnalytics;
+        if (typeof BusinessAnalytics !== 'undefined') return BusinessAnalytics;
+        return null;
+    },
+
     /** Indian states / UT for Place of Supply (Book Keeper style). */
     INDIAN_POS_OPTIONS: [
         'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
@@ -450,11 +457,12 @@ const InvoicesUI = {
     },
 
     _resolveLedgerForParty(party, accountGroup, dateRange) {
-        if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
+        const BA = this._ba();
+        if (!BA || !BA.getAccountLedger) return null;
         const probes = [party?.partyId, party?.customerId, party?.vendorId, party?.name].filter(Boolean);
         for (const probe of probes) {
             try {
-                const l = BusinessAnalytics.getAccountLedger(probe, {
+                const l = BA.getAccountLedger(probe, {
                     accountGroup,
                     startDate: dateRange?.startDate || undefined,
                     endDate: dateRange?.endDate || undefined
@@ -655,7 +663,7 @@ const InvoicesUI = {
                                         <input type="radio" class="btn-check" name="voucherLinkFilter" id="vlinkUnlinked" value="unlinked" ${this.currentVoucherLinkFilter === 'unlinked' ? 'checked' : ''} onchange="InvoicesUI.setVoucherLinkFilter('unlinked')">
                                         <label class="btn btn-outline-warning btn-sm" for="vlinkUnlinked">Not linked</label>
                                     </div>
-                                    <span class="text-white-50 small">Ledger due uses Account Ledger closing for the period above; Balance is this bill’s open amount from receipt allocations.</span>
+                                    <span class="text-white-50 small">Ledger due = customer’s Account Ledger closing for the calendar month (if selected) or full available range; Balance = this bill’s open amount from receipt allocations.</span>
                                 </div>
                             </div>
                         </div>
@@ -747,9 +755,8 @@ const InvoicesUI = {
         let totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
         const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
-        const canComputeLedgerSummary = typeof BusinessAnalytics !== 'undefined'
-            && BusinessAnalytics.getAccountLedger
-            && !query
+        const BA = this._ba();
+        const canComputeLedgerSummary = BA && BA.getAccountLedger
             && filteredAll.length <= 300;
         if (canComputeLedgerSummary) {
             const partyMap = new Map();
@@ -799,14 +806,12 @@ const InvoicesUI = {
         // Sort by date desc
         forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        const canComputeRowLedgerDue = typeof BusinessAnalytics !== 'undefined'
-            && BusinessAnalytics.getAccountLedger
-            && !query
-            && forTable.length <= 200;
+        // Per-row ledger due: cached by party (one getAccountLedger per customer, not per row).
+        const canComputeRowLedgerDue = BA && BA.getAccountLedger
+            && forTable.length <= 5000;
         const ledgerCache = new Map();
         const getLedgerDueForInv = (inv) => {
             if (!canComputeRowLedgerDue) return null;
-            if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
             const k = this._partyLedgerCacheKey(inv);
             if (ledgerCache.has(k)) return ledgerCache.get(k);
             const party = { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName };
@@ -3096,7 +3101,8 @@ const InvoicesUI = {
         let totalPending = filtered.reduce((sum, p) => sum + p.balance, 0);
         const pendingCount = filtered.filter(p => p.balance > 0.05).length;
         let outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
-        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+        const pba = this._ba();
+        if (pba && pba.getAccountLedger) {
             const range = this._purchaseLedgerRangeFromFilters('');
             const partyMap = new Map();
             filtered.forEach(p => {
@@ -3543,8 +3549,9 @@ const InvoicesUI = {
      */
     _isCreditNoteSalesDoc(inv) {
         if (!inv) return false;
-        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics._isCreditNoteInvoice) {
-            return BusinessAnalytics._isCreditNoteInvoice(inv);
+        const ba = this._ba();
+        if (ba && ba._isCreditNoteInvoice) {
+            return ba._isCreditNoteInvoice(inv);
         }
         const t = (inv.type || '').toLowerCase();
         if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return true;
@@ -3556,8 +3563,9 @@ const InvoicesUI = {
 
     _isDebitNotePurchaseDoc(exp) {
         if (!exp) return false;
-        if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics._isDebitNotePurchase) {
-            return BusinessAnalytics._isDebitNotePurchase(exp);
+        const ba = this._ba();
+        if (ba && ba._isDebitNotePurchase) {
+            return ba._isDebitNotePurchase(exp);
         }
         const t = String(exp.type || exp.v_type || exp.billType || '').toLowerCase();
         const billNo = String(exp.billNo || exp.bookkeeperVchNo || exp.id || '').toUpperCase();
@@ -3882,6 +3890,7 @@ const InvoicesUI = {
         const dcBadge = (inv) => (typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(inv))
             ? ' <span class="badge bg-secondary">DC</span>' : '';
         const fmt = (n) => (parseFloat(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const sba = this._ba();
         if (mode === 'parties') {
             const partySeen = new Map();
             for (const inv of lines) {
@@ -3897,7 +3906,7 @@ const InvoicesUI = {
             }
             const rows = [...partySeen.values()].map((entry) => {
                 let ledgerDue = null;
-                if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+                if (sba && sba.getAccountLedger) {
                     const l = this._resolveLedgerForParty(entry.party, 'customer', range);
                     ledgerDue = Math.max(0, parseFloat(l?.summary?.balance || 0) || 0);
                 }
@@ -3920,7 +3929,7 @@ const InvoicesUI = {
             const sorted = [...lines].sort((a, b) => new Date(b.date) - new Date(a.date));
             const ledgerCache = new Map();
             const ledgerFor = (inv) => {
-                if (typeof BusinessAnalytics === 'undefined' || !BusinessAnalytics.getAccountLedger) return null;
+                if (!sba || !sba.getAccountLedger) return null;
                 const k = this._partyLedgerCacheKey(inv);
                 if (ledgerCache.has(k)) return ledgerCache.get(k);
                 const party = { partyId: inv.partyId, customerId: inv.customerId, name: inv.customerName };
@@ -4016,13 +4025,14 @@ const InvoicesUI = {
                 const key = p.vendor || 'Unknown';
                 map.set(key, (map.get(key) || 0) + (p.balance || 0));
             });
+            const oba = this._ba();
             let rows = [...map.entries()].map(([name, amt]) => {
                 let alignedAmt = amt;
                 // Align supplier outstanding modal with Customer Ledger logic when available.
                 // Ledger is party-based (includes supplier payments even if bill links are imperfect).
-                if (typeof BusinessAnalytics !== 'undefined' && BusinessAnalytics.getAccountLedger) {
+                if (oba && oba.getAccountLedger) {
                     try {
-                        const l = BusinessAnalytics.getAccountLedger(name, { accountGroup: 'vendor' });
+                        const l = oba.getAccountLedger(name, { accountGroup: 'vendor' });
                         if (l && l.summary && Number.isFinite(Number(l.summary.balance))) {
                             alignedAmt = Math.max(0, parseFloat(l.summary.balance) || 0);
                         }

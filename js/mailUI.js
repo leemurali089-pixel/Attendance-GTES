@@ -1019,31 +1019,74 @@ const MailUI = (() => {
         document.body.appendChild(loader);
         const modal = new bootstrap.Modal(loader);
         modal.show();
-        loader.addEventListener('hidden.bs.modal', () => loader.remove());
+
+        const blobRef = { url: null };
+        const disposeModal = () => {
+            if (blobRef.url) {
+                try { URL.revokeObjectURL(blobRef.url); } catch {}
+                blobRef.url = null;
+            }
+            try { loader.remove(); } catch {}
+        };
+        loader.addEventListener('hidden.bs.modal', () => disposeModal(), { once: true });
 
         const res = await window.electronAPI.gmail.readAttachmentBytes({ messageId, attachmentId: a.attachmentId, filename: a.filename });
         if (!res.success) {
             loader.querySelector('#attBody').innerHTML = `<div class="p-4 text-danger">Error: ${esc(res.error)}</div>`;
             return;
         }
-        const b64 = res.data.base64;
+        const b64 = res.data && res.data.base64;
+        if (!b64) {
+            loader.querySelector('#attBody').innerHTML = `<div class="p-4 text-danger">Error: no attachment data</div>`;
+            return;
+        }
         const mt = (a.mimeType || '').toLowerCase();
-        const dataUrl = `data:${mt || 'application/octet-stream'};base64,${b64}`;
         const body = loader.querySelector('#attBody');
         body.innerHTML = '';
+        body.style.cssText = 'flex:1;min-height:0;display:flex;flex-direction:column;';
 
         const ext = (a.filename || '').split('.').pop().toLowerCase();
         const isPdf = mt.includes('pdf') || ext === 'pdf';
         const isImg = mt.startsWith('image/') || ['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext);
         const isText = mt.startsWith('text/') || ['txt','csv','log','json','xml','html','md'].includes(ext);
 
+        // Large PDFs exceed Chromium's practical data: URL limit (~2MB) and render as a blank iframe.
+        // Use a blob: URL for PDFs and other binary previews; fall back to data: URL only when needed.
+        let downloadHref = null;
+        try {
+            const byteChars = atob(b64);
+            const n = byteChars.length;
+            const u8 = new Uint8Array(n);
+            for (let i = 0; i < n; i++) u8[i] = byteChars.charCodeAt(i);
+            const blobType = isPdf ? 'application/pdf' : (mt || 'application/octet-stream');
+            const blob = new Blob([u8], { type: blobType });
+            blobRef.url = URL.createObjectURL(blob);
+            downloadHref = blobRef.url;
+        } catch (e) {
+            console.warn('[mailUI] attachment decode failed', e);
+        }
+        const dataUrl = `data:${mt || 'application/octet-stream'};base64,${b64}`;
+        if (!downloadHref) downloadHref = dataUrl;
+
+        const contentEl = loader.querySelector('.modal-content');
+        if (contentEl) {
+            contentEl.style.display = 'flex';
+            contentEl.style.flexDirection = 'column';
+        }
+
         if (isPdf) {
-            body.innerHTML = `<iframe src="${dataUrl}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+            const pdfSrc = blobRef.url || dataUrl;
+            const iframe = document.createElement('iframe');
+            const safeName = String(a.filename || 'PDF').replace(/[<>&"]/g, '');
+            iframe.title = safeName;
+            iframe.style.cssText = 'width:100%;min-height:72vh;flex:1;border:0;background:#fff';
+            iframe.src = pdfSrc;
+            body.appendChild(iframe);
         } else if (isImg) {
-            body.innerHTML = `<div class="text-center p-3"><img src="${dataUrl}" style="max-width:100%;max-height:80vh"></div>`;
+            body.innerHTML = `<div class="text-center p-3 flex-grow-1"><img src="${blobRef.url || dataUrl}" style="max-width:100%;max-height:80vh" alt=""></div>`;
         } else if (isText) {
             const txt = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
-            body.innerHTML = `<pre class="mail-msg-bodytext">${esc(txt.slice(0, 200000))}</pre>`;
+            body.innerHTML = `<pre class="mail-msg-bodytext flex-grow-1" style="overflow:auto">${esc(txt.slice(0, 200000))}</pre>`;
         } else {
             body.innerHTML = `
               <div class="p-5 text-center">
@@ -1055,7 +1098,7 @@ const MailUI = (() => {
 
         loader.querySelector('#attDownload').onclick = () => {
             const link = document.createElement('a');
-            link.href = dataUrl;
+            link.href = downloadHref;
             link.download = a.filename;
             link.click();
         };

@@ -997,6 +997,30 @@
                             <input type="number" step="0.01" class="form-control" id="customerOpeningBalance" placeholder="0 — Dr positive for receivable from party">
                             <small class="text-muted">Same meaning as in Customers / Suppliers list: starting balance before current books.</small>
                         </div>
+                        <div class="mb-3 d-none" id="otherAccountGroupWrap">
+                            <label class="form-label">Account group *</label>
+                            <select class="form-select" id="customerAccountGroup">
+                                <option value="">— Select group —</option>
+                                <option>Direct Income</option>
+                                <option>Indirect Income</option>
+                                <option>Direct Expenses</option>
+                                <option>Indirect Expenses</option>
+                                <option>Bank &amp; Cash</option>
+                                <option>Bank Account</option>
+                                <option>Cash-in-hand</option>
+                                <option>Duties &amp; Taxes</option>
+                                <option>Fixed Assets</option>
+                                <option>Current Assets</option>
+                                <option>Current Liabilities</option>
+                                <option>Capital</option>
+                                <option>Loans (Liability)</option>
+                                <option>Sundry Debtors</option>
+                                <option>Sundry Creditors</option>
+                                <option>Investments</option>
+                                <option>Other / Misc</option>
+                            </select>
+                            <small class="text-muted">Shown on the Other Accounts list and used for ledger grouping.</small>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer border-secondary">
@@ -1671,14 +1695,14 @@
     <script src="js/fileStorage.js?v=2.1"></script>
 
     <!-- Application Scripts -->
-    <script src="js/data.js?v=1.8"></script>
+    <script src="js/data.js?v=2.0"></script>
     <script src="js/userManager.js?v=1.2"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/updateChecker.js?v=1.9"></script>
     <script src="js/appUpdater.js?v=1.0"></script>
 
     <!-- Book Keeper Integration (Load before SyncManager) -->
-    <script src="js/bookKeeperSync.js?v=1.5"></script>
+    <script src="js/bookKeeperSync.js?v=1.7"></script>
     <script src="js/syncManager.js?v=1.8"></script>
     
     <!-- Hidden input for web file import fallback -->
@@ -1694,29 +1718,29 @@
     <script src="js/emailService.js?v=1.1"></script>
     <script src="js/salary.js?v=1.2"></script>
     <script src="js/employeeView.js?v=1.2"></script>
-    <script src="js/customers.js?v=1.3"></script>
+    <script src="js/customers.js?v=1.5"></script>
     <script src="js/inventory.js?v=1.1"></script>
     <script src="js/delivery.js?v=1.1"></script>
     <script src="js/jobcard.js?v=1.1"></script>
     <script src="js/invoices.js?v=1.4"></script>
     <script src="js/vouchers.js?v=1.6"></script>
-    <script src="js/vouchersUI.js?v=2.1"></script>
+    <script src="js/vouchersUI.js?v=2.3"></script>
     <script src="js/paymentsUI.js?v=1.1"></script>
     <script src="js/whatsappService.js?v=1.1"></script>
-    <script src="js/tasksUI.js?v=1.1"></script>
-    <script src="js/invoicesUI.js?v=2.7"></script>
-    <script src="js/deliveryUI.js?v=1.3"></script>
+    <script src="js/tasksUI.js?v=1.5"></script>
+    <script src="js/businessAnalytics.js?v=1.7"></script>
+    <script src="js/invoicesUI.js?v=2.9"></script>
+    <script src="js/deliveryUI.js?v=2.0"></script>
     <script src="js/accountingUI.js?v=1.2"></script>
     <script src="js/admin.js?v=1.6"></script>
-    <script src="js/mailUI.js?v=1.4"></script>
-    <script src="js/poQueueUI.js?v=1.2"></script>
-    <script src="js/bankMailUI.js?v=1.3"></script>
+    <script src="js/mailUI.js?v=1.6"></script>
+    <script src="js/poQueueUI.js?v=1.3"></script>
+    <script src="js/bankMailUI.js?v=1.4"></script>
     <script src="js/reports.js?v=1.2"></script>
-    <script src="js/businessAnalytics.js?v=1.5"></script>
-    <script src="js/analyticsUI.js?v=1.7"></script>
+    <script src="js/analyticsUI.js?v=1.9"></script>
     <script src="js/bankImportHelper.js?v=1.1"></script>
     <script src="js/exportImportHelper.js?v=1.1"></script>
-    <script src="js/bookKeeperImport.js?v=3.1"></script>
+    <script src="js/bookKeeperImport.js?v=3.4"></script>
     <script src="js/seedData.js?v=1.1"></script>
     <script src="js/app.js?v=2.7"></script>
 
@@ -1826,7 +1850,7 @@
     <script src="js/ai_assistant.js"></script>
     
     <!-- Recycle Bin UI -->
-    <script src="js/recycleBinUI.js"></script>
+    <script src="js/recycleBinUI.js?v=1.1"></script>
     <!-- PWA Registration -->
     <script>
         // Only register Service Worker on supported web protocols (not locally via file://)

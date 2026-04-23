@@ -180,11 +180,15 @@ const CustomerManager = {
             isOtherAccount: customerData.isOtherAccount || false,
             accountGroup: customerData.accountGroup || '',
             balance: customerData.balance ?? customerData.openingBalance ?? 0,
+            // Created in MJS PrimeLogic UI (not BookKeeper import)
+            source: (customerData.source !== undefined && customerData.source !== null && customerData.source !== '')
+                ? customerData.source
+                : 'local',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
 
-        const extraKeys = ['state', 'pincode', 'pan', 'address2', 'country', 'openingBalance', 'creditLimit', 'creditPeriod', 'displayName', 'status'];
+        const extraKeys = ['bookkeeperId', 'bookkeeperAccountId', 'state', 'pincode', 'pan', 'address2', 'country', 'openingBalance', 'creditLimit', 'creditPeriod', 'displayName', 'status'];
         extraKeys.forEach((k) => {
             const v = customerData[k];
             if (v !== undefined && v !== null && v !== '') customer[k] = v;
@@ -206,11 +210,15 @@ const CustomerManager = {
             throw new Error('Customer not found');
         }
 
-        customers[index] = {
+        const merged = {
             ...customers[index],
             ...updates,
             updatedAt: new Date().toISOString()
         };
+        if (!merged.source || merged.source === '') {
+            merged.source = 'local';
+        }
+        customers[index] = merged;
 
         await DataManager.saveData('customers', customers);
         return customers[index];
@@ -283,6 +291,7 @@ const CustomerManager = {
     async deleteCustomer(customerId) {
         const customers = DataManager.getData('customers') || [];
         const filtered = customers.filter(c => c.id !== customerId);
-        await DataManager.saveData('customers', filtered);
+        // Pre-save merge re-unions the cloud list with local rows and would resurrect deleted parties.
+        await DataManager.saveData('customers', filtered, { skipPreSaveMerge: true });
     }
 };

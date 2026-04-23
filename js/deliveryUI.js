@@ -27,19 +27,71 @@ const DeliveryUI = {
     HISTORY_INITIAL_LIMIT: 200,
     HISTORY_LOAD_MORE_STEP: 200,
 
+    /** `null` = summary of account groups; string = show parties under that group (or "Unclassified"). */
+    _otherGroupFilter: null,
+
+    /** Canonical "Other" ledger groups (must match Add Other / customerAccountGroup options). */
+    OTHER_ACCOUNT_GROUP_LABELS: [
+        'Direct Income', 'Indirect Income', 'Direct Expenses', 'Indirect Expenses',
+        'Bank & Cash', 'Bank Account', 'Cash-in-hand', 'Duties & Taxes',
+        'Fixed Assets', 'Current Assets', 'Current Liabilities', 'Capital',
+        'Loans (Liability)', 'Sundry Debtors', 'Sundry Creditors', 'Investments', 'Other / Misc'
+    ],
+
+    /**
+     * Map stored BookKeeper / UI accountGroup string to a canonical label in OTHER_ACCOUNT_GROUP_LABELS, or "".
+     */
+    mapRawAccountGroupToLabel(raw) {
+        const t = String(raw || '').trim();
+        if (!t) return '';
+        const low = t.toLowerCase();
+        for (const label of this.OTHER_ACCOUNT_GROUP_LABELS) {
+            if (label.toLowerCase() === low) return label;
+        }
+        if (low.includes('sundry') && low.includes('debtor')) return 'Sundry Debtors';
+        if (low.includes('sundry') && low.includes('credit')) return 'Sundry Creditors';
+        if (low.includes('direct') && low.includes('expense')) return 'Direct Expenses';
+        if (low.includes('indirect') && low.includes('expense')) return 'Indirect Expenses';
+        if (low.includes('direct') && low.includes('income')) return 'Direct Income';
+        if (low.includes('indirect') && low.includes('income')) return 'Indirect Income';
+        if (low.includes('bank') && low.includes('cash')) return 'Bank & Cash';
+        if (low === 'duties & taxes' || (low.includes('duties') && low.includes('tax'))) return 'Duties & Taxes';
+        return '';
+    },
+
+    _otherPartyMatchesFilter(c) {
+        if (!this._otherGroupFilter) return true;
+        const g = this.mapRawAccountGroupToLabel(c.accountGroup);
+        if (this._otherGroupFilter === 'Unclassified') return !g;
+        return g === this._otherGroupFilter;
+    },
+
+    openOtherGroupDetail(label) {
+        this._otherGroupFilter = label;
+        this.loadCustomers();
+    },
+
+    backToOtherGroups() {
+        this._otherGroupFilter = null;
+        this.loadCustomers();
+    },
+
     getAccountCategory(c) {
         if (!c) return 'Customer';
         if (c.isOtherAccount || c.accountType === 'Other') return 'Other';
-        if (c.accountType === 'Supplier') return 'Supplier';
-        if (c.accountType === 'Customer') return 'Customer';
-
-        // Smart fallback for legacy or incomplete data
         const name = (c.name || '').toLowerCase();
         const group = (c.accountGroup || '').toLowerCase();
 
-        // Known System/Other Account keywords
-        const systemKeywords = ['bank', 'cash', 'sales return', 'purchase return', 'tax', 'gst', 'vat', 'discount', 'tds', 'round off', 'salary', 'duty', 'expense', 'income', 'capital'];
-        if (systemKeywords.some(k => name.includes(k))) return 'Other';
+        // Ledger / BookKeeper artifacts: classify as Other even if accountType was forced to "Customer" (duplicates in customer list)
+        const systemKeywords = [
+            'bank', 'cash', 'sales return', 'purchase return', 'tax', 'gst', 'vat', 'discount', 'tds', 'tcs',
+            'round off', 'basic salary', 'salary', 'duty', 'expense', 'income', 'capital', 'debit note', 'credit note',
+            'journal', 'suspense', 'profit', 'loss'
+        ];
+        if (systemKeywords.some((k) => name.includes(k))) return 'Other';
+
+        if (c.accountType === 'Supplier') return 'Supplier';
+        if (c.accountType === 'Customer') return 'Customer';
 
         // Known non-customer/supplier groups
         if (group && (group.includes('bank') || group.includes('cash') || group.includes('tax') ||
@@ -57,15 +109,94 @@ const DeliveryUI = {
         return 'Customer';
     },
 
+    _isHistoryCreditNoteInvoice(inv) {
+        if (!inv) return false;
+        const t = (inv.type || '').toLowerCase();
+        return t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return'
+            || t.includes('credit') && t.includes('note');
+    },
+
+    _isHistoryDebitNoteExpense(e) {
+        if (!e) return false;
+        const t = String(e.type || e.billType || '').toLowerCase();
+        if (t === 'debit-note' || t === 'debit_note' || (t.includes('debit') && t.includes('note'))) return true;
+        const n = String(e.narration || e.description || e.remarks || '').toLowerCase();
+        if (n.includes('debit note') || n.includes('debit_note')) return true;
+        return false;
+    },
+
+    /** One row per GSTIN, else one per normalized name — reduces duplicate parties in filters. */
+    _dedupeCustomerListForFilters(customers) {
+        const list = Array.isArray(customers) ? customers : [];
+        const byGst = new Set();
+        const byNormName = new Set();
+        const norm = (n) => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const out = [];
+        for (const c of list) {
+            if (!c) continue;
+            const g = String(c.gstin || '').replace(/\s/g, '').toUpperCase();
+            if (g.length === 15) {
+                if (byGst.has(g)) continue;
+                byGst.add(g);
+            } else {
+                const n = norm(c.name);
+                if (n && byNormName.has(n)) continue;
+                if (n) byNormName.add(n);
+            }
+            out.push(c);
+        }
+        return out;
+    },
+
     async init() {
         try {
             await CustomerManager.init();
             await InventoryManager.init();
             await DeliveryManager.init();
+            this._installPdfPreviewModalCleanup();
         } catch (error) {
             console.error('DeliveryUI initialization failed:', error);
             App.showNotification('Error initializing Delivery module: ' + error.message, 'error');
         }
+    },
+
+    /**
+     * Remove orphan Bootstrap 5 .modal-backdrop nodes and fix body.modal-open / overflow
+     * after closing nested modals (common cause of a frozen grey screen).
+     */
+    reconcileModalStack() {
+        try {
+            document.querySelectorAll('.modal-backdrop').forEach((b) => { b.style.zIndex = ''; });
+            const open = () => document.querySelectorAll('.modal.show').length;
+            let backs;
+            while ((backs = document.querySelectorAll('.modal-backdrop')).length > open()) {
+                backs[backs.length - 1].remove();
+            }
+            if (open() === 0) {
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('overflow');
+                document.body.style.removeProperty('padding-right');
+            } else {
+                document.body.classList.add('modal-open');
+            }
+        } catch (e) {
+            console.warn('[DeliveryUI] reconcileModalStack', e);
+        }
+    },
+
+    /**
+     * Closing the PDF preview after opening it on top of another modal (e.g. Task Details) can leave
+     * an extra .modal-backdrop or break body.modal-open — the UI stays grey until refresh.
+     */
+    _installPdfPreviewModalCleanup() {
+        if (this._pdfPreviewModalCleanupInstalled) return;
+        this._pdfPreviewModalCleanupInstalled = true;
+        const el = document.getElementById('pdfPreviewModal');
+        if (!el) return;
+        el.addEventListener('hidden.bs.modal', () => {
+            el.style.zIndex = '';
+            this.reconcileModalStack();
+        });
     },
 
     /**
@@ -814,6 +945,35 @@ const DeliveryUI = {
             }
         }
 
+        const ogw = document.getElementById('otherAccountGroupWrap');
+        const ogs = document.getElementById('customerAccountGroup');
+        if (ogw) {
+            const isOther = this.currentCustomerType === 'Other';
+            ogw.classList.toggle('d-none', !isOther);
+            if (ogs && isOther) {
+                ogs.querySelectorAll('option[data-temp="1"]').forEach((o) => o.remove());
+                if (customerId) {
+                    const cu = CustomerManager.getCustomer(customerId);
+                    const ag = (cu && cu.accountGroup) ? String(cu.accountGroup).trim() : '';
+                    if (ag) {
+                        const has = Array.from(ogs.options).some((o) => (o.value || o.textContent) === ag);
+                        if (!has) {
+                            const o = document.createElement('option');
+                            o.value = ag;
+                            o.textContent = ag;
+                            o.setAttribute('data-temp', '1');
+                            ogs.appendChild(o);
+                        }
+                        ogs.value = ag;
+                    } else {
+                        ogs.selectedIndex = 0;
+                    }
+                } else {
+                    ogs.selectedIndex = 0;
+                }
+            }
+        }
+
         const modal = new bootstrap.Modal(document.getElementById('customerModal'));
         modal.show();
     },
@@ -883,6 +1043,19 @@ const DeliveryUI = {
             if (openingBalance !== undefined && !Number.isNaN(openingBalance)) {
                 customerData.openingBalance = openingBalance;
                 customerData.balance = openingBalance;
+            }
+
+            if (this.currentCustomerType === 'Other') {
+                const ag = document.getElementById('customerAccountGroup')?.value?.trim();
+                if (!ag) {
+                    throw new Error('Select an account group for Other accounts');
+                }
+                customerData.isOtherAccount = true;
+                customerData.accountType = 'Other';
+                customerData.accountGroup = ag;
+            } else {
+                customerData.isOtherAccount = false;
+                customerData.accountGroup = '';
             }
 
             if (!customerData.name) {
@@ -976,10 +1149,13 @@ const DeliveryUI = {
         if (sSupp) sSupp.innerText = counts.Supplier;
         if (sOther) sOther.innerText = counts.Other;
 
+        const allOtherPartyRows = allData.filter(c => this.getAccountCategory(c) === 'Other');
+
         // Apply categorical filter
-        let customers = allData.filter(c => {
-            return this.getAccountCategory(c) === this.currentCustomerType;
-        });
+        let customers = allData.filter(c => this.getAccountCategory(c) === this.currentCustomerType);
+        if (this.currentCustomerType === 'Other' && this._otherGroupFilter) {
+            customers = customers.filter(c => this._otherPartyMatchesFilter(c));
+        }
 
         if (searchQuery) {
             const lowerQuery = searchQuery.toLowerCase();
@@ -996,13 +1172,101 @@ const DeliveryUI = {
             'Other': 'Other Accounts'
         };
 
+        const isOtherGroups = this.currentCustomerType === 'Other' && !this._otherGroupFilter;
+        const isOtherDetail = this.currentCustomerType === 'Other' && !!this._otherGroupFilter;
+        const headerListTitle = isOtherGroups
+            ? 'Account groups'
+            : (isOtherDetail
+                ? `${this._otherGroupFilter}`
+                : typeLabels[this.currentCustomerType]);
+        const headerListCount = isOtherGroups ? '' : ` (${customers.length})`;
+
+        const th1 = isOtherGroups ? 'Group' : (this.currentCustomerType === 'Other' ? 'Account / name' : `${this.currentCustomerType} Info`);
+        const th2 = isOtherGroups ? 'Count' : (this.currentCustomerType === 'Other' ? 'Stored group' : 'Address');
+        const th3 = isOtherGroups ? 'Open' : 'Actions';
+
+        let tbodyHtml = '';
+        if (isOtherGroups) {
+            const q = (searchQuery || '').trim();
+            const low = q.toLowerCase();
+            const memMatch = (c) => {
+                if (!q) return true;
+                return (c.name || '').toLowerCase().includes(low) ||
+                    (c.gstin || '').toLowerCase().includes(low) ||
+                    String(c.phone || '').includes(q);
+            };
+            const groups = [...this.OTHER_ACCOUNT_GROUP_LABELS, 'Unclassified'];
+            tbodyHtml = groups.map((label) => {
+                const n = allOtherPartyRows.filter((c) => {
+                    const g = this.mapRawAccountGroupToLabel(c.accountGroup);
+                    const inG = (label === 'Unclassified') ? !g : g === label;
+                    return inG && memMatch(c);
+                }).length;
+                const labJs = JSON.stringify(String(label));
+                return `
+                <tr class="gtes-other-group-row" style="cursor:pointer" onclick='DeliveryUI.openOtherGroupDetail(${labJs})'>
+                    <td>
+                        <div class="fw-bold text-info">${String(label).replace(/</g, '&lt;')}</div>
+                        <div class="extra-small text-white-50">Click to list ledger names in this group</div>
+                    </td>
+                    <td class="text-end align-middle"><span class="badge bg-secondary">${n}</span></td>
+                    <td class="text-end align-middle text-white-50 small"><i class="bi bi-chevron-right"></i></td>
+                </tr>`;
+            }).join('');
+        } else if (customers.length === 0) {
+            tbodyHtml = `<tr><td colspan="3" class="text-center p-5 text-muted">No ${this.currentCustomerType.toLowerCase()}s found</td></tr>`;
+        } else {
+            tbodyHtml = customers.map(c => {
+                try {
+                    const cid = JSON.stringify(String(c.id));
+                    return `
+                                    <tr onclick='DeliveryUI.showCustomerBills(${cid})' style="cursor: pointer;">
+                                        <td>
+                                            <div class="fw-bold text-white">${c.name || c.displayName || '(No Name)'}</div>
+                                            <div class="extra-small text-muted">
+                                                ${c.gstin ? `<span class="me-2"><i class="bi bi-tag-fill me-1"></i>${c.gstin}</span>` : ''}
+                                                ${c.phone ? `<span><i class="bi bi-telephone-fill me-1"></i>${c.phone}</span>` : ''}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="extra-small text-muted text-truncate" style="max-width: 200px;">
+                                                ${this.currentCustomerType === 'Other' ? (c.accountGroup || '—') : (c.address || '-')}
+                                            </div>
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-info" onclick="event.stopPropagation(); DeliveryUI.showCustomerModal(${cid})" title="Edit">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <button class="btn btn-outline-success" onclick="event.stopPropagation(); DeliveryUI.showCustomerLedger(${cid})" title="Ledger">
+                                                    <i class="bi bi-journal-text"></i>
+                                                </button>
+                                                <button class="btn btn-outline-danger" onclick="event.stopPropagation(); DeliveryUI.deleteCustomer(${cid})" title="Delete">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `;
+                } catch (e) {
+                    console.error('Error rendering customer row:', e, c);
+                    return `<tr class="table-danger"><td colspan="3">Error rendering record: ${c.name || c.id}</td></tr>`;
+                }
+            }).join('');
+        }
+
+        const backBtn = isOtherDetail
+            ? `<button type="button" class="btn btn-sm btn-outline-light me-2" onclick="DeliveryUI.backToOtherGroups()"><i class="bi bi-arrow-left me-1"></i> All groups</button>`
+            : '';
+
         container.innerHTML = `
             <div class="row h-100 g-4">
                 <!-- Left: List View -->
                 <div class="col-md-7 border-end border-secondary">
-                    <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
                         <h4 class="mb-0 text-primary">
-                            <i class="bi bi-people-fill me-2"></i>${typeLabels[this.currentCustomerType]} (${customers.length})
+                            ${backBtn}
+                            <i class="bi bi-people-fill me-2"></i>${headerListTitle}${headerListCount}
                         </h4>
                         <div class="btn-group">
                             <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
@@ -1013,11 +1277,12 @@ const DeliveryUI = {
                             </button>
                         </div>
                     </div>
+                    ${isOtherGroups ? '<p class="small text-white-50 mb-2">Only <strong>account group</strong> categories are listed here. Open a group to see individual ledgers (e.g. company names) imported or added under that group.</p>' : ''}
 
                     <div class="input-group mb-3 glass-panel p-2 rounded">
                         <span class="input-group-text bg-transparent border-0 text-muted"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control bg-transparent border-0 text-white" id="customerSearchGlobal"
-                               placeholder="Search name, GSTIN or phone..." value="${searchQuery}"
+                               placeholder="${isOtherGroups ? 'Filter groups by name, GSTIN or phone under that group' : 'Search name, GSTIN or phone...'}" value="${searchQuery}"
                                oninput="DeliveryUI.loadCustomers(this.value)">
                     </div>
 
@@ -1025,49 +1290,13 @@ const DeliveryUI = {
                         <table class="table table-dark table-hover align-middle border-secondary">
                             <thead class="sticky-top bg-dark">
                                 <tr class="small text-uppercase text-muted">
-                                    <th>${this.currentCustomerType} Info</th>
-                                    <th>${this.currentCustomerType === 'Other' ? 'Group' : 'Address'}</th>
-                                    <th class="text-end">Actions</th>
+                                    <th>${th1}</th>
+                                    <th>${isOtherGroups ? th2 : (this.currentCustomerType === 'Other' ? 'Group' : 'Address')}</th>
+                                    <th class="text-end">${th3}</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${customers.length === 0 ? `<tr><td colspan="3" class="text-center p-5 text-muted">No ${this.currentCustomerType.toLowerCase()}s found</td></tr>` :
-                customers.map(c => {
-                    try {
-                        return `
-                                    <tr onclick="DeliveryUI.showCustomerBills('${c.id}')" style="cursor: pointer;">
-                                        <td>
-                                            <div class="fw-bold text-white">${c.name || c.displayName || '(No Name)'}</div>
-                                            <div class="extra-small text-muted">
-                                                ${c.gstin ? `<span class="me-2"><i class="bi bi-tag-fill me-1"></i>${c.gstin}</span>` : ''}
-                                                ${c.phone ? `<span><i class="bi bi-telephone-fill me-1"></i>${c.phone}</span>` : ''}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="extra-small text-muted text-truncate" style="max-width: 200px;">
-                                                ${c.isOtherAccount ? (c.accountGroup || 'Other') : (c.address || '-')}
-                                            </div>
-                                        </td>
-                                        <td class="text-end">
-                                            <div class="btn-group btn-group-sm">
-                                                <button class="btn btn-outline-info" onclick="event.stopPropagation(); DeliveryUI.showCustomerModal('${c.id}')" title="Edit">
-                                                    <i class="bi bi-pencil"></i>
-                                                </button>
-                                                <button class="btn btn-outline-success" onclick="event.stopPropagation(); DeliveryUI.showCustomerLedger('${c.id}')" title="Ledger">
-                                                    <i class="bi bi-journal-text"></i>
-                                                </button>
-                                                <button class="btn btn-outline-danger" onclick="event.stopPropagation(); DeliveryUI.deleteCustomer('${c.id}')" title="Delete">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                `;
-                    } catch (e) {
-                        console.error('Error rendering customer row:', e, c);
-                        return `<tr class="table-danger"><td colspan="3">Error rendering record: ${c.name || c.id}</td></tr>`;
-                    }
-                }).join('')}
+                                ${tbodyHtml}
                             </tbody>
                         </table>
                     </div>
@@ -1078,7 +1307,7 @@ const DeliveryUI = {
                     <div id="customerBillView" class="h-100">
                         <div class="h-100 d-flex flex-column justify-content-center align-items-center text-muted p-5 text-center bg-dark bg-opacity-25 rounded border border-dashed">
                             <i class="bi bi-receipt mb-3 fs-1"></i>
-                            <p>Select a ${this.currentCustomerType.toLowerCase()} to view history</p>
+                            <p>${isOtherGroups ? 'Open a group, then select a ledger to view history' : `Select a ${this.currentCustomerType.toLowerCase()} to view history`}</p>
                         </div>
                     </div>
                 </div>
@@ -1432,20 +1661,31 @@ const DeliveryUI = {
             </div>
         `;
 
-        // Remove old modal if exists
+        // Remove old instance: do not .hide() then sync-remove — that leaves a stray .modal-backdrop.
         const oldModal = document.getElementById('ledgerModal');
         if (oldModal) {
             const inst = bootstrap.Modal.getInstance(oldModal);
-            if (inst) inst.hide();
+            if (inst) {
+                inst.dispose();
+            }
             oldModal.remove();
+            this.reconcileModalStack();
         }
 
         // Insert modal HTML into DOM
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
-        // Now create and show the modal
-        const modal = new bootstrap.Modal(document.getElementById('ledgerModal'));
-        modal.show();
+        const ledgeEl = document.getElementById('ledgerModal');
+        const inst = bootstrap.Modal.getOrCreateInstance(ledgeEl);
+        ledgeEl.addEventListener('hidden.bs.modal', () => {
+            try {
+                const ae = document.activeElement;
+                if (ae && ledgeEl.contains(ae)) ae.blur();
+            } catch {}
+            this.reconcileModalStack();
+        });
+        inst.show();
+        setTimeout(() => this.reconcileModalStack(), 0);
     },
 
     // Inventory Management
@@ -1820,10 +2060,10 @@ const DeliveryUI = {
         const dataType = this.historyFilters.dataType;
         const needsInvoiceSplit = ['all', 'invoice-gst', 'invoice-non-gst'].includes(dataType);
         const needsDcChallanMerge = dataType === 'challan-dc';
-        const needsInvoices = needsInvoiceSplit || needsDcChallanMerge;
+        const needsInvoices = needsInvoiceSplit || needsDcChallanMerge || dataType === 'credit-notes';
         const needsJobCards = ['all', 'job-cards'].includes(dataType);
         const needsVouchers = ['all', 'vouchers', 'vouchers-receipt', 'vouchers-payment'].includes(dataType);
-        const needsPurchases = ['all', 'purchases'].includes(dataType);
+        const needsPurchases = ['all', 'purchases', 'debit-notes'].includes(dataType);
 
         const challans = DeliveryManager.getAllChallans();
         const deliveryChallans = challans.filter(c => c.type === 'delivery');
@@ -1842,7 +2082,7 @@ const DeliveryUI = {
 
         const jobCards = needsJobCards && typeof JobCardManager !== 'undefined' ? (JobCardManager.getAllJobCards() || []) : [];
         const vouchers = needsVouchers && typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []) : [];
-        const customers = CustomerManager.getAllCustomers();
+        const customers = this._dedupeCustomerListForFilters(CustomerManager.getAllCustomers());
         
         // Optimization: Create a customer map for O(1) lookups
         const customerMap = new Map();
@@ -1864,14 +2104,28 @@ const DeliveryUI = {
         if (dataType === 'all') {
             const allExpenses = needsPurchases && (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
             const purchases = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase')).map(p => ({ ...p, _source: 'purchase', total: p.amount }));
+            const creditNoteRows = (allInvoicesRaw || []).filter((inv) => this._isHistoryCreditNoteInvoice(inv)).map((i) => ({
+                ...i,
+                _source: 'credit-note',
+                total: parseFloat(i.total) || 0
+            }));
+            const debitNoteRows = (allExpenses || []).filter((e) => this._isHistoryDebitNoteExpense(e)).map((e) => ({
+                ...e,
+                _source: 'debit-note',
+                total: parseFloat(e.total ?? e.amount ?? e.grandTotal ?? 0) || 0
+            }));
+            // Avoid listing credit notes twice: main "invoices" stream excludes CN rows (they are merged via creditNoteRows).
+            const invoicesNoCn = (invoices || []).filter((i) => !this._isHistoryCreditNoteInvoice(i));
 
             data = [
                 ...challans.map(c => ({ ...c, _source: 'challan' })),
                 ...dcInvoicesForHistory.map(i => ({ ...i, _source: 'dc-invoice' })),
-                ...invoices.map(i => ({ ...i, _source: 'invoice' })),
+                ...invoicesNoCn.map(i => ({ ...i, _source: 'invoice' })),
+                ...creditNoteRows,
                 ...jobCards.map(jc => ({ ...jc, _source: 'jobcard' })),
                 ...vouchers.map(v => ({ ...v, _source: 'voucher', total: parseFloat(v.amount) })),
-                ...purchases
+                ...purchases,
+                ...debitNoteRows
             ];
         } else if (dataType === 'challan-dc') {
             // Challan rows + DC-style sales invoices (e.g. GTES/26-27/DC03) that exist only as invoices or are unlinked.
@@ -1896,6 +2150,16 @@ const DeliveryUI = {
         } else if (dataType === 'purchases') {
             const allExpenses = needsPurchases && (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
             data = allExpenses.filter(e => (e.category || '').toLowerCase().includes('purchase')).map(p => ({ ...p, _source: 'purchase', total: p.amount }));
+        } else if (dataType === 'credit-notes') {
+            const raw = (typeof InvoiceManager !== 'undefined') ? (InvoiceManager.getAllInvoices() || []) : [];
+            data = raw.filter((inv) => this._isHistoryCreditNoteInvoice(inv)).map((i) => ({ ...i, _source: 'credit-note', total: parseFloat(i.total) || 0 }));
+        } else if (dataType === 'debit-notes') {
+            const allExpenses = (typeof ExpenseManager !== 'undefined') ? ExpenseManager.getAllExpenses() : [];
+            data = allExpenses.filter((e) => this._isHistoryDebitNoteExpense(e)).map((e) => ({
+                ...e,
+                _source: 'debit-note',
+                total: parseFloat(e.total ?? e.amount ?? e.grandTotal ?? 0) || 0
+            }));
         }
 
         // Cache month key once per record for fast month filter checks
@@ -1948,6 +2212,9 @@ const DeliveryUI = {
                     if (statusFilter === 'pending-jc') matchesStatus = item.status !== 'dispatched';
                     else if (statusFilter === 'dispatched') matchesStatus = item.status === 'dispatched';
                     else matchesStatus = item.status === statusFilter;
+                } else if (item._source === 'purchase' || item._source === 'voucher' || item._source === 'credit-note' || item._source === 'debit-note') {
+                    // Invoice/challan status filters do not apply to purchases, vouchers, or notes — still show the row.
+                    matchesStatus = true;
                 } else {
                     matchesStatus = false;
                 }
@@ -2007,6 +2274,8 @@ const DeliveryUI = {
                                         <option value="vouchers-payment" ${this.historyFilters.dataType === 'vouchers-payment' ? 'selected' : ''}>Payments</option>
                                     </optgroup>
                                     <option value="purchases" ${this.historyFilters.dataType === 'purchases' ? 'selected' : ''}>Purchases</option>
+                                    <option value="credit-notes" ${this.historyFilters.dataType === 'credit-notes' ? 'selected' : ''}>Credit notes</option>
+                                    <option value="debit-notes" ${this.historyFilters.dataType === 'debit-notes' ? 'selected' : ''}>Debit notes</option>
                                 </select>
                             </div>
                             <div class="col-md-2">
@@ -2214,6 +2483,23 @@ const DeliveryUI = {
                                 <i class="bi bi-pencil"></i>
                             </button>
                         `;
+                    } else if (item._source === 'credit-note') {
+                        typeBadge = 'bg-secondary';
+                        const s = (item.status || 'posted').toUpperCase();
+                        statusHtml = `<span class="badge bg-info text-dark">CREDIT NOTE</span><br><small class="text-muted">${s}</small>`;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-success" onclick="InvoicesUI.previewInvoice('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        `;
+                    } else if (item._source === 'debit-note') {
+                        typeBadge = 'bg-dark border border-info';
+                        statusHtml = `<span class="badge bg-info text-dark">DEBIT NOTE</span>`;
+                        actionHtml = `
+                            <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${item.id}')" title="View">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        `;
                     } else if (item._source === 'purchase') {
                         typeBadge = 'bg-warning text-dark';
                         statusHtml = `<span class="badge bg-secondary">${(item.status || 'pending').toUpperCase()}</span>`;
@@ -2240,8 +2526,10 @@ const DeliveryUI = {
                     const invType = (item.type || '').toLowerCase();
                     const safeTypeStr = item._source === 'challan' ? (item.type || '').toUpperCase() :
                         item._source === 'dc-invoice' ? 'DELIVERY' :
-                            (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') :
-                                (item._source || '').toUpperCase());
+                            item._source === 'credit-note' ? 'CR NOTE' :
+                                item._source === 'debit-note' ? 'DR NOTE' :
+                                    (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') :
+                                        (item._source || '').toUpperCase());
                     const rowId = item._source === 'dc-invoice' ? (item.invoiceNo || item.id) : item.id;
 
                     return `
@@ -2289,13 +2577,14 @@ const DeliveryUI = {
     async deleteGenericRecord(source, id) {
         let deleteChallanToo = false;
 
-        if (source === 'invoice') {
+        if (source === 'invoice' || source === 'credit-note') {
             const inv = InvoiceManager.getAllInvoices().find(i => i.id === id);
             const linked = (typeof DeliveryManager !== 'undefined')
                 ? DeliveryManager.getAllChallans().filter(c => c.invoiceId === id || c.id === inv?.challanId)
                 : [];
-            let msg = 'Delete this invoice?';
-            if (linked.length) {
+            const label = source === 'credit-note' ? 'credit note' : 'invoice';
+            let msg = `Delete this ${label}?`;
+            if (linked.length && source === 'invoice') {
                 msg = `Delete this invoice and ${linked.length} linked challan(s) (${linked.map(c => c.id).join(', ')})?`;
             }
             if (!confirm(msg)) return;
@@ -2327,7 +2616,7 @@ const DeliveryUI = {
 
         try {
             if (source === 'challan') await DeliveryManager.deleteChallan(id);
-            else if (source === 'invoice') await InvoiceManager.deleteInvoice(id);
+            else if (source === 'invoice' || source === 'credit-note') await InvoiceManager.deleteInvoice(id);
             else if (source === 'jobcard') {
                 await JobCardManager.deleteJobCard(id);
                 if (deleteChallanToo) {
@@ -2345,7 +2634,7 @@ const DeliveryUI = {
                 }
             }
             else if (source === 'voucher') await VoucherManager.deleteVoucher(id);
-            else if (source === 'purchase' && typeof ExpenseManager !== 'undefined') await ExpenseManager.deleteExpense(id);
+            else if ((source === 'purchase' || source === 'debit-note') && typeof ExpenseManager !== 'undefined') await ExpenseManager.deleteExpense(id);
 
             App.showNotification(`${source.toUpperCase()} deleted`, 'success');
             this.loadHistory();
@@ -2847,6 +3136,7 @@ const DeliveryUI = {
     },
 
     filterCustomerType(type) {
+        this._otherGroupFilter = null;
         this.currentCustomerType = type;
 
         // Update active UI classes
@@ -3932,7 +4222,18 @@ const DeliveryUI = {
         pr.onclick = () => this.nativePrint();
         const modalEl = document.getElementById('pdfPreviewModal');
         if (modalEl) {
-            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            this._installPdfPreviewModalCleanup();
+            const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+            inst.show();
+            // Place PDF modal above a parent modal without rewriting z-index of every backdrop (breaks stack on hide).
+            const boostZ = () => {
+                modalEl.style.zIndex = '2005';
+                const all = document.querySelectorAll('.modal-backdrop');
+                if (all.length) all[all.length - 1].style.zIndex = '2000';
+            };
+            setTimeout(boostZ, 0);
+            requestAnimationFrame(() => setTimeout(boostZ, 0));
+            setTimeout(boostZ, 100);
         }
     },
 

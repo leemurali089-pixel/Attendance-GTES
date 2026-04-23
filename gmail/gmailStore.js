@@ -329,7 +329,8 @@ async function updateQueueEntry(name, messageId, patch) {
     const p = queuePath(name);
     return withLock(p, async () => {
         const list = await readQueue(name);
-        const i = list.findIndex(x => x.messageId === messageId);
+        const mid = (messageId == null ? '' : String(messageId)).trim();
+        const i = list.findIndex(x => (x.messageId == null ? '' : String(x.messageId)).trim() === mid);
         if (i >= 0) {
             list[i] = { ...list[i], ...patch };
             await writeQueue(name, list);

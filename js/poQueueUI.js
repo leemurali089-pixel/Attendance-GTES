@@ -249,6 +249,8 @@ const POQueueUI = (() => {
                 ((x.hints && x.hints.poNumber) || '').toLowerCase().includes(q)
             );
         }
+        // Newest first (received timestamp desc) so the inbox is not a random order
+        items.sort((a, b) => (Number(b.receivedAt) || 0) - (Number(a.receivedAt) || 0));
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="8" class="text-center p-4 text-muted">No purchase-order mails ${state.filter !== 'all' ? '(' + state.filter + ')' : ''}.</td></tr>`;
             return;
@@ -321,6 +323,12 @@ const POQueueUI = (() => {
 
     // ---- Invoice picker + multi-link modal ----
 
+    function invoiceYmdParts(inv) {
+        const raw = String(inv && (inv.date || inv.invoiceDate || inv.createdAt) || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+        return { y: raw.slice(0, 4), m: raw.slice(5, 7), d: raw, raw };
+    }
+
     function openInvoicePicker(messageId) {
         const item = state.items.find(x => x.messageId === messageId);
         if (!item) return;
@@ -339,6 +347,29 @@ const POQueueUI = (() => {
             if (ma !== mb) return mb - ma;
             return String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''));
         });
+
+        const yearsSet = new Set();
+        for (const inv of invoices) {
+            const p = invoiceYmdParts(inv);
+            if (p) yearsSet.add(p.y);
+        }
+        const yList = Array.from(yearsSet).sort().reverse();
+        if (yList.length === 0) {
+            const y0 = new Date().getFullYear();
+            for (let i = 0; i < 6; i++) yearsSet.add(String(y0 - i));
+        }
+        const yearOptVals = (yList.length ? yList : Array.from(yearsSet).sort().reverse());
+        const yearOptionsHtml = '<option value="">All years</option>' + yearOptVals
+            .map((y) => `<option value="${esc(y)}">${esc(y)}</option>`).join('');
+        const monthOptionsHtml = [
+            { v: '', t: 'All months' },
+            { v: '01', t: 'Jan' }, { v: '02', t: 'Feb' }, { v: '03', t: 'Mar' },
+            { v: '04', t: 'Apr' }, { v: '05', t: 'May' }, { v: '06', t: 'Jun' },
+            { v: '07', t: 'Jul' }, { v: '08', t: 'Aug' }, { v: '09', t: 'Sep' },
+            { v: '10', t: 'Oct' }, { v: '11', t: 'Nov' }, { v: '12', t: 'Dec' }
+        ].map((o) => `<option value="${o.v}">${o.t}</option>`).join('');
+
+        const pick = { q: '', year: '', month: '' };
 
         const modal = document.createElement('div');
         modal.className = 'modal fade';
@@ -363,6 +394,13 @@ const POQueueUI = (() => {
         });
 
         const render = () => {
+            const prevPick = modal.querySelector('#poPick');
+            const prevY = modal.querySelector('#poPickYear');
+            const prevM = modal.querySelector('#poPickMonth');
+            if (prevPick) pick.q = prevPick.value;
+            if (prevY) pick.year = prevY.value;
+            if (prevM) pick.month = prevM.value;
+
             const allocated = computeAllocated(item);
             const total = Number(item.totalQty) || 0;
             const remaining = total > 0 ? (total - allocated) : null;
@@ -382,13 +420,31 @@ const POQueueUI = (() => {
                     </div>`;
                 }).join('');
 
-            const q = (modal.querySelector('#poPick')?.value || '').trim().toLowerCase();
+            const q = (pick.q || '').trim().toLowerCase();
+            const words = q ? q.split(/\s+/).filter(Boolean) : [];
             let list = invoices.slice();
-            if (q) list = list.filter(inv => {
-                const info = invoiceInfo(inv);
-                return `${info.no} ${info.party} ${inv.poNumber || ''} ${info.date}`.toLowerCase().includes(q);
-            });
-            list = list.slice(0, 50);
+            if (words.length) {
+                list = list.filter((inv) => {
+                    const info = invoiceInfo(inv);
+                    const idStr = (inv.id != null ? String(inv.id) : '');
+                    const cname = (inv.customerName != null ? String(inv.customerName) : '');
+                    const hay = `${info.no} ${idStr} ${info.party} ${cname} ${inv.poNumber || ''} ${info.date || ''} ${inv.narration || ''}`.toLowerCase();
+                    return words.every((w) => hay.includes(w));
+                });
+            }
+            if (pick.year) {
+                list = list.filter((inv) => {
+                    const p = invoiceYmdParts(inv);
+                    return p && p.y === pick.year;
+                });
+            }
+            if (pick.month) {
+                list = list.filter((inv) => {
+                    const p = invoiceYmdParts(inv);
+                    return p && p.m === pick.month;
+                });
+            }
+            if (list.length > 500) list = list.slice(0, 500);
 
             const suggestionsHtml = list.map(inv => {
                 const info = invoiceInfo(inv);
@@ -446,9 +502,20 @@ const POQueueUI = (() => {
               <div id="poLinkedList">${linkedHtml}</div>
 
               <hr>
-              <div class="d-flex align-items-center gap-2 mb-2">
-                <h6 class="mb-0">Pick invoices</h6>
-                <input id="poPick" class="form-control form-control-sm ms-auto" style="max-width:320px" placeholder="Search invoice / customer / PO#">
+              <h6 class="mb-2">Pick invoices</h6>
+              <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+                <div>
+                  <label class="form-label small mb-0">Year</label>
+                  <select id="poPickYear" class="form-select form-select-sm" style="min-width:110px">${yearOptionsHtml}</select>
+                </div>
+                <div>
+                  <label class="form-label small mb-0">Month</label>
+                  <select id="poPickMonth" class="form-select form-select-sm" style="min-width:122px">${monthOptionsHtml}</select>
+                </div>
+                <div class="flex-grow-1" style="min-width:200px">
+                  <label class="form-label small mb-0">Search (invoice, customer, PO#, id)</label>
+                  <input id="poPick" class="form-control form-control-sm" value="${esc(pick.q)}" placeholder="e.g. customer name, INV-…, or PO number">
+                </div>
               </div>
               <div class="table-responsive" style="max-height:45vh;overflow:auto">
                 <table class="table table-sm table-hover mb-0 align-middle">
@@ -465,7 +532,20 @@ const POQueueUI = (() => {
               </div>
             `;
 
-            modal.querySelector('#poPick').oninput = render;
+            const pickInp = modal.querySelector('#poPick');
+            if (pickInp) {
+                pickInp.oninput = (e) => { pick.q = e.target.value; render(); };
+            }
+            const ySel = modal.querySelector('#poPickYear');
+            if (ySel) {
+                ySel.value = pick.year;
+                ySel.onchange = (e) => { pick.year = e.target.value; render(); };
+            }
+            const mSel = modal.querySelector('#poPickMonth');
+            if (mSel) {
+                mSel.value = pick.month;
+                mSel.onchange = (e) => { pick.month = e.target.value; render(); };
+            }
 
             modal.querySelectorAll('.po-add').forEach(btn => btn.onclick = () => {
                 const invId = btn.dataset.id;

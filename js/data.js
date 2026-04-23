@@ -92,6 +92,24 @@ const DataManager = {
                 const bk = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
                 if (bk) return `bk:${bk}`;
             }
+            if (storageKey === 'customers') {
+                const bka = item.bookkeeperAccountId != null ? String(item.bookkeeperAccountId).trim() : '';
+                if (bka) return `bka:${bka}`;
+                const bki = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
+                if (bki) return `bki:${bki}`;
+                const gst = String(item.gstin || '')
+                    .replace(/\s/g, '')
+                    .toUpperCase();
+                if (gst.length === 15) return `gst:${gst}`;
+                const n = String(item.name || '')
+                    .toLowerCase()
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                const src = String(item.source || '').toLowerCase();
+                if (n && (src === 'bookkeeper' || src === 'bookkeeper_service_table')) {
+                    return `bkn:${n}`;
+                }
+            }
             const id = item.id;
             if (id === undefined || id === null || id === '') return null;
             return `id:${String(id)}`;
@@ -2387,9 +2405,39 @@ const ExpenseManager = {
         return DataManager.saveDataSync(DataManager.KEYS.EXPENSES, expenses);
     },
 
-    deleteExpense(id) {
-        const expenses = this.getAllExpenses().filter(e => e.id !== id);
-        return DataManager.saveDataSync(DataManager.KEYS.EXPENSES, expenses);
+    async deleteExpense(id) {
+        const expenses = this.getAllExpenses();
+        const exp = expenses.find((e) => e.id === id);
+        if (exp) {
+            const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+            bin.push({
+                ...exp,
+                _deletedAt: new Date().toISOString(),
+                _recordType: 'expense'
+            });
+            await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, bin, { skipPreSaveMerge: true });
+        }
+        const filtered = expenses.filter((e) => e.id !== id);
+        await DataManager.saveData(DataManager.KEYS.EXPENSES, filtered, { skipPreSaveMerge: true });
+        return true;
+    },
+
+    async restoreExpense(id) {
+        const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
+        const index = bin.findIndex((item) => item.id === id && item._recordType === 'expense');
+        if (index === -1) throw new Error('Record not found in Recycle Bin');
+
+        const record = { ...bin[index] };
+        delete record._deletedAt;
+        delete record._recordType;
+
+        const expenses = this.getAllExpenses();
+        expenses.push(record);
+        const newBin = bin.filter((_, i) => i !== index);
+
+        await DataManager.saveData(DataManager.KEYS.EXPENSES, expenses);
+        await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin, { skipPreSaveMerge: true });
+        return record;
     },
 
     addCategory(name, type = 'indirect') {

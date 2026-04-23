@@ -21,6 +21,236 @@ const TasksUI = {
         return list.filter((t) => String(t?.assignedTo || '').trim().toLowerCase() === uname);
     },
 
+    _escHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    /** Open invoice PDF/preview from task modal (nested above task dialog). */
+    openPaymentInvoicePreview(invoiceId) {
+        const id = String(invoiceId == null ? '' : invoiceId).trim();
+        if (!id) return;
+        setTimeout(() => {
+            try {
+                if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.viewInvoice === 'function') {
+                    void DeliveryUI.viewInvoice(id);
+                    return;
+                }
+                if (typeof InvoicesUI !== 'undefined' && typeof InvoicesUI.previewInvoice === 'function') {
+                    InvoicesUI.previewInvoice(id);
+                    return;
+                }
+                if (typeof App !== 'undefined') App.showNotification('Invoice preview is not available', 'error');
+            } catch (e) {
+                console.error('openPaymentInvoicePreview', e);
+                if (typeof App !== 'undefined') App.showNotification('Could not open invoice preview', 'error');
+            }
+        }, 0);
+    },
+
+    /** Voucher PDF preview from task live summary (stacks over task modal). */
+    openPaymentVoucherPreview(voucherId) {
+        const id = String(voucherId == null ? '' : voucherId).trim();
+        if (!id) return;
+        setTimeout(() => {
+            try {
+                if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.viewVoucher === 'function') {
+                    void DeliveryUI.viewVoucher(id);
+                    return;
+                }
+                if (typeof VouchersUI !== 'undefined' && typeof VouchersUI.previewVoucher === 'function') {
+                    void VouchersUI.previewVoucher(id);
+                }
+            } catch (e) {
+                console.error('openPaymentVoucherPreview', e);
+                if (typeof App !== 'undefined') App.showNotification('Could not open voucher preview', 'error');
+            }
+        }, 0);
+    },
+
+    /** Match invoice to a payment follow-up task (same rules as "View Pending Bills"). */
+    _matchTaskPartyInvoice(task, inv) {
+        if (!task || !inv) return false;
+        const searchParty = (task.partyId || '').toLowerCase().trim();
+        const taskPartyName = (task.partyName || '').toLowerCase().trim();
+        const invId = (inv.customerId || '').toLowerCase().trim();
+        const invName = (inv.customerName || '').toLowerCase().trim();
+        const invKey = `${invId || 'ID'}::${invName || 'NAME'}`;
+        return (searchParty && invId === searchParty) ||
+            (taskPartyName && invName === taskPartyName) ||
+            (searchParty && invKey.toLowerCase() === searchParty) ||
+            (taskPartyName && (invName === taskPartyName || invId === taskPartyName));
+    },
+
+    /**
+     * Live totals: pending count/balance, receipts after task was created, optional focus bills.
+     */
+    async _renderPaymentFollowupSnapshot(task) {
+        const el = document.getElementById('taskPaymentLiveSnapshot');
+        if (!el) return;
+        if (task.type !== 'payment_followup' || !task.partyId) {
+            el.classList.add('d-none');
+            el.innerHTML = '';
+            return;
+        }
+        el.classList.remove('d-none');
+        el.innerHTML = '<div class="small text-muted p-2"><span class="spinner-border spinner-border-sm me-1"></span> Loading live summary…</div>';
+        try {
+            if (typeof InvoiceManager === 'undefined' || !InvoiceManager.getInvoicesWithBalance) {
+                el.innerHTML = '<div class="text-warning small">Invoices module not available.</div>';
+                return;
+            }
+            const allInvoices = await InvoiceManager.getInvoicesWithBalance();
+            const partyInv = allInvoices.filter(
+                (inv) => this._matchTaskPartyInvoice(task, inv) && (parseFloat(inv.balance) || 0) > 0.05
+            );
+            const pendingCount = partyInv.length;
+            const totalPending = partyInv.reduce((a, i) => a + (parseFloat(i.balance) || 0), 0);
+            const t0 = new Date(task.createdAt).getTime();
+            const vouchers = (typeof DataManager !== 'undefined' && DataManager.getData) ? (DataManager.getData('vouchers') || []) : [];
+            const pidT = (task.partyId || '').toLowerCase().trim();
+            const pnameT = (task.partyName || '').toLowerCase().trim();
+            const focusIds = Array.isArray(task.followupInvoiceIds) ? task.followupInvoiceIds : [];
+            let focusPending = 0;
+            for (const fid of focusIds) {
+                const inv = partyInv.find((i) => i.id === fid);
+                if (inv) focusPending += parseFloat(inv.balance) || 0;
+            }
+
+            const receiptRows = [];
+            for (const v of vouchers) {
+                if (v.type !== 'receipt' || !v.date) continue;
+                const vd = new Date(v.date).getTime();
+                if (vd < t0) continue;
+                const pid = (v.customerId || '').toString().toLowerCase().trim();
+                const pn = (v.customerName || '').toString().toLowerCase().trim();
+                const same = (pidT && pid === pidT) || (pnameT && pn === pnameT);
+                if (!same) continue;
+                receiptRows.push({
+                    date: v.date,
+                    id: v.id || '—',
+                    amount: parseFloat(v.amount) || 0,
+                    mode: v.paymentMode || v.referenceId || '—'
+                });
+            }
+            receiptRows.sort((a, b) => new Date(b.date) - new Date(a.date));
+            const receivedSince = receiptRows.reduce((a, r) => a + r.amount, 0);
+
+            const billsSorted = partyInv.slice().sort((a, b) => {
+                const da = new Date(a.date || 0).getTime();
+                const db = new Date(b.date || 0).getTime();
+                return db - da;
+            });
+
+            const billsTableRows = billsSorted.map((inv) => {
+                const no = this._escHtml(inv.invoiceNo || inv.id);
+                const d = inv.date ? this._escHtml(new Date(inv.date).toLocaleDateString('en-IN')) : '—';
+                const bal = (parseFloat(inv.balance) || 0).toLocaleString('en-IN');
+                const iid = JSON.stringify(String(inv.id));
+                const eye = (typeof InvoicesUI !== 'undefined' && InvoicesUI.previewInvoice)
+                    ? `<button type="button" class="btn btn-sm btn-outline-info py-0 px-2" title="Preview" onclick='TasksUI.openPaymentInvoicePreview(${iid})'><i class="bi bi-eye"></i></button>`
+                    : '';
+                return `<tr><td class="fw-semibold text-info">${no}</td><td class="text-white-50 small">${d}</td><td class="text-end text-warning fw-semibold">₹${bal}</td><td class="text-end">${eye}</td></tr>`;
+            }).join('');
+
+            const receiptTableRows = receiptRows.slice(0, 40).map((r) => {
+                const d = this._escHtml(new Date(r.date).toLocaleDateString('en-IN'));
+                const vid = this._escHtml(String(r.id));
+                const vidJs = JSON.stringify(String(r.id));
+                const vEye = (typeof DeliveryUI !== 'undefined' && DeliveryUI.viewVoucher)
+                    ? `<button type="button" class="btn btn-sm btn-outline-info py-0 px-2" title="Voucher" onclick='TasksUI.openPaymentVoucherPreview(${vidJs})'><i class="bi bi-eye"></i></button>`
+                    : '';
+                const amt = r.amount.toLocaleString('en-IN');
+                const mode = this._escHtml(String(r.mode));
+                return `<tr><td class="text-white-50 small">${d}</td><td><code class="small">${vid}</code></td><td class="text-end text-success fw-semibold">₹${amt}</td><td class="small text-white-50">${mode}</td><td class="text-end" style="width:52px">${vEye}</td></tr>`;
+            }).join('');
+
+            const tidJs = JSON.stringify(String(task.id));
+            el.innerHTML = `
+                <div class="rounded-4 overflow-hidden border border-info border-opacity-40 shadow-lg" style="background: linear-gradient(180deg, rgba(13,110,253,0.12) 0%, rgba(13,202,240,0.06) 100%);">
+                    <div class="px-3 py-3 border-bottom border-info border-opacity-25 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="d-inline-flex align-items-center justify-content-center rounded-circle bg-info bg-opacity-25 text-info" style="width:44px;height:44px;"><i class="bi bi-graph-up-arrow fs-5"></i></span>
+                            <div>
+                                <div class="fw-bold text-info fs-6 mb-0">Live payment summary</div>
+                                <div class="small text-white-50">Pending bills &amp; receipts since this task was created</div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-light" onclick='TasksUI.viewTaskDetail(${tidJs})'><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+                    </div>
+                    <div class="p-3">
+                        <div class="row g-2 mb-3">
+                            <div class="col-sm-4">
+                                <div class="rounded-3 p-3 text-center h-100" style="background: rgba(255,193,7,0.12); border: 1px solid rgba(255,193,7,0.35);">
+                                    <div class="small text-white-50 text-uppercase">Outstanding</div>
+                                    <div class="fs-4 fw-bold text-warning mb-0">₹${totalPending.toLocaleString('en-IN')}</div>
+                                    <div class="small text-white-50">${pendingCount} bill(s)</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="rounded-3 p-3 text-center h-100" style="background: rgba(25,135,84,0.12); border: 1px solid rgba(25,135,84,0.35);">
+                                    <div class="small text-white-50 text-uppercase">Receipts (after task)</div>
+                                    <div class="fs-4 fw-bold text-success mb-0">₹${receivedSince.toLocaleString('en-IN')}</div>
+                                    <div class="small text-white-50">${receiptRows.length} txn</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="rounded-3 p-3 text-center h-100" style="background: rgba(13,202,240,0.1); border: 1px solid rgba(13,202,240,0.35);">
+                                    <div class="small text-white-50 text-uppercase">${focusIds.length ? 'On selected bills' : 'Focus'}</div>
+                                    <div class="fs-5 fw-bold text-info mb-0">₹${focusPending.toLocaleString('en-IN')}</div>
+                                    <div class="small text-white-50">${focusIds.length ? 'balance on bills picked at creation' : '—'}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="bi bi-receipt-cutoff text-warning"></i>
+                                <span class="fw-semibold text-white">Pending bills</span>
+                                <span class="badge bg-warning text-dark">${pendingCount}</span>
+                            </div>
+                            <div class="table-responsive rounded-3 border border-secondary border-opacity-25" style="max-height: 220px;">
+                                <table class="table table-sm table-dark table-hover mb-0 align-middle">
+                                    <thead class="sticky-top" style="background: rgba(33,37,41,0.95);">
+                                        <tr class="small text-white-50 text-uppercase">
+                                            <th>Invoice</th><th>Date</th><th class="text-end">Balance</th><th class="text-end" style="width:52px"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${billsTableRows || '<tr><td colspan="4" class="text-center text-white-50 py-4">No pending bills for this party.</td></tr>'}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="bi bi-cash-coin text-success"></i>
+                                <span class="fw-semibold text-white">Receipts after task created</span>
+                                <span class="badge bg-success">${receiptRows.length}</span>
+                            </div>
+                            <div class="table-responsive rounded-3 border border-secondary border-opacity-25" style="max-height: 180px;">
+                                <table class="table table-sm table-dark table-hover mb-0 align-middle">
+                                    <thead class="sticky-top" style="background: rgba(33,37,41,0.95);">
+                                        <tr class="small text-white-50 text-uppercase">
+                                            <th>Date</th><th>Ref / voucher</th><th class="text-end">Amount</th><th>Mode / ref</th><th class="text-end" style="width:52px"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${receiptTableRows || '<tr><td colspan="5" class="text-center text-white-50 py-3">No receipts recorded after this task was created.</td></tr>'}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        } catch (e) {
+            el.innerHTML = `<div class="text-warning small">Could not load summary: ${this._escHtml((e && e.message) || e)}</div>`;
+        }
+    },
+
     _getActiveAssignableUsers(users, currentUser, preserveUsername = '') {
         const all = Array.isArray(users) ? users : [];
         const active = all.filter((u) => u && u.isActive !== false);
@@ -35,6 +265,22 @@ const TasksUI = {
 
     async init() {
         console.log('TasksUI initialized');
+        if (!this._dataChangeForSnapshot) {
+            this._dataChangeForSnapshot = true;
+            window.addEventListener('gtes:data-changed', (ev) => {
+                const key = ev.detail && ev.detail.key;
+                if (key !== 'vouchers' && key !== 'invoices') return;
+                const modal = document.getElementById('taskDetailModal');
+                if (!modal || !modal.classList.contains('show')) return;
+                const tid = modal.dataset.currentTaskId;
+                if (!tid) return;
+                const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
+                const t = tasks.find((x) => x.id === tid);
+                if (t && t.type === 'payment_followup' && t.partyId) {
+                    void this._renderPaymentFollowupSnapshot(t);
+                }
+            });
+        }
     },
 
     currentFilter: 'pending', // 'pending', 'completed', 'all'
@@ -572,6 +818,7 @@ const TasksUI = {
                             <div class="list-group-item bg-transparent border-0 px-2 py-1 d-flex align-items-center">
                                 <input class="form-check-input task-bill-checkbox me-2" type="checkbox" 
                                     value="${inv.invoiceNo}" 
+                                    data-invoice-id="${inv.id}"
                                     data-amount="${inv.balance}"
                                     data-total="${inv.total}"
                                     id="bill_${inv.id}"
@@ -673,22 +920,26 @@ const TasksUI = {
             });
         } else {
             // Create a single task
-            const newTask = {
-                id: 'TASK-' + Date.now(),
-                type: taskType,
-                narration,
-                partyId,
-                partyName,
-                assignedTo,
-                assignedToName,
-                followupDate,
-                followupTime,
-                status: 'open',
-                createdAt: new Date().toISOString(),
-                history: []
-            };
-            this.addHistory(newTask, 'Task Created', `Initial task created`);
-            tasks.push(newTask);
+            const followupInvoiceIds = Array.from(document.querySelectorAll('.task-bill-checkbox:checked'))
+                    .map((cb) => cb.getAttribute('data-invoice-id') || '')
+                    .filter(Boolean);
+                const newTask = {
+                    id: 'TASK-' + Date.now(),
+                    type: taskType,
+                    narration,
+                    partyId,
+                    partyName,
+                    assignedTo,
+                    assignedToName,
+                    followupDate,
+                    followupTime,
+                    status: 'open',
+                    createdAt: new Date().toISOString(),
+                    history: [],
+                    ...(taskType === 'payment_followup' && followupInvoiceIds.length ? { followupInvoiceIds } : {})
+                };
+                this.addHistory(newTask, 'Task Created', `Initial task created`);
+                tasks.push(newTask);
         }
 
         await DataManager.saveData(DataManager.KEYS.TASKS, tasks);
@@ -763,6 +1014,7 @@ const TasksUI = {
                                     <textarea id="taskDetailNarration" class="form-control bg-dark border-secondary text-white fs-5" rows="3" onblur="TasksUI.handleNarrationUpdate('${task.id}', this.value)">${task.narration}</textarea>
                                     <div class="small text-muted mt-1">Click outside to save changes</div>
                                 </div>
+                                <div id="taskPaymentLiveSnapshot" class="mb-4 d-none"></div>
                                 
                                 <div class="mb-4">
                                     <label class="text-white-50 small uppercase tracking-wider mb-1">Related Party</label>
@@ -848,7 +1100,7 @@ const TasksUI = {
                                     ${task.type === 'payment_followup' && task.partyId ? `
                                         <div class="mt-4 p-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 rounded-3">
                                             <div class="small fw-bold text-primary mb-2 text-center">PAYMENT FOLLOW-UP</div>
-                                            <button class="btn btn-primary btn-sm w-100" onclick="TasksUI.togglePendingBills('${task.id}', '${task.partyId}')">
+                                            <button class="btn btn-primary btn-sm w-100" onclick='TasksUI.togglePendingBills(${JSON.stringify(task.id)}, ${JSON.stringify(task.partyId || '')})'>
                                                 <i class="bi bi-receipt me-2"></i> View Pending Bills
                                             </button>
                                         </div>
@@ -880,12 +1132,28 @@ const TasksUI = {
             </div>
         `;
 
+        modalEl.dataset.currentTaskId = task.id;
+
+        if (!modalEl._gtesA11yHide) {
+            modalEl._gtesA11yHide = true;
+            modalEl.addEventListener('hide.bs.modal', () => {
+                try {
+                    const ae = document.activeElement;
+                    if (ae && modalEl.contains(ae)) ae.blur();
+                } catch {}
+            });
+        }
+
         if (isNew) {
             new bootstrap.Modal(modalEl).show();
         } else {
             // If already open, just refresh content. Bootstrap will handle focus.
             // But we might need to manually trigger show() to ensure backdrop etc.
             bootstrap.Modal.getInstance(modalEl).show();
+        }
+
+        if (task.type === 'payment_followup' && task.partyId) {
+            setTimeout(() => void this._renderPaymentFollowupSnapshot(task), 0);
         }
     },
 
@@ -1069,7 +1337,7 @@ const TasksUI = {
                                         <td>${new Date(inv.date).toLocaleDateString()}</td>
                                         <td class="text-end text-info fw-bold">₹${inv.balance.toLocaleString('en-IN')}</td>
                                         <td class="text-end pe-2">
-                                            <button class="btn btn-link btn-sm p-0 text-info" onclick="InvoicesUI.previewInvoice('${inv.id}')">
+                                            <button class="btn btn-link btn-sm p-0 text-info" onclick='InvoicesUI.previewInvoice(${JSON.stringify(String(inv.id))})'>
                                                 <i class="bi bi-eye"></i>
                                             </button>
                                         </td>

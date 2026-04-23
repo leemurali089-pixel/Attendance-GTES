@@ -69,18 +69,19 @@ const RecycleBinUI = {
               <div class="text-center py-5 text-muted">
                 <i class="bi bi-trash3" style="font-size:3rem;opacity:0.3;"></i>
                 <p class="mt-3 fs-5">Recycle Bin is empty</p>
-                <p class="small">Deleted Invoices, Vouchers, Challans, and Job Cards will appear here.</p>
+                <p class="small">Deleted invoices, vouchers, challans, job cards, and purchase / debit notes appear here.</p>
               </div>`;
             return;
         }
 
         const rows = bin.map((item, idx) => {
             const type = item._recordType || 'unknown';
-            const typeLabel = type === 'invoice' ? 'Invoice' : type === 'voucher' ? 'Voucher' : type === 'challan' ? (item.type === 'delivery' ? 'DC' : 'SC') : type === 'task' ? 'Task' : 'Job Card';
+            const typeLabel = type === 'invoice' ? 'Invoice' : type === 'voucher' ? 'Voucher' : type === 'expense' ? 'Expense' : type === 'challan' ? (item.type === 'delivery' ? 'DC' : 'SC') : type === 'task' ? 'Task' : 'Job Card';
 
             let typeBadge = '';
             if (type === 'invoice') typeBadge = `<span class="badge" style="background:#1a56db">Invoice</span>`;
             else if (type === 'voucher') typeBadge = `<span class="badge" style="background:#7e3af2">Voucher</span>`;
+            else if (type === 'expense') typeBadge = `<span class="badge" style="background:#b45309">Purchase / DN</span>`;
             else if (type === 'challan') typeBadge = `<span class="badge" style="background:#047857">${item.type === 'delivery' ? 'DC' : 'SC'}</span>`;
             else if (type === 'task') typeBadge = `<span class="badge" style="background:#0d6efd">Task</span>`;
             else typeBadge = `<span class="badge" style="background:#d97706">Job Card</span>`;
@@ -141,6 +142,8 @@ const RecycleBinUI = {
                 await DeliveryManager.restoreChallan(id);
             } else if (type === 'task') {
                 await TasksUI.restoreTask(id);
+            } else if (type === 'expense' && typeof ExpenseManager !== 'undefined') {
+                await ExpenseManager.restoreExpense(id);
             }
             App.showNotification('Record restored successfully!', 'success');
             this._render();

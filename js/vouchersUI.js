@@ -2586,9 +2586,10 @@ const VouchersUI = {
                         const msgId = this._pendingBankMailLink.messageId;
                         await window.electronAPI.gmail.queueUpdate({
                             name: 'bank',
-                            messageId: msgId,
+                            messageId: String(msgId).trim(),
                             patch: { linkedVoucherId: newVoucher && newVoucher.id ? newVoucher.id : data.id, status: 'linked' }
                         });
+                        try { sessionStorage.setItem('bankMail_nextFilter', 'voucher'); } catch {}
                         if (typeof App !== 'undefined' && App.showNotification) {
                             App.showNotification(`Voucher ${data.id} linked to bank email.`, 'success');
                         }
@@ -3227,8 +3228,21 @@ const VouchersUI = {
             };
         }
 
-        const modal = new bootstrap.Modal(document.getElementById('pdfPreviewModal'));
-        modal.show();
+        const modalEl = document.getElementById('pdfPreviewModal');
+        if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI._installPdfPreviewModalCleanup === 'function') {
+            DeliveryUI._installPdfPreviewModalCleanup();
+        }
+        if (modalEl) {
+            const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+            inst.show();
+            const boostZ = () => {
+                modalEl.style.zIndex = '2005';
+                const all = document.querySelectorAll('.modal-backdrop');
+                if (all.length) all[all.length - 1].style.zIndex = '2000';
+            };
+            setTimeout(boostZ, 0);
+            setTimeout(boostZ, 100);
+        }
     },
 
     async showEditVoucherModal(voucherId) {

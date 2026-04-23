@@ -18,8 +18,10 @@ const BusinessAnalytics = {
     /**
      * Get comprehensive stock report
      */
-    getStockReport() {
-        const inventory = DataManager.getData('inventory') || [];
+    getStockReport(taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
+        const inventory = (DataManager.getData('inventory') || [])
+            .filter((item) => this._itemMatchesTaxScope(item, ts));
         const transactions = DataManager.getData('inventoryTransactions') || [];
         const txByMaterial = new Map();
         transactions.forEach(t => {
@@ -310,6 +312,52 @@ const BusinessAnalytics = {
         if (inv.billType === 'gst') return true;
         const t = (inv.type || '').toLowerCase();
         return t === 'with-bill' || t === 'gst-invoice' || t === 'sales-gst';
+    },
+
+    _normalizeTaxScope(scope) {
+        const s = String(scope || 'all').toLowerCase();
+        if (s === 'plain' || s === 'gst') return s;
+        return 'all';
+    },
+
+    _invoiceMatchesTaxScope(inv, scope) {
+        const s = this._normalizeTaxScope(scope);
+        if (this._isCreditNoteInvoice(inv)) {
+            if (s === 'all') return true;
+            const tax = this._invoiceOutputTax(inv);
+            const hasTax = (tax.cgst + tax.sgst + tax.igst) > 0.01;
+            if (s === 'gst') return this._isGstSalesInvoice(inv) || hasTax;
+            return !this._isGstSalesInvoice(inv) && !hasTax;
+        }
+        if (s === 'all') return true;
+        if (s === 'gst') return this._isGstSalesInvoice(inv);
+        return !this._isGstSalesInvoice(inv);
+    },
+
+    _purchaseMatchesTaxScope(exp, scope) {
+        const s = this._normalizeTaxScope(scope);
+        if (s === 'all') return true;
+        const t = this._expenseTaxParts(exp);
+        const hasTax = t.cgst + t.sgst + t.igst > 0.01;
+        const bt = String(exp.billType || '').toLowerCase();
+        const isGst = hasTax || bt === 'gst' || bt === 'with-bill';
+        if (s === 'gst') return isGst;
+        return !isGst;
+    },
+
+    _signedInvoiceRevenueAmount(inv) {
+        const raw = parseFloat(inv.total) || 0;
+        if (this._isCreditNoteInvoice(inv)) return -Math.abs(raw);
+        return raw;
+    },
+
+    _itemMatchesTaxScope(item, scope) {
+        const s = this._normalizeTaxScope(scope);
+        if (s === 'all') return true;
+        const g = String(item.gstRate || item.taxRate || item.scheme || '').toLowerCase();
+        const looksGst = /\bgst\b|cgst|sgst|igst|hsn|sac|@[0-9]/.test(g) && !/exempt|nil|0\s*%|non-?gst/i.test(g);
+        if (s === 'gst') return looksGst;
+        return !looksGst;
     },
 
     /**
@@ -740,8 +788,8 @@ const BusinessAnalytics = {
         return false;
     },
 
-    _includeInCustomerLedgerInvoice(inv) {
-        return this._isCreditNoteInvoice(inv) || this._isGstStyleSalesInvoice(inv);
+    _includeInCustomerLedgerInvoice(inv, taxScope = 'all') {
+        return this._invoiceMatchesTaxScope(inv, taxScope);
     },
 
     /** Debit note from supplier — reduces payables (debit side of vendor ledger). */
@@ -754,13 +802,14 @@ const BusinessAnalytics = {
         return false;
     },
 
-    _collectCustomerRawEntries(account) {
+    _collectCustomerRawEntries(account, options = {}) {
+        const taxScope = (options && options.taxScope) != null ? options.taxScope : 'all';
         const invoices = DataManager.getData('invoices') || [];
         const vouchers = DataManager.getData('vouchers') || [];
         const entries = [];
         const customerInvoices = invoices.filter(inv =>
             this._partyMatches(account, inv.customerId, inv.customerName, inv.partyId) &&
-            this._includeInCustomerLedgerInvoice(inv)
+            this._includeInCustomerLedgerInvoice(inv, taxScope)
         );
         const customerInvoiceKeys = new Set();
         customerInvoices.forEach(inv => {
@@ -1350,15 +1399,16 @@ const BusinessAnalytics = {
         const requestedNorm = this._normalizePartyName(requestedRaw);
         const account = customers.find(c => {
             const idMatch = c.id != null && String(c.id) === requestedRaw;
+            const partyIdMatch = c.partyId != null && String(c.partyId).trim() === requestedRaw;
             const nameRawMatch = (c.name || '').toString().trim() === requestedRaw;
             const nameNormMatch = requestedNorm && this._normalizePartyName(c.name) === requestedNorm;
-            return idMatch || nameRawMatch || nameNormMatch;
+            return idMatch || partyIdMatch || nameRawMatch || nameNormMatch;
         });
         if (!account) return null;
 
         const raw = accountGroup === 'vendor'
             ? this._collectVendorRawEntries(account)
-            : this._collectCustomerRawEntries(account);
+            : this._collectCustomerRawEntries(account, options);
 
         const sign = (d, c) => this._ledgerRunningDelta(accountGroup, d, c);
 
@@ -1433,9 +1483,10 @@ const BusinessAnalytics = {
         const requestedNorm = this._normalizePartyName(requestedRaw);
         const account = customers.find(c => {
             const idMatch = c.id != null && String(c.id) === requestedRaw;
+            const partyIdMatch = c.partyId != null && String(c.partyId).trim() === requestedRaw;
             const nameRawMatch = (c.name || '').toString().trim() === requestedRaw;
             const nameNormMatch = requestedNorm && this._normalizePartyName(c.name) === requestedNorm;
-            return idMatch || nameRawMatch || nameNormMatch;
+            return idMatch || partyIdMatch || nameRawMatch || nameNormMatch;
         });
         if (!account) return null;
 
@@ -1572,6 +1623,7 @@ const BusinessAnalytics = {
         const mode = opts.mode === 'fy' ? 'fy' : 'month';
         const year = opts.year != null ? opts.year : today.getFullYear();
         const month = opts.month != null ? opts.month : today.getMonth();
+        const taxScope = this._normalizeTaxScope(opts.taxScope);
 
         const fyFromDate = (d) => (typeof DataManager.getFinancialYear === 'function')
             ? DataManager.getFinancialYear(d, true)
@@ -1589,14 +1641,15 @@ const BusinessAnalytics = {
                 expenseCardLabel: `Expenses (FY ${fyLabel})`,
                 revenueCompareHint: 'vs previous FY',
                 cashFlowChartHint: 'Chart is always for the selected financial year (Apr–Mar).',
-                revenue: this.getRevenueMetricsForFY(fyStart),
-                expenses: this.getExpenseMetricsForFY(fyStart),
+                taxScope,
+                revenue: this.getRevenueMetricsForFY(fyStart, taxScope),
+                expenses: this.getExpenseMetricsForFY(fyStart, taxScope),
                 inventory: this.getInventoryMetrics(),
-                customers: this.getCustomerMetricsForPeriod('fy', fyStart),
-                cashFlow: this.getCashFlowData(fyStart),
+                customers: this.getCustomerMetricsForPeriod('fy', fyStart, null, taxScope),
+                cashFlow: this.getCashFlowData(fyStart, taxScope),
                 cashFlowFyLabel: fyLabel,
-                recentActivity: this.getRecentActivityForDashboard({ mode: 'fy', fyStartYear: fyStart }),
-                alerts: this.getAlerts()
+                recentActivity: this.getRecentActivityForDashboard({ mode: 'fy', fyStartYear: fyStart, taxScope }),
+                alerts: this.getAlerts({ taxScope })
             };
         }
 
@@ -1612,39 +1665,44 @@ const BusinessAnalytics = {
             expenseCardLabel: `Expenses (${mn} ${year})`,
             revenueCompareHint: 'vs last month',
             cashFlowChartHint: '',
-            revenue: this.getRevenueMetrics(year, month),
-            expenses: this.getExpenseMetrics(year, month),
+            taxScope,
+            revenue: this.getRevenueMetrics(year, month, taxScope),
+            expenses: this.getExpenseMetrics(year, month, taxScope),
             inventory: this.getInventoryMetrics(),
-            customers: this.getCustomerMetricsForPeriod('month', year, month),
-            cashFlow: this.getCashFlowData(fy.startYear),
+            customers: this.getCustomerMetricsForPeriod('month', year, month, taxScope),
+            cashFlow: this.getCashFlowData(fy.startYear, taxScope),
             cashFlowFyLabel: fy.label,
-            recentActivity: this.getRecentActivityForDashboard({ mode: 'month', year, month }),
-            alerts: this.getAlerts()
+            recentActivity: this.getRecentActivityForDashboard({ mode: 'month', year, month, taxScope }),
+            alerts: this.getAlerts({ taxScope })
         };
     },
 
     /**
      * Revenue for a full Indian FY (April fyStartYear → March fyStartYear+1).
      */
-    getRevenueMetricsForFY(fyStartYear) {
+    getRevenueMetricsForFY(fyStartYear, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const invoices = DataManager.getData('invoices') || [];
         const fyTag = typeof DataManager.getFinancialYear === 'function'
             ? DataManager.getFinancialYear(new Date(fyStartYear, 3, 1))
             : '';
         const inFy = (inv) => !fyTag || DataManager.getFinancialYear(inv.date) === fyTag;
-        const fyInv = invoices.filter(inFy);
-        const total = fyInv.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
+        const fyInv = invoices.filter(inFy).filter((inv) => this._invoiceMatchesTaxScope(inv, ts));
+        const total = fyInv.reduce((sum, inv) => sum + this._signedInvoiceRevenueAmount(inv), 0);
 
         const prevTag = typeof DataManager.getFinancialYear === 'function'
             ? DataManager.getFinancialYear(new Date(fyStartYear - 1, 3, 1))
             : '';
         const prevTotal = prevTag
             ? invoices.filter(inv => DataManager.getFinancialYear(inv.date) === prevTag)
-                .reduce((s, inv) => s + (parseFloat(inv.total) || 0), 0)
+                .filter((inv) => this._invoiceMatchesTaxScope(inv, ts))
+                .reduce((s, inv) => s + this._signedInvoiceRevenueAmount(inv), 0)
             : 0;
 
         const changePercent = prevTotal > 0 ? ((total - prevTotal) / prevTotal * 100) : (total > 0 ? 100 : 0);
-        const pendingInvoices = invoices.filter(inv => inv.status === 'pending' || inv.status === 'unpaid');
+        const pendingInvoices = invoices.filter(inv =>
+            (inv.status === 'pending' || inv.status === 'unpaid') && this._invoiceMatchesTaxScope(inv, ts)
+        );
         const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
 
         return {
@@ -1662,7 +1720,8 @@ const BusinessAnalytics = {
     /**
      * Expense totals for an Indian FY (tag string from DataManager.getFinancialYear).
      */
-    _collectExpenseTotalsForFYTag(fyTagString) {
+    _collectExpenseTotalsForFYTag(fyTagString, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const purchases = (typeof ExpenseManager !== 'undefined')
             ? ExpenseManager.getAllExpenses()
             : (DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('purchases') || []);
@@ -1679,6 +1738,7 @@ const BusinessAnalytics = {
 
         purchases.forEach((r) => {
             if (!inFy(r.date)) return;
+            if (!this._purchaseMatchesTaxScope(r, ts)) return;
             const a = this._purchaseRowAmount(r);
             total += a;
             count++;
@@ -1686,38 +1746,43 @@ const BusinessAnalytics = {
             byCategory[cat] = (byCategory[cat] || 0) + a;
         });
 
-        petty.forEach((r) => {
-            if (!inFy(r.date)) return;
-            const a = parseFloat(r.amount) || 0;
-            total += a;
-            count++;
-            const cat = r.category || 'Other';
-            byCategory[cat] = (byCategory[cat] || 0) + a;
-        });
+        if (ts !== 'gst') {
+            petty.forEach((r) => {
+                if (!inFy(r.date)) return;
+                const a = parseFloat(r.amount) || 0;
+                total += a;
+                count++;
+                const cat = r.category || 'Other';
+                byCategory[cat] = (byCategory[cat] || 0) + a;
+            });
+        }
 
-        const salaryPayouts = settings.salaryPayouts || {};
-        Object.entries(salaryPayouts).forEach(([key, rec]) => {
-            const parts = key.split('_');
-            if (parts.length < 2) return;
-            const y = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (Number.isNaN(y) || Number.isNaN(m)) return;
-            const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-            if (!inFy(dateStr)) return;
-            let sal = parseFloat(rec.totalPaid) || 0;
-            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
-                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-            }
-            if (sal <= 0) return;
-            total += sal;
-            count++;
-            byCategory.Salary = (byCategory.Salary || 0) + sal;
-        });
+        if (ts !== 'gst') {
+            const salaryPayouts = settings.salaryPayouts || {};
+            Object.entries(salaryPayouts).forEach(([key, rec]) => {
+                const parts = key.split('_');
+                if (parts.length < 2) return;
+                const y = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                if (Number.isNaN(y) || Number.isNaN(m)) return;
+                const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+                if (!inFy(dateStr)) return;
+                let sal = parseFloat(rec.totalPaid) || 0;
+                if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                    sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                }
+                if (sal <= 0) return;
+                total += sal;
+                count++;
+                byCategory.Salary = (byCategory.Salary || 0) + sal;
+            });
+        }
 
         return { total, byCategory, count };
     },
 
-    getExpenseMetricsForFY(fyStartYear) {
+    getExpenseMetricsForFY(fyStartYear, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const fyTag = typeof DataManager.getFinancialYear === 'function'
             ? DataManager.getFinancialYear(new Date(fyStartYear, 3, 1))
             : '';
@@ -1725,8 +1790,8 @@ const BusinessAnalytics = {
             ? DataManager.getFinancialYear(new Date(fyStartYear - 1, 3, 1))
             : '';
 
-        const cur = fyTag ? this._collectExpenseTotalsForFYTag(fyTag) : { total: 0, byCategory: {}, count: 0 };
-        const prev = prevTag ? this._collectExpenseTotalsForFYTag(prevTag) : { total: 0, byCategory: {}, count: 0 };
+        const cur = fyTag ? this._collectExpenseTotalsForFYTag(fyTag, ts) : { total: 0, byCategory: {}, count: 0 };
+        const prev = prevTag ? this._collectExpenseTotalsForFYTag(prevTag, ts) : { total: 0, byCategory: {}, count: 0 };
 
         let changeVal = 0;
         if (prev.total > 0) {
@@ -1748,25 +1813,27 @@ const BusinessAnalytics = {
     /**
      * Top customers for a calendar month or full FY.
      */
-    getCustomerMetricsForPeriod(periodMode, yOrFyStart, monthOpt) {
+    getCustomerMetricsForPeriod(periodMode, yOrFyStart, monthOpt, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         if (periodMode === 'fy' && typeof DataManager.getFinancialYear !== 'function') {
             return this.getCustomerMetrics();
         }
         const customers = (typeof CustomerManager !== 'undefined') ? CustomerManager.getAllCustomers() : [];
         const invoices = DataManager.getData('invoices') || [];
-        const filtered = periodMode === 'fy'
+        const filtered = (periodMode === 'fy'
             ? invoices.filter(inv =>
                 typeof DataManager.getFinancialYear === 'function'
                 && DataManager.getFinancialYear(inv.date) === DataManager.getFinancialYear(new Date(yOrFyStart, 3, 1)))
             : invoices.filter(inv => {
                 const d = new Date(inv.date);
                 return !isNaN(d.getTime()) && d.getFullYear() === yOrFyStart && d.getMonth() === monthOpt;
-            });
+            })
+        ).filter((inv) => this._invoiceMatchesTaxScope(inv, ts));
 
         const customerRevenue = {};
         filtered.forEach(inv => {
             const key = inv.customerName || inv.customerId;
-            customerRevenue[key] = (customerRevenue[key] || 0) + (parseFloat(inv.total) || 0);
+            customerRevenue[key] = (customerRevenue[key] || 0) + this._signedInvoiceRevenueAmount(inv);
         });
 
         const topCustomers = Object.entries(customerRevenue)
@@ -1811,7 +1878,8 @@ const BusinessAnalytics = {
 
         const activities = [];
 
-        invoices.filter(inv => inPeriod(inv.date)).slice(-40).forEach(inv => {
+        const ts = (opts && opts.taxScope) != null ? this._normalizeTaxScope(opts.taxScope) : 'all';
+        invoices.filter(inv => inPeriod(inv.date) && this._invoiceMatchesTaxScope(inv, ts)).slice(-40).forEach(inv => {
             activities.push({
                 type: 'invoice',
                 icon: 'bi-receipt',
@@ -1833,7 +1901,7 @@ const BusinessAnalytics = {
             });
         });
 
-        purchases.filter(p => inPeriod(p.date)).slice(-40).forEach(p => {
+        purchases.filter(p => inPeriod(p.date) && this._purchaseMatchesTaxScope(p, ts)).slice(-40).forEach(p => {
             activities.push({
                 type: 'expense',
                 icon: 'bi-bag-check',
@@ -1843,6 +1911,12 @@ const BusinessAnalytics = {
                 date: p.date
             });
         });
+
+        if (ts === 'gst') {
+            return activities
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .slice(0, 10);
+        }
 
         expenses.filter(exp => inPeriod(exp.date)).slice(-40).forEach(exp => {
             activities.push({
@@ -1863,14 +1937,14 @@ const BusinessAnalytics = {
     /**
      * Get revenue metrics
      */
-    getRevenueMetrics(year, month) {
+    getRevenueMetrics(year, month, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const invoices = DataManager.getData('invoices') || [];
-        const challans = DataManager.getData('challans') || [];
 
         // Current month revenue
         const currentMonthInvoices = invoices.filter(inv => {
             const d = new Date(inv.date);
-            return d.getFullYear() === year && d.getMonth() === month;
+            return d.getFullYear() === year && d.getMonth() === month && this._invoiceMatchesTaxScope(inv, ts);
         });
 
         // Previous month for comparison
@@ -1878,23 +1952,25 @@ const BusinessAnalytics = {
         const prevYear = month === 0 ? year - 1 : year;
         const prevMonthInvoices = invoices.filter(inv => {
             const d = new Date(inv.date);
-            return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
+            return d.getFullYear() === prevYear && d.getMonth() === prevMonth && this._invoiceMatchesTaxScope(inv, ts);
         });
 
-        const currentRevenue = currentMonthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
-        const prevRevenue = prevMonthInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
-        const changePercent = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue * 100) : 0;
+        const currentRevenue = currentMonthInvoices.reduce((sum, inv) => sum + this._signedInvoiceRevenueAmount(inv), 0);
+        const prevRevenue = prevMonthInvoices.reduce((sum, inv) => sum + this._signedInvoiceRevenueAmount(inv), 0);
+        const changePercent = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / Math.abs(prevRevenue) * 100) : 0;
 
         // Pending payments
-        const pendingInvoices = invoices.filter(inv => inv.status === 'pending' || inv.status === 'unpaid');
+        const pendingInvoices = invoices.filter(inv =>
+            (inv.status === 'pending' || inv.status === 'unpaid') && this._invoiceMatchesTaxScope(inv, ts)
+        );
         const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
 
         // High-level FY Revenue (YTD)
         const currentFY = DataManager.getFinancialYear(`${year}-${month + 1}-01`);
         const ytdInvoices = invoices.filter(inv => {
-            return DataManager.getFinancialYear(inv.date) === currentFY;
+            return DataManager.getFinancialYear(inv.date) === currentFY && this._invoiceMatchesTaxScope(inv, ts);
         });
-        const ytdRevenue = ytdInvoices.reduce((sum, inv) => sum + (parseFloat(inv.total) || 0), 0);
+        const ytdRevenue = ytdInvoices.reduce((sum, inv) => sum + this._signedInvoiceRevenueAmount(inv), 0);
 
         return {
             currentMonth: currentRevenue,
@@ -1916,7 +1992,8 @@ const BusinessAnalytics = {
     /**
      * All cash expenses for dashboard: **purchases** book + optional petty `expenses` array + **salary** payouts marked in settings.
      */
-    _collectExpenseTotalsForMonth(year, month) {
+    _collectExpenseTotalsForMonth(year, month, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const purchases = (typeof ExpenseManager !== 'undefined')
             ? ExpenseManager.getAllExpenses()
             : (DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('purchases') || DataManager.getData('gtes_expenses') || []);
@@ -1933,6 +2010,7 @@ const BusinessAnalytics = {
 
         purchases.forEach((r) => {
             if (!inMonth(r.date)) return;
+            if (!this._purchaseMatchesTaxScope(r, ts)) return;
             const a = this._purchaseRowAmount(r);
             total += a;
             count++;
@@ -1940,26 +2018,30 @@ const BusinessAnalytics = {
             byCategory[cat] = (byCategory[cat] || 0) + a;
         });
 
-        petty.forEach((r) => {
-            if (!inMonth(r.date)) return;
-            const a = parseFloat(r.amount) || 0;
-            total += a;
-            count++;
-            const cat = r.category || 'Other';
-            byCategory[cat] = (byCategory[cat] || 0) + a;
-        });
-
-        const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || DataManager.getData('gtes_settings') || {};
-        const rec = settings.salaryPayouts && settings.salaryPayouts[`${year}_${month}`];
-        if (rec) {
-            let sal = parseFloat(rec.totalPaid) || 0;
-            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
-                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-            }
-            if (sal > 0) {
-                total += sal;
+        if (ts !== 'gst') {
+            petty.forEach((r) => {
+                if (!inMonth(r.date)) return;
+                const a = parseFloat(r.amount) || 0;
+                total += a;
                 count++;
-                byCategory.Salary = (byCategory.Salary || 0) + sal;
+                const cat = r.category || 'Other';
+                byCategory[cat] = (byCategory[cat] || 0) + a;
+            });
+        }
+
+        if (ts !== 'gst') {
+            const settings = DataManager.getData(DataManager.KEYS.SETTINGS) || DataManager.getData('gtes_settings') || {};
+            const rec = settings.salaryPayouts && settings.salaryPayouts[`${year}_${month}`];
+            if (rec) {
+                let sal = parseFloat(rec.totalPaid) || 0;
+                if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                    sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                }
+                if (sal > 0) {
+                    total += sal;
+                    count++;
+                    byCategory.Salary = (byCategory.Salary || 0) + sal;
+                }
             }
         }
 
@@ -1969,11 +2051,12 @@ const BusinessAnalytics = {
     /**
      * Get expense metrics
      */
-    getExpenseMetrics(year, month) {
-        const cur = this._collectExpenseTotalsForMonth(year, month);
+    getExpenseMetrics(year, month, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
+        const cur = this._collectExpenseTotalsForMonth(year, month, ts);
         const prevMonth = month === 0 ? 11 : month - 1;
         const prevYear = month === 0 ? year - 1 : year;
-        const prev = this._collectExpenseTotalsForMonth(prevYear, prevMonth);
+        const prev = this._collectExpenseTotalsForMonth(prevYear, prevMonth, ts);
 
         let changeVal = 0;
         if (prev.total > 0) {
@@ -2045,7 +2128,8 @@ const BusinessAnalytics = {
     /**
      * @param {number} fyStartYear - Indian FY start (April year), e.g. 2025 for FY 2025–26
      */
-    getCashFlowData(fyStartYear) {
+    getCashFlowData(fyStartYear, taxScope = 'all') {
+        const ts = this._normalizeTaxScope(taxScope);
         const invoices = DataManager.getData('invoices') || [];
         const pettyExpenses = DataManager.getData('expenses') || [];
         const purchases = (typeof ExpenseManager !== 'undefined')
@@ -2066,24 +2150,32 @@ const BusinessAnalytics = {
             map.set(k, (map.get(k) || 0) + delta);
         };
 
-        invoices.forEach(inv => addSum(revenueByYm, inv.date, parseFloat(inv.total) || 0));
-        purchases.forEach(p => addSum(expenseByYm, p.date, this._purchaseRowAmount(p)));
-        pettyExpenses.forEach(exp => addSum(expenseByYm, exp.date, parseFloat(exp.amount) || 0));
-        const salaryPayouts = settings.salaryPayouts || {};
-        Object.entries(salaryPayouts).forEach(([key, rec]) => {
-            const parts = key.split('_');
-            if (parts.length < 2) return;
-            const y = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (Number.isNaN(y) || Number.isNaN(m)) return;
-            let sal = parseFloat(rec.totalPaid) || 0;
-            if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
-                sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-            }
-            if (sal <= 0) return;
-            const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-            addSum(expenseByYm, dateStr, sal);
+        invoices.forEach((inv) => {
+            if (!this._invoiceMatchesTaxScope(inv, ts)) return;
+            addSum(revenueByYm, inv.date, this._signedInvoiceRevenueAmount(inv));
         });
+        purchases.forEach((p) => {
+            if (!this._purchaseMatchesTaxScope(p, ts)) return;
+            addSum(expenseByYm, p.date, this._purchaseRowAmount(p));
+        });
+        if (ts !== 'gst') {
+            pettyExpenses.forEach(exp => addSum(expenseByYm, exp.date, parseFloat(exp.amount) || 0));
+            const salaryPayouts = settings.salaryPayouts || {};
+            Object.entries(salaryPayouts).forEach(([key, rec]) => {
+                const parts = key.split('_');
+                if (parts.length < 2) return;
+                const y = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                if (Number.isNaN(y) || Number.isNaN(m)) return;
+                let sal = parseFloat(rec.totalPaid) || 0;
+                if (sal <= 0 && rec.individualPayouts && typeof rec.individualPayouts === 'object') {
+                    sal = Object.values(rec.individualPayouts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                }
+                if (sal <= 0) return;
+                const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+                addSum(expenseByYm, dateStr, sal);
+            });
+        }
         vouchers.forEach(v => addSum(collectedByYm, v.date, parseFloat(v.amount) || 0));
 
         const monthlyData = [];
@@ -2179,7 +2271,8 @@ const BusinessAnalytics = {
     /**
      * Get alerts
      */
-    getAlerts() {
+    getAlerts(opts = {}) {
+        const ts = this._normalizeTaxScope(opts.taxScope);
         const alerts = [];
 
         const lowStock = this.getLowStockAlerts();
@@ -2198,6 +2291,7 @@ const BusinessAnalytics = {
         const today = new Date();
         invoices.filter(inv => {
             if (inv.status !== 'pending' && inv.status !== 'unpaid') return false;
+            if (!this._invoiceMatchesTaxScope(inv, ts)) return false;
             const dueDate = new Date(inv.dueDate || inv.date);
             dueDate.setDate(dueDate.getDate() + 30); // 30 days payment terms
             return today > dueDate;
@@ -2222,7 +2316,8 @@ const BusinessAnalytics = {
     /**
      * Get all due date reminders
      */
-    getDueReminders() {
+    getDueReminders(opts = {}) {
+        const ts = this._normalizeTaxScope(opts.taxScope);
         const invoices = DataManager.getData('invoices') || [];
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -2234,7 +2329,9 @@ const BusinessAnalytics = {
             upcoming: [] // 8-30 days
         };
 
-        invoices.filter(inv => inv.status === 'pending' || inv.status === 'unpaid').forEach(inv => {
+        invoices.filter(inv =>
+            (inv.status === 'pending' || inv.status === 'unpaid') && this._invoiceMatchesTaxScope(inv, ts)
+        ).forEach(inv => {
             const invDate = new Date(inv.dueDate || inv.date);
             const dueDate = new Date(invDate);
             dueDate.setDate(dueDate.getDate() + (inv.paymentTerms || 30));

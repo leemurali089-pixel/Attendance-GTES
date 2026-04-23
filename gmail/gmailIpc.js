@@ -178,7 +178,10 @@ function register() {
     // --- Queues (PO + Bank) ---
     ipcMain.handle('gmail:queue-list', (_e, name) => safe(() => store.readQueue(name)));
     ipcMain.handle('gmail:queue-update', (_e, { name, messageId, patch }) =>
-        safe(() => store.updateQueueEntry(name, messageId, patch)));
+        safe(async () => {
+            await store.updateQueueEntry(name, messageId, patch);
+            broadcast('gmail:queue-updated', { updated: { name, messageId, patch } });
+        }));
     ipcMain.handle('gmail:queue-remove', (_e, { name, messageId }) => safe(async () => {
         const list = await store.readQueue(name);
         await store.writeQueue(name, list.filter(x => x.messageId !== messageId));

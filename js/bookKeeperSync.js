@@ -6,8 +6,8 @@ const BookKeeperSync = {
     config: {
         autoSync: true,
         backupPath: null, // User selected path to .db file
-        /** Poll backup file mtime less often to avoid IPC + main-thread work competing with cloud sync / UI. */
-        syncInterval: 60000, // 60 seconds
+        /** Poll backup mtime — lower = closer to real-time when you edit Book Keeper and save the .db (Electron). */
+        syncInterval: 4000, // poll backup mtime — closer to real-time when Book Keeper writes the .db
         lastModified: 0
     },
 

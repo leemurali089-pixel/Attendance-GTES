@@ -18,6 +18,9 @@ const AnalyticsUI = {
     /** Stock Reports: filter full table — all | low | out | value (sort by value). */
     _stockFilter: null,
 
+    /** all | plain | gst — filters sales/purchases/ledger/dash/reminders/stock (GST = tax-invoice style). */
+    taxScope: 'all',
+
     /** Full analytics sub-nav (same markup as former index.html block). */
     _SUB_NAV_HTML: `<ul class="nav nav-pills mb-4 flex-wrap gap-2 p-2 rounded-3 border border-secondary border-opacity-25 bg-dark bg-opacity-25" id="analyticsTabs" role="tablist" aria-label="Business analytics sections">
 <li class="nav-item"><a class="nav-link active" href="#" onclick="AnalyticsUI.currentSection='dashboard'; AnalyticsUI.renderDashboard(); return false;"><i class="bi bi-speedometer2 me-1"></i> Dashboard</a></li>
@@ -130,6 +133,31 @@ const AnalyticsUI = {
         this.renderStockReports();
     },
 
+    setTaxScope(scope) {
+        const s = String(scope || 'all').toLowerCase();
+        this.taxScope = s === 'plain' || s === 'gst' ? s : 'all';
+        this.refreshCurrentSection();
+    },
+
+    _taxScopeControlHtml() {
+        const t = this.taxScope || 'all';
+        return `
+            <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+                <div>
+                    <label class="form-label small text-muted mb-0">Tax scope</label>
+                    <div class="btn-group" role="group" aria-label="Tax scope">
+                        <button type="button" class="btn btn-sm ${t === 'all' ? 'btn-primary' : 'btn-outline-secondary'}"
+                            onclick="AnalyticsUI.setTaxScope('all')">All</button>
+                        <button type="button" class="btn btn-sm ${t === 'plain' ? 'btn-primary' : 'btn-outline-secondary'}"
+                            onclick="AnalyticsUI.setTaxScope('plain')">Plain</button>
+                        <button type="button" class="btn btn-sm ${t === 'gst' ? 'btn-primary' : 'btn-outline-secondary'}"
+                            onclick="AnalyticsUI.setTaxScope('gst')">GST</button>
+                    </div>
+                </div>
+                <span class="small text-muted align-self-center pt-2">${t === 'all' ? 'GST + non-GST' : t === 'plain' ? 'Non-GST / without-bill' : 'GST / tax invoices'}</span>
+            </div>`;
+    },
+
     scrollToGstSection(anchorId) {
         const node = document.getElementById(anchorId);
         if (!node) return;
@@ -181,7 +209,8 @@ const AnalyticsUI = {
             mode: this.dashboardMode,
             year: this.selectedYear,
             month: this.selectedMonth,
-            fyStartYear: this.selectedFyStart
+            fyStartYear: this.selectedFyStart,
+            taxScope: this.taxScope
         };
         const data = BusinessAnalytics.getDashboardData(dashOpts);
 
@@ -199,6 +228,7 @@ const AnalyticsUI = {
             `<option value="${y}"${y === this.selectedFyStart ? ' selected' : ''}>FY ${y}–${String(y + 1).slice(-2)}</option>`
         ).join('');
         const periodToolbar = `
+            ${this._taxScopeControlHtml()}
             <div class="row g-2 mb-3 align-items-end">
                 <div class="col-auto">
                     <label class="form-label small text-muted mb-0">View</label>
@@ -513,6 +543,7 @@ const AnalyticsUI = {
         const defEnd = new Date().toISOString().slice(0, 10);
 
         container.innerHTML = `
+            ${this._taxScopeControlHtml()}
             <ul class="nav nav-pills mb-3 flex-wrap gap-2" id="gstSubTabs" role="tablist">
                 <li class="nav-item">
                     <button type="button" class="nav-link active btn btn-sm" data-gst-sub="month"
@@ -874,6 +905,31 @@ const AnalyticsUI = {
         const sel = this._getGstReportSelection();
         if (!sel) return;
         const { month, calendarYear } = sel;
+        const content = document.getElementById('gstReportContent');
+        if (!content) return;
+        const scope = this.taxScope || 'all';
+        const d0 = new Date(calendarYear, month, 1);
+        const d1 = new Date(calendarYear, month + 1, 0);
+        const toY = (d) => d.toISOString().slice(0, 10);
+        const plainForMonth = BusinessAnalytics.getSalesRegister(toY(d0), toY(d1), 'plain');
+        if (scope === 'plain') {
+            const tot = plainForMonth.totals || {};
+            content.innerHTML = `
+                <p class="text-muted small mb-2">Plain (non-GST) sales for the selected month. GSTR-1 / HSN apply to GST scope only.</p>
+                ${this._renderRegisterTable(
+                    ['Invoice #', 'Date', 'Customer', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total', 'Type'],
+                    plainForMonth.rows.map(r => [
+                        r.invoiceNo, r.date, r.customerName,
+                        `₹${this.formatCurrency(r.taxable)}`,
+                        `₹${this.formatCurrency(r.cgst)}`, `₹${this.formatCurrency(r.sgst)}`, `₹${this.formatCurrency(r.igst)}`,
+                        `₹${this.formatCurrency(r.total)}`, r.billType
+                    ]),
+                    ['', '', '', `₹${this.formatCurrency(tot.taxable || 0)}`,
+                        `₹${this.formatCurrency(tot.cgst || 0)}`, `₹${this.formatCurrency(tot.sgst || 0)}`, `₹${this.formatCurrency(tot.igst || 0)}`,
+                        `₹${this.formatCurrency(tot.total || 0)}`, '']
+                )}`;
+            return;
+        }
 
         const gstr1 = BusinessAnalytics.generateGSTR1(calendarYear, month);
         const gstr3b = BusinessAnalytics.generateGSTR3B(calendarYear, month);
@@ -882,8 +938,15 @@ const AnalyticsUI = {
         const hsnLines = BusinessAnalytics.generateHSNWiseSalesLines(calendarYear, month);
         const grand = BusinessAnalytics.generateGstMonthGrandSummary(calendarYear, month);
 
-        const content = document.getElementById('gstReportContent');
+        const allBanner = scope === 'all'
+            ? `<div class="alert alert-secondary py-2 mb-3">
+                Same month (plain / non-GST): <strong>₹${this.formatCurrency(plainForMonth.totals?.total || 0)}</strong>
+                · ${plainForMonth.rows.length} invoice(s) — set tax scope to <strong>Plain</strong> for the full table.
+            </div>`
+            : '';
+
         content.innerHTML = `
+            ${allBanner}
             <div class="row g-3 mb-4">
                 <div class="col-md-4">
                     <div class="card gtes-gst-metric-card border-secondary h-100 gtes-analytics-summary-card" role="button" tabindex="0"
@@ -1216,6 +1279,7 @@ const AnalyticsUI = {
         const defaultEnd = new Date().toISOString().slice(0, 10);
 
         container.innerHTML = `
+            ${this._taxScopeControlHtml()}
             <div class="row g-4 mb-4">
                 <div class="col-md-4">
                     <div class="card glass-panel border-0">
@@ -1331,7 +1395,8 @@ const AnalyticsUI = {
         return {
             accountGroup: document.getElementById('ledgerAccountGroup')?.value || 'customer',
             startDate: document.getElementById('ledgerStartDate')?.value || undefined,
-            endDate: document.getElementById('ledgerEndDate')?.value || undefined
+            endDate: document.getElementById('ledgerEndDate')?.value || undefined,
+            taxScope: this.taxScope || 'all'
         };
     },
 
@@ -1690,12 +1755,12 @@ const AnalyticsUI = {
         const container = document.getElementById('analyticsContainer');
         if (!container) return;
 
-        const stockReport = BusinessAnalytics.getStockReport();
+        const stockReport = BusinessAnalytics.getStockReport(this.taxScope);
         const lowStock = BusinessAnalytics.getLowStockAlerts();
         const fastMoving = BusinessAnalytics.getFastMovingItems();
         const fastList = fastMoving.items || [];
         const fastBasis = fastMoving.basis || 'out';
-        const totalValue = BusinessAnalytics.getTotalInventoryValue();
+        const totalValue = stockReport.reduce((s, i) => s + (parseFloat(i.stockValue) || 0), 0);
         const sf = this._stockFilter;
         const outCount = stockReport.filter(i => i.currentStock === 0).length;
 
@@ -1707,6 +1772,7 @@ const AnalyticsUI = {
         const stockCardCls = (active) => `card glass-panel border-0 text-center gtes-analytics-summary-card${active ? ' gtes-analytics-summary-card--active' : ''}`;
 
         container.innerHTML = `
+            ${this._taxScopeControlHtml()}
             ${sf ? `
             <div class="alert alert-info py-2 d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <span><i class="bi bi-funnel me-2"></i>Table: <strong>${{ low: 'Low stock only', out: 'Out of stock only', value: 'Sorted by value (high → low)' }[sf] || sf}</strong></span>
@@ -1853,11 +1919,13 @@ const AnalyticsUI = {
                             <tbody>
                                 ${filteredRows.length === 0 ? `
                                     <tr><td colspan="6" class="text-center text-muted py-4">No rows match this filter.</td></tr>
-                                ` : filteredRows.map(item => `
+                                ` : filteredRows.map(item => {
+            const minS = (item.minStock != null && item.minStock !== '' && !Number.isNaN(parseFloat(item.minStock))) ? item.minStock : '—';
+            return `
                                     <tr>
                                         <td>${item.name}</td>
-                                        <td class="text-center">${item.currentStock} ${item.unit}</td>
-                                        <td class="text-center">${item.minStock} ${item.unit}</td>
+                                        <td class="text-center">${item.currentStock} ${item.unit || ''}</td>
+                                        <td class="text-center">${minS} ${item.unit || ''}</td>
                                         <td class="text-end">₹${this.formatCurrency(item.rate)}</td>
                                         <td class="text-end">₹${this.formatCurrency(item.stockValue)}</td>
                                         <td class="text-center">
@@ -1868,7 +1936,8 @@ const AnalyticsUI = {
                     : '<span class="badge bg-success">OK</span>'}
                                         </td>
                                     </tr>
-                                `).join('')}
+                                `;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -1886,7 +1955,7 @@ const AnalyticsUI = {
         const container = document.getElementById('analyticsContainer');
         if (!container) return;
 
-        const reminders = BusinessAnalytics.getDueReminders();
+        const reminders = BusinessAnalytics.getDueReminders({ taxScope: this.taxScope });
         const f = this._reminderFilter;
         const cardCls = (active) => `card glass-panel border-0 text-center gtes-analytics-summary-card${active ? ' gtes-analytics-summary-card--active' : ''}`;
 
@@ -1901,6 +1970,7 @@ const AnalyticsUI = {
         push('upcoming', 'Upcoming (8-30 days)', reminders.upcoming, 'success', false);
 
         container.innerHTML = `
+            ${this._taxScopeControlHtml()}
             ${f ? `
             <div class="alert alert-info py-2 d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <span><i class="bi bi-funnel me-2"></i>Showing: <strong>${{ overdue: 'Overdue', dueToday: 'Due today', dueSoon: 'Due this week', upcoming: 'Upcoming' }[f] || f}</strong></span>
