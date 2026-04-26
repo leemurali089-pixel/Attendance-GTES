@@ -19,6 +19,25 @@ const FileStorage = {
         return true;
     },
 
+    /**
+     * Large JSON list keys: after local/IDB persistence, uploading the full array to RTDB can take
+     * seconds and block the next paint. Match attendance: fire-and-forget .set; local copy is
+     * already safe on Electron; web has DataManager's IndexedDB mirror.
+     */
+    _deferredRtdbKeys() {
+        if (this._deferredRtdbKeySet) return this._deferredRtdbKeySet;
+        const s = new Set();
+        if (window.DataManager && window.DataManager.KEYS) {
+            const K = window.DataManager.KEYS;
+            if (K.ATTENDANCE) s.add(K.ATTENDANCE);
+            if (K.VOUCHERS) s.add(K.VOUCHERS);
+            if (K.INVOICES) s.add(K.INVOICES);
+            if (K.EXPENSES) s.add(K.EXPENSES);
+        }
+        this._deferredRtdbKeySet = s;
+        return s;
+    },
+
     async init() {
         if (typeof window.db === 'undefined') {
             console.error("Realtime DB not initialized.");
@@ -41,7 +60,15 @@ const FileStorage = {
         }
         this.isCloudReady = true;
         console.log("☁️ Realtime Database cloud connection active.");
-        this.attachRealtimeListeners();
+        // Defer dozens of .on('value') listeners to the next task so the UI can paint (login form)
+        // before the browser processes every subscription callback in one long synchronous stretch.
+        setTimeout(() => {
+            try {
+                this.attachRealtimeListeners();
+            } catch (e) {
+                console.warn('[FileStorage] attachRealtimeListeners error:', e && e.message);
+            }
+        }, 0);
         return true;
     },
 
@@ -185,12 +212,24 @@ const FileStorage = {
             return localSuccess; // Electron file write only — reflect actual file result
         }
 
-        // Desktop: do not block UI on RTDB round-trip for attendance; local .json is already saved.
-        const attKey = window.DataManager && window.DataManager.KEYS && window.DataManager.KEYS.ATTENDANCE;
-        if (window.electronAPI && localSuccess && attKey && key === attKey) {
-            window.db.ref(key).set(data)
+        const deferSet = this._deferredRtdbKeys();
+        const deferRtdb =
+            deferSet.has(key) && ((window.electronAPI && localSuccess) || !window.electronAPI);
+        if (deferRtdb) {
+            window.db
+                .ref(key)
+                .set(data)
                 .then(() => console.log(`✅ Cloud Sync [${key}]: Success`))
-                .catch((error) => console.error(`🚨 Cloud Sync Failed for ${key}:`, error));
+                .catch((error) => {
+                    console.error(`🚨 Cloud Sync Failed for ${key}:`, error);
+                    if (!window.electronAPI) {
+                        try {
+                            localStorage.setItem(key, JSON.stringify(data));
+                        } catch (e) {
+                            console.warn(`[FileStorage] localStorage fallback for '${key}' failed:`, e);
+                        }
+                    }
+                });
             return true;
         }
 

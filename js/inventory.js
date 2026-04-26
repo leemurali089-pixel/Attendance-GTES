@@ -59,7 +59,9 @@ const InventoryManager = {
         };
 
         inventory.push(material);
-        await DataManager.saveData('inventory', inventory);
+        const noMerge = { skipPreSaveMerge: true };
+        const ok = await DataManager.saveData('inventory', inventory, noMerge);
+        if (ok === false) throw new Error('Could not save — sync conflict. Try again after sync.');
         return material;
     },
 
@@ -79,7 +81,9 @@ const InventoryManager = {
                 ...materialData,
                 updatedAt: new Date().toISOString()
             };
-            await DataManager.saveData('inventory', inventory);
+            const noMerge = { skipPreSaveMerge: true };
+            const upOk = await DataManager.saveData('inventory', inventory, noMerge);
+            if (upOk === false) throw new Error('Could not save — sync conflict. Try again after sync.');
             return inventory[existingIndex];
         } else {
             // Add new
@@ -92,7 +96,8 @@ const InventoryManager = {
      */
     async updateMaterial(materialId, updates) {
         const inventory = DataManager.getData('inventory') || [];
-        const index = inventory.findIndex(m => m.id === materialId);
+        const want = String(materialId);
+        const index = inventory.findIndex(m => m && String(m.id) === want);
 
         if (index === -1) {
             throw new Error('Material not found');
@@ -111,7 +116,9 @@ const InventoryManager = {
             updatedAt: new Date().toISOString()
         };
 
-        await DataManager.saveData('inventory', inventory);
+        const noMerge = { skipPreSaveMerge: true };
+        const ok = await DataManager.saveData('inventory', inventory, noMerge);
+        if (ok === false) throw new Error('Could not save — sync conflict. Try again after sync.');
         return inventory[index];
     },
 
@@ -255,9 +262,25 @@ const InventoryManager = {
      * Delete material
      */
     async deleteMaterial(materialId) {
+        const want = String(materialId);
         const inventory = DataManager.getData('inventory') || [];
-        const filtered = inventory.filter(m => m.id !== materialId);
-        await DataManager.saveData('inventory', filtered);
+        const list = Array.isArray(inventory) ? inventory : (DataManager.coerceJsonArray && DataManager.coerceJsonArray(inventory)) || [];
+        const filtered = list.filter(m => m && String(m.id) !== want);
+        if (filtered.length === list.length) {
+            throw new Error('Item not found or could not be matched for delete.');
+        }
+        const noMerge = { skipPreSaveMerge: true };
+        const ok = await DataManager.saveData('inventory', filtered, noMerge);
+        if (ok === false) {
+            throw new Error('Delete blocked (sync conflict). Try Sync, then delete again.');
+        }
+        // Legacy mirror so UI does not re-read a stale duplicate path.
+        try {
+            const altKey = DataManager.KEYS && DataManager.KEYS.INVENTORY_ITEMS ? DataManager.KEYS.INVENTORY_ITEMS : 'gtes_inventory_items';
+            await DataManager.saveData(altKey, filtered, noMerge);
+        } catch (e) {
+            console.warn('[InventoryManager] inventory_items mirror:', e && e.message);
+        }
     },
 
     /**

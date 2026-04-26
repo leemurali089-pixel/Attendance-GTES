@@ -217,6 +217,45 @@ const DataManager = {
         } catch(e) { return null; }
     },
 
+    /**
+     * Remove a key from the IndexedDB "largeData" store (used when a collection was mirrored
+     * out of localStorage to avoid the empty-cloud+IDB rehydration path reviving old rows).
+     */
+    async removeFromIDB(key) {
+        try {
+            const db = await this.initDB();
+            return new Promise((resolve) => {
+                const tx = db.transaction('largeData', 'readwrite');
+                const store = tx.objectStore('largeData');
+                const request = store.delete(key);
+                request.onsuccess = () => resolve(true);
+                request.onerror = () => resolve(false);
+            });
+        } catch (e) {
+            return false;
+        }
+    },
+
+    /**
+     * Drop memory cache, localStorage, and IDB for a key so the next write is authoritative.
+     * Call before saveData in BookKeeper "Reset" after computing the replacement array in memory.
+     */
+    async wipeKeyMirrorsForReset(key) {
+        const storageKey = this.resolveStorageKey(key);
+        this.invalidateDataCache(key);
+        try {
+            localStorage.removeItem(storageKey);
+        } catch (_) { /* ignore */ }
+        if (storageKey === this.KEYS.CHALLANS) {
+            try { localStorage.removeItem('challans'); } catch (_) { /* ignore */ }
+        }
+        await this.removeFromIDB(storageKey);
+        if (storageKey === this.KEYS.CHALLANS) {
+            await this.removeFromIDB('challans');
+        }
+        return true;
+    },
+
     /** Keep a copy in localStorage only for smaller payloads; large data → IndexedDB to avoid QuotaExceededError for Firebase. */
     async _mirrorToLocalOrIDB(key, data) {
         try {

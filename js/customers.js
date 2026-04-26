@@ -248,7 +248,16 @@ const CustomerManager = {
      * Get all customers
      */
     getAllCustomers() {
-        return DataManager.getData('customers') || [];
+        const raw = DataManager.getData('customers');
+        if (raw == null) return [];
+        if (Array.isArray(raw)) return raw;
+        if (typeof DataManager.coerceJsonArray === 'function') {
+            return DataManager.coerceJsonArray(raw);
+        }
+        if (typeof raw === 'object') {
+            return Object.values(raw).filter((x) => x && typeof x === 'object');
+        }
+        return [];
     },
 
     getCustomerByName(name, accountType = null) {

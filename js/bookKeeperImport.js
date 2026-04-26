@@ -3507,6 +3507,38 @@ const BookKeeperImport = {
     async clearAllData() {
         App.showNotification('Sweeping all BookKeeper Service & Inventory Data...', 'info');
         const noMerge = { skipPreSaveMerge: true };
+        // Electron: many saves in a row; SyncManager can return false (cooldown / conflict) and skip
+        // writing local files — data comes back on reload. Allow all writes during this admin sweep.
+        let _bkPrevSuppress = false;
+        if (window.SyncManager) {
+            _bkPrevSuppress = !!window.SyncManager.suppressConflictPrompts;
+            window.SyncManager.suppressConflictPrompts = true;
+        }
+
+        const saveSwept = async (k, d, o = noMerge) => {
+            if (typeof DataManager.wipeKeyMirrorsForReset === 'function') {
+                await DataManager.wipeKeyMirrorsForReset(k);
+            }
+            const ok = await DataManager.saveData(k, d, o);
+            if (ok === false) {
+                throw new Error(`Save was blocked (sync) for: ${k}`);
+            }
+        };
+
+        let _bkResetSweepError = null;
+        try {
+        // Load full collections from cloud + local union (IndexedDB included) so filters see every row; large `purchases` were often hidden from getData (LS-only) before a full load.
+        const _bkResetRefreshKeys = [
+            'invoices', 'vouchers', 'customers', 'inventory', 'gtes_inventory_items',
+            DataManager.KEYS.EXPENSES, 'gtes_expenses', 'inventoryTransactions'
+        ];
+        for (const k of _bkResetRefreshKeys) {
+            try {
+                await DataManager.loadData(k, { forceRefresh: true });
+            } catch (e) {
+                console.warn('[clearAllData] loadData refresh', k, e);
+            }
+        }
 
         // 1. Invoices (drop BK + credit notes / sales return rows that often linger after import)
         const invoices = DataManager.getData('invoices') || [];
@@ -3516,16 +3548,24 @@ const BookKeeperImport = {
             if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return false;
             return true;
         });
-        await DataManager.saveData('invoices', cleanInvoices, noMerge);
+        await saveSwept('invoices', cleanInvoices, noMerge);
 
         // 2. Vouchers (Transactions)
         const vouchers = DataManager.getData('vouchers') || [];
-        const cleanVouchers = vouchers.filter((v) => v.source !== 'bookkeeper' && v.source !== 'seed');
-        await DataManager.saveData('vouchers', cleanVouchers, noMerge);
+        const cleanVouchers = vouchers.filter((v) => {
+            if (v.source === 'bookkeeper' || v.source === 'seed' || v.bookkeeperId) return false;
+            const s = String(v.source || '').toLowerCase();
+            if (s && s !== 'local' && s !== 'mjsprime' && s !== 'manual') return false;
+            const idStr = String(v.id != null ? v.id : '');
+            if (idStr && /^(BK-|vch_bk-)/i.test(idStr)) return false;
+            return true;
+        });
+        await saveSwept('vouchers', cleanVouchers, noMerge);
 
         // 3. Inventory (Robust Cleanup for all import variants)
-        const inventory = DataManager.getData('inventory') || [];
-        const cleanInventory = inventory.filter(i => {
+        const invRaw = DataManager.getData('inventory') || DataManager.getData('gtes_inventory_items') || [];
+        const invList = Array.isArray(invRaw) ? invRaw : (typeof DataManager.coerceJsonArray === 'function' ? DataManager.coerceJsonArray(invRaw) : []);
+        const cleanInventory = invList.filter(i => {
             // Explicit tags
             if (i.source === 'bookkeeper') return false;
             if (i.source === 'bookkeeper_service_table') return false;
@@ -3541,15 +3581,20 @@ const BookKeeperImport = {
             }
             return true;
         });
-        await DataManager.saveData('inventory', cleanInventory, noMerge);
+        await saveSwept('inventory', cleanInventory, noMerge);
+        try {
+            await saveSwept('gtes_inventory_items', cleanInventory, noMerge);
+        } catch (e) {
+            console.warn('[clearAllData] gtes_inventory_items:', e && e.message);
+        }
 
         // 3b. Services Collection (NEW - Clear dedicated services collection)
-        await DataManager.saveData('gtes_services', [], noMerge);
+        await saveSwept('gtes_services', [], noMerge);
 
         // 4. Inventory Txns (Remove if linked to BK)
         const txn = DataManager.getData('inventoryTransactions') || [];
         const cleanTxn = txn.filter(t => !t.refId?.toString().includes('BK-') && t.source !== 'bookkeeper' && t.source !== 'seed');
-        await DataManager.saveData('inventoryTransactions', cleanTxn, noMerge);
+        await saveSwept('inventoryTransactions', cleanTxn, noMerge);
 
         // 5. Customers — keep only parties created in MJS PrimeLogic (source local / mjsprime)
         const customers = DataManager.getData('customers') || [];
@@ -3571,43 +3616,90 @@ const BookKeeperImport = {
             return false;
         };
         const cleanCustomers = customers.filter(keepLocalAppParty);
-        await DataManager.saveData('customers', cleanCustomers, noMerge);
+        await saveSwept('customers', cleanCustomers, noMerge);
 
-        // 6. Expenses / purchase bills (remove BK + purchase/vendor bills + debit notes so Reset clears purchases)
-        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        // 6. Expenses / purchase bills — union `purchases` + `gtes_expenses` (both may exist; `[]` is truthy and hid gtes)
+        const asArr = (raw) => {
+            if (raw == null) return [];
+            if (Array.isArray(raw)) return raw;
+            return typeof DataManager.coerceJsonArray === 'function' ? DataManager.coerceJsonArray(raw) : [];
+        };
+        const exA = asArr(DataManager.getData(DataManager.KEYS.EXPENSES));
+        const exB = asArr(DataManager.getData('gtes_expenses'));
+        const exSeen = new Set();
+        const expenses = [];
+        for (const e of [...exA, ...exB]) {
+            if (!e) continue;
+            const k = e.id != null && e.id !== '' ? `id:${e.id}` : `n:${(e.billNo || e.vch_no || '')}___${(e.vendor || e.vendorName || '')}___${e.date || ''}`;
+            if (exSeen.has(k)) continue;
+            exSeen.add(k);
+            expenses.push(e);
+        }
         const isDebitNoteRow = (e) => {
+            if (typeof BusinessAnalytics !== 'undefined' && typeof BusinessAnalytics._isDebitNotePurchase === 'function' && BusinessAnalytics._isDebitNotePurchase(e)) {
+                return true;
+            }
             const t = String(e.type || e.billType || e.v_type || '').toLowerCase();
             if (t === 'debit-note' || t === 'debit_note' || (t.includes('debit') && t.includes('note'))) return true;
             if (e.isDebitNote === true) return true;
             const n = String(e.narration || e.description || e.remarks || '').toLowerCase();
             if (n.includes('debit note') || n.includes('debit_note')) return true;
+            const b = String(e.billNo || e.vch_no || e.invoiceNo || e.purchaseNo || e.supplierInvoiceNo || '').trim();
+            if (b && /^(PRR|DN|DRN)/i.test(b)) return true;
+            if (b && (/\/PUR|\.PUR|PUR-?\d{2,}|GTE.+\/PUR|PINV|PINVBILL|DEBIT.+(NOTE|NT)/i.test(b) || b.includes('D/N'))) return true;
             return false;
         };
+        const looksGtesOrImportedPurchaseRef = (e) => {
+            const b = String(e.billNo || e.vch_no || e.purchaseNo || e.invoiceNo || e.supplierInvoiceNo || '').trim();
+            if (!b) return false;
+            if (/GTES\/.{0,24}\/PUR|GTE.+\/PUR|\/PUR\d{2,}/i.test(b)) return true;
+            if (e.source == null && /GTES\/.{0,30}\/PUR|GTE.+\/PUR/i.test(b)) return true;
+            return false;
+        };
+        const hasPurchaseStructure = (e) =>
+            (Array.isArray(e.lineItems) && e.lineItems.length > 0) ||
+            (Array.isArray(e.items) && e.items.length > 0) ||
+            e.itcCgst != null || e.itcSgst != null || e.itcIgst != null;
+        const hasBillNo = (e) => String(e.billNo || e.vch_no || e.invoiceNo || e.purchaseNo || '').trim() !== '';
+        const catBlob = (e) =>
+            String(
+                e.category || e.expenseCategory || e.purchaseCategory || e.ledgerGroup || e.ledgerName || e.group || ''
+            ).toLowerCase();
         const cleanExpenses = expenses.filter((e) => {
             if (e.bookkeeperId || e.source === 'bookkeeper' || e.source === 'seed') return false;
             if (isDebitNoteRow(e)) return false;
-            const cat = String(e.category || '').toLowerCase();
-            const ptype = String(e.purchaseType || e.expenseType || '').toLowerCase();
-            if (cat.includes('purchase') || ptype === 'material' || ptype === 'purchase') return false;
+            const sSrc = String(e.source || '').toLowerCase();
+            if (looksGtesOrImportedPurchaseRef(e) && sSrc !== 'local' && sSrc !== 'mjsprime') return false;
+            const cat = catBlob(e);
+            const ptype = String(e.purchaseType || e.expenseType || e.billType || e.docType || '').toLowerCase();
+            if (cat.includes('purchase') || ptype === 'material' || ptype === 'purchase' || ptype === 'debit-note' || ptype === 'debit_note') return false;
             if (cat.includes('supplier') || cat.includes('vendor') || cat.includes('inward') || cat.includes('itc')) return false;
             if (String(e.purchaseType || '').toLowerCase() === 'material') return false;
+            if (String(e.docType || e.recordType || '').toLowerCase() === 'purchase') return false;
+            if (hasBillNo(e) && hasPurchaseStructure(e) && String(e.vendor || e.vendorName || e.partyName || '').trim() !== '') return false;
+            if ((e.vendor || e.vendorName) && (hasPurchaseStructure(e) || String(e.billNo || e.vch_no || '').toUpperCase().includes('PUR'))) return false;
             return true;
         });
-        await DataManager.saveData(DataManager.KEYS.EXPENSES, cleanExpenses, noMerge);
+        await saveSwept(DataManager.KEYS.EXPENSES, cleanExpenses, noMerge);
+        try {
+            await saveSwept('gtes_expenses', cleanExpenses, noMerge);
+        } catch (e) {
+            console.warn('[clearAllData] gtes_expenses mirror:', e && e.message);
+        }
 
         // 7. Additional BK generated collections
-        await DataManager.saveData('challans', [], noMerge);
+        await saveSwept('challans', [], noMerge);
         try {
-            await DataManager.saveData(DataManager.KEYS.CHALLANS, [], noMerge);
+            await saveSwept(DataManager.KEYS.CHALLANS, [], noMerge);
         } catch (e) {
             console.warn('[clearAllData] gtes_challans clear:', e && e.message);
         }
-        await DataManager.saveData(DataManager.KEYS.TAX_SCHEMES, [], noMerge);
-        await DataManager.saveData(DataManager.KEYS.WAREHOUSES, [], noMerge);
-        await DataManager.saveData(DataManager.KEYS.SERVICES, [], noMerge);
-        await DataManager.saveData(DataManager.KEYS.ESTIMATES, [], noMerge);
-        await DataManager.saveData(DataManager.KEYS.PURCHASE_ORDERS, [], noMerge);
-        await DataManager.saveData('gtes_debug_import_schema', null, noMerge);
+        await saveSwept(DataManager.KEYS.TAX_SCHEMES, [], noMerge);
+        await saveSwept(DataManager.KEYS.WAREHOUSES, [], noMerge);
+        await saveSwept(DataManager.KEYS.SERVICES, [], noMerge);
+        await saveSwept(DataManager.KEYS.ESTIMATES, [], noMerge);
+        await saveSwept(DataManager.KEYS.PURCHASE_ORDERS, [], noMerge);
+        await saveSwept('gtes_debug_import_schema', null, noMerge);
 
         // 8. Stop BK auto rehydrate/watcher so cleared data does not return.
         try {
@@ -3626,7 +3718,22 @@ const BookKeeperImport = {
         } catch (e) {
             console.warn('[BK Reset] Could not fully reset bk_sync_config:', e);
         }
+        } catch (e) {
+            _bkResetSweepError = e;
+            console.error('[clearAllData]', e);
+            App.showNotification(
+                'Reset could not complete: ' + (e && e.message ? e.message : 'unknown error'),
+                'error'
+            );
+        } finally {
+            if (window.SyncManager) {
+                window.SyncManager.suppressConflictPrompts = _bkPrevSuppress;
+            }
+        }
 
+        if (_bkResetSweepError) {
+            return;
+        }
         App.showNotification('All BookKeeper data cleared successfully.', 'success');
         setTimeout(() => location.reload(), 1500);
     },

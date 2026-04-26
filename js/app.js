@@ -43,7 +43,7 @@ const App = {
 
         this.showLoader();
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.25';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.26';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -56,19 +56,30 @@ const App = {
 
         try {
             await DataManager.init();
-            await UserManager.init();
-
             const loggedIn = await this.checkLoginStatus();
 
-            await this.updateCompanyBranding();
-
-            // When logged out, dismiss the full-screen loader immediately so the login form is usable.
-            // Remaining modules (sync, analytics, etc.) run on the next task so they do not block typing.
             if (!loggedIn) {
-                this.hideLoader(0);
-                loginScreenReady = true;
-                setTimeout(() => this._initDeferredModules(), 0);
+                // Core data (users/settings) is already in cache. First-run has no user rows: must
+                // finish UserManager.init (create admin) before allowing interaction.
+                const rawUsers = DataManager.getData('gtes_users') || DataManager.getData(UserManager.STORAGE_KEY);
+                const hasUsers = Array.isArray(rawUsers) && rawUsers.length > 0;
+                if (hasUsers) {
+                    this.hideLoader(0);
+                    loginScreenReady = true;
+                    void UserManager.init().then(() => {
+                        this.updateCompanyBranding().catch((e) => console.warn('[App] updateCompanyBranding:', e));
+                    });
+                    setTimeout(() => this._initDeferredModules(), 0);
+                } else {
+                    await UserManager.init();
+                    await this.updateCompanyBranding();
+                    this.hideLoader(0);
+                    loginScreenReady = true;
+                    setTimeout(() => this._initDeferredModules(), 0);
+                }
             } else {
+                await UserManager.init();
+                await this.updateCompanyBranding();
                 this._initDeferredModules();
             }
         } catch (error) {

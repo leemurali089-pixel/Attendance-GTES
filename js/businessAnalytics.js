@@ -798,7 +798,10 @@ const BusinessAnalytics = {
         const t = String(exp.type || exp.v_type || exp.billType || '').toLowerCase();
         if (t === 'debit-note' || t === 'debit_note') return true;
         if (t.includes('debit') && t.includes('note')) return true;
+        if (t.includes('purchase') && t.includes('return')) return true;
         if (exp.isDebitNote === true) return true;
+        const b = String(exp.billNo || exp.vch_no || exp.invoiceNo || exp.purchaseNo || '').trim();
+        if (b && /^(PRR|DN|DRN)/i.test(b)) return true;
         return false;
     },
 

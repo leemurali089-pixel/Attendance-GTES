@@ -64,17 +64,15 @@ const PaymentsUI = {
                     </div>
                 </div>
 
-                <!-- Filters & Toggles -->
-                <div class="card glass-panel border-secondary mb-4">
-                    <div class="card-body">
+                <!-- Filters & Toggles: higher z-index + overflow visible so typeahead sits above summary cards -->
+                <div class="card glass-panel border-secondary mb-4 pay-followup-filter-stack" style="position:relative;z-index:100;">
+                    <div class="card-body overflow-visible">
                         <div class="row g-3 align-items-end">
-                            <div class="col-md-3 position-relative">
+                            <div class="col-md-3 position-relative" style="z-index:200;">
                                 <label class="text-white-50 small mb-1">Filter by Customer</label>
                                 <input type="text" id="payFollowCustomerFilter" class="form-control bg-dark border-secondary text-white" 
-                                    placeholder="Search customer..." value="${this.currentFilters.customer}"
-                                    oninput="PaymentsUI.updateFiltersDebounced()" autocomplete="off">
-                                <div id="payFollowCustomerDropdown" class="list-group position-absolute w-100 shadow-lg d-none" 
-                                    style="z-index: 1050; max-height: 250px; overflow-y: auto; top: 105%;"></div>
+                                    placeholder="Type to search customer..." value="${(this.currentFilters.customer || '').replace(/"/g, '&quot;')}"
+                                    autocomplete="off">
                             </div>
                             <div class="col-md-2">
                                 <label class="text-white-50 small mb-1">Financial Year</label>
@@ -115,7 +113,44 @@ const PaymentsUI = {
                     </div>
                 </div>
 
-                <!-- Summary Cards -->
+                <div id="payFollowResultsBlock" class="pay-followup-results-stack" style="position:relative;z-index:1;">
+                ${this._buildPayFollowResultsHtml(customerSummary)}
+                </div>
+            </div>
+        `;
+        
+        this.setupCustomerSearchDropdown();
+    },
+
+    /**
+     * Recompute summary + table only (keeps focus in customer filter; avoids full re-render on each keystroke).
+     */
+    renderPayFollowResultsOnly() {
+        const block = document.getElementById('payFollowResultsBlock');
+        if (!block) {
+            this.renderPaymentFollowup();
+            return;
+        }
+        if (!this.dataCache) {
+            this.dataCache = InvoiceManager.getInvoicesWithBalance();
+        }
+        let pendingInvoices = this.dataCache.filter(inv => inv.balance > 0.05);
+        const custEl = document.getElementById('payFollowCustomerFilter');
+        if (custEl) {
+            this.currentFilters.customer = custEl.value;
+        }
+        const yearEl = document.getElementById('payFollowYearFilter');
+        if (yearEl) {
+            this.currentFilters.financialYear = yearEl.value;
+        }
+        pendingInvoices = this.applyFilters(pendingInvoices);
+        const customerSummary = this.groupInvoicesByCustomer(pendingInvoices);
+        block.innerHTML = this._buildPayFollowResultsHtml(customerSummary);
+        requestAnimationFrame(() => this._positionPayFollowCustomerDropdown());
+    },
+
+    _buildPayFollowResultsHtml(customerSummary) {
+        return `
                 <div class="row g-3 mb-4">
                     <div class="col-md-4">
                          <div class="card bg-dark border-info border-opacity-25 h-100 shadow-sm">
@@ -143,7 +178,6 @@ const PaymentsUI = {
                     </div>
                 </div>
 
-                <!-- Customer List Table -->
                 <div class="card glass-panel border-secondary overflow-hidden shadow">
                     <div class="table-responsive">
                         <table class="table table-dark table-hover mb-0 align-middle">
@@ -168,14 +202,14 @@ const PaymentsUI = {
                                     <tr onclick="PaymentsUI.renderCustomerDetails('${btoa(c.groupKey)}')" style="cursor: pointer;">
                                         <td class="ps-4" onclick="event.stopPropagation()">
                                             <input type="checkbox" class="form-check-input" ${this.selectedCustomers.has(c.groupKey) ? 'checked' : ''} 
-                                                onchange="PaymentsUI.toggleCustomerSelection('${c.groupKey}')">
+                                                onchange="PaymentsUI.toggleCustomerSelection('${(c.groupKey || '').replace(/'/g, "\\'")}')">
                                         </td>
                                         <td class="ps-4 fw-bold">
                                             <div class="d-flex align-items-center">
                                                 <div class="avatar-sm bg-primary bg-opacity-10 text-primary me-3 rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width: 32px; height: 32px; font-size: 0.8rem;">
                                                     ${c.customerName.charAt(0).toUpperCase()}
                                                 </div>
-                                                ${c.customerName}
+                                                ${(c.customerName || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
                                             </div>
                                         </td>
                                         <td class="text-center">
@@ -196,10 +230,7 @@ const PaymentsUI = {
                         </table>
                     </div>
                 </div>
-            </div>
         `;
-        
-        this.setupCustomerSearchDropdown();
     },
 
     /**
@@ -367,19 +398,12 @@ const PaymentsUI = {
         this.renderPaymentFollowup();
     },
 
-    // Debounce filter input for performance
-    filterTimeout: null,
-    updateFiltersDebounced() {
-        if (this.filterTimeout) clearTimeout(this.filterTimeout);
-        this.filterTimeout = setTimeout(() => this.updateFilters(), 300);
-    },
-
     updateFilters() {
         const cust = document.getElementById('payFollowCustomerFilter')?.value || '';
         const year = document.getElementById('payFollowYearFilter')?.value || '';
         this.currentFilters.customer = cust;
         this.currentFilters.financialYear = year;
-        this.renderPaymentFollowup();
+        this.renderPayFollowResultsOnly();
     },
 
     refreshData() {
@@ -512,80 +536,241 @@ const PaymentsUI = {
         }
     },
 
+    _escapeAttr(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
     /**
-     * Custom live-search dropdown for customer filter
-     * Similar logic to VouchersUI and Bank Import
+     * Master book customers (always an array) plus any party names on pending invoices in dataCache
+     * so the typeahead matches the table when `customers` is not loaded yet or is stored as an object map.
+     */
+    _getCustomersForTypeahead() {
+        let book = typeof CustomerManager !== 'undefined' ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
+        if (!Array.isArray(book)) {
+            book =
+                typeof DataManager.coerceJsonArray === 'function'
+                    ? DataManager.coerceJsonArray(book)
+                    : Object.values(book || {}).filter((x) => x && typeof x === 'object');
+        }
+        const byKey = new Map();
+        for (const c of book) {
+            if (!c || typeof c !== 'object') continue;
+            const n = (c.name || '').trim();
+            if (!n) continue;
+            const k = n.toLowerCase();
+            if (!byKey.has(k)) {
+                byKey.set(k, { name: c.name || n, phone: c.phone != null ? String(c.phone) : '' });
+            }
+        }
+        for (const inv of this.dataCache || []) {
+            const n = (inv && inv.customerName) ? String(inv.customerName).trim() : '';
+            if (!n) continue;
+            const k = n.toLowerCase();
+            if (!byKey.has(k)) byKey.set(k, { name: n, phone: '' });
+        }
+        return Array.from(byKey.values());
+    },
+
+    /**
+     * Append dropdown to `document.body` so `position: fixed` is viewport-anchored. Ancestors with
+     * `backdrop-filter` (e.g. `.glass-panel`) create a containing block in Chromium/WebKit, which
+     * made the list appear off-canvas or with zero effective area.
+     */
+    _getPayFollowCustomerDropdownEl() {
+        let el = document.getElementById('payFollowCustomerDropdown');
+        if (el) {
+            if (el.parentNode !== document.body) {
+                document.body.appendChild(el);
+            }
+            return el;
+        }
+        el = document.createElement('div');
+        el.id = 'payFollowCustomerDropdown';
+        el.setAttribute('role', 'listbox');
+        el.className = 'list-group shadow-lg d-none pay-followup-cust-dd';
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+        return el;
+    },
+
+    _positionPayFollowCustomerDropdown() {
+        const input = document.getElementById('payFollowCustomerFilter');
+        const dd = this._getPayFollowCustomerDropdownEl();
+        if (!input || !dd || dd.classList.contains('d-none')) return;
+        const r = input.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) return;
+        const pad = 4;
+        const maxH = Math.min(window.innerHeight * 0.5, 420);
+        let left = Math.max(8, r.left);
+        const width = r.width;
+        if (left + width > window.innerWidth - 8) {
+            left = Math.max(8, window.innerWidth - 8 - width);
+        }
+        const bottomSpace = window.innerHeight - r.bottom - pad;
+        Object.assign(dd.style, {
+            position: 'fixed',
+            left: `${left}px`,
+            top: `${r.bottom + pad}px`,
+            width: `${width}px`,
+            maxHeight: `${Math.min(maxH, bottomSpace)}px`,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            zIndex: '2147483647',
+            boxSizing: 'border-box',
+            border: '1px solid rgba(148, 163, 184, 0.35)',
+            borderRadius: '0.375rem',
+            backgroundColor: 'rgb(21, 27, 39)',
+            display: 'flex',
+            flexDirection: 'column',
+            pointerEvents: 'auto',
+            visibility: 'visible',
+        });
+    },
+
+    /**
+     * Party-style typeahead: CustomerManager (name + phone) like VouchersUI Party Name. No full re-render on each keystroke.
+     * Suggestions are capped at 50; customers with an outstanding (cached) balance are listed first.
      */
     setupCustomerSearchDropdown() {
         const input = document.getElementById('payFollowCustomerFilter');
-        const dropdown = document.getElementById('payFollowCustomerDropdown');
+        const dropdown = this._getPayFollowCustomerDropdownEl();
         if (!input || !dropdown) return;
 
         let activeIdx = -1;
-        const allInvoices = this.dataCache || [];
-        const uniqueCustomers = [...new Set(allInvoices.map(inv => inv.customerName).filter(Boolean))].sort();
 
         const renderDropdown = (query) => {
-            const q = query.toLowerCase().trim();
-            if (!q) {
-                dropdown.classList.add('d-none');
-                return;
+            let customers = [];
+            try {
+                customers = this._getCustomersForTypeahead();
+            } catch (e) {
+                console.warn('[PaymentsUI] typeahead list:', e && e.message);
+                customers = [];
             }
+            const outNames = new Set(
+                (this.dataCache || [])
+                    .map((inv) => (inv.customerName || '').trim())
+                    .filter(Boolean)
+            );
+            const lowerQuery = (query || '').toLowerCase().trim();
+            let matches = customers;
+            if (lowerQuery !== '') {
+                matches = customers.filter(
+                    (c) =>
+                        (c.name && c.name.toLowerCase().includes(lowerQuery)) ||
+                        (c.phone && String(c.phone).toLowerCase().includes(lowerQuery))
+                );
+            }
+            matches = matches
+                .slice()
+                .sort((a, b) => {
+                    const aOut = outNames.has((a.name || '').trim()) ? 0 : 1;
+                    const bOut = outNames.has((b.name || '').trim()) ? 0 : 1;
+                    if (aOut !== bOut) return aOut - bOut;
+                    return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+                })
+                .slice(0, 50);
 
-            const matches = uniqueCustomers.filter(name => name.toLowerCase().includes(q)).slice(0, 20);
             if (matches.length === 0) {
-                dropdown.classList.add('d-none');
+                dropdown.innerHTML =
+                    '<div class="list-group-item list-group-item-dark bg-dark text-muted border-secondary">No matching customers found</div>';
+                dropdown.classList.remove('d-none');
+                dropdown.setAttribute('aria-hidden', 'false');
+                requestAnimationFrame(() => this._positionPayFollowCustomerDropdown());
                 return;
             }
 
-            dropdown.innerHTML = matches.map((name, i) => `
-                <button type="button" class="list-group-item list-group-item-action bg-dark text-white border-secondary small py-2 d-flex justify-content-between align-items-center" 
-                    onclick="PaymentsUI.selectCustomerFilter('${name.replace(/'/g, "\\'")}')" data-idx="${i}">
-                    <span>${name}</span>
-                    <i class="bi bi-chevron-right small text-muted"></i>
+            dropdown.innerHTML = matches
+                .map((c) => {
+                    const enc = encodeURIComponent(c.name);
+                    const phone = String(c.phone != null ? c.phone : '');
+                    return `
+                <button type="button" class="list-group-item list-group-item-action list-group-item-dark border-secondary d-flex justify-content-between align-items-center pay-followup-dd-item"
+                    data-cust-enc="${enc}">
+                    <span class="fw-bold text-info text-start text-break">${this._escapeAttr(c.name)}</span>
+                    <small class="text-secondary text-end text-nowrap ms-2 flex-shrink-0">${this._escapeAttr(phone)}</small>
                 </button>
-            `).join('');
+            `;
+                })
+                .join('');
             dropdown.classList.remove('d-none');
+            dropdown.setAttribute('aria-hidden', 'false');
+            requestAnimationFrame(() => this._positionPayFollowCustomerDropdown());
         };
 
-        let searchTimeout = null;
-        input.addEventListener('input', (e) => {
-            if (searchTimeout) clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                renderDropdown(e.target.value);
+        if (!dropdown._payFollowClickDelegate) {
+            dropdown._payFollowClickDelegate = (e) => {
+                const btn = e.target && e.target.closest && e.target.closest('button[data-cust-enc]');
+                if (!btn) return;
+                e.preventDefault();
+                const name = decodeURIComponent(btn.getAttribute('data-cust-enc') || '');
+                if (name) this.selectCustomerFilter(name);
+            };
+            dropdown.addEventListener('click', dropdown._payFollowClickDelegate);
+        }
+
+        let tableDebounce = null;
+        if (!input._payFollowInputWired) {
+            input._payFollowInputWired = true;
+            input.addEventListener('input', (e) => {
+                this.currentFilters.customer = e.target.value;
                 activeIdx = -1;
-            }, 150);
-        });
+                renderDropdown(e.target.value);
+                if (tableDebounce) clearTimeout(tableDebounce);
+                tableDebounce = setTimeout(() => this.renderPayFollowResultsOnly(), 280);
+            });
+            input.addEventListener('focus', () => {
+                setTimeout(() => renderDropdown(input.value), 0);
+            });
+        }
 
-        input.addEventListener('focus', () => renderDropdown(input.value));
-
-        // Keyboard navigation
-        input.addEventListener('keydown', (e) => {
-            const items = dropdown.querySelectorAll('.list-group-item');
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                activeIdx = Math.min(activeIdx + 1, items.length - 1);
-                this.updateActiveItem(items, activeIdx);
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                activeIdx = Math.max(activeIdx - 1, 0);
-                this.updateActiveItem(items, activeIdx);
-            } else if (e.key === 'Enter') {
-                if (activeIdx >= 0) {
+        if (!input._payFollowKeydownWired) {
+            input._payFollowKeydownWired = true;
+            input.addEventListener('keydown', (e) => {
+                const items = dropdown.querySelectorAll('.pay-followup-dd-item');
+                if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    items[activeIdx].click();
+                    if (items.length) {
+                        activeIdx = Math.min(activeIdx + 1, items.length - 1);
+                        this.updateActiveItem(items, activeIdx);
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (items.length) {
+                        activeIdx = Math.max(activeIdx - 1, 0);
+                        this.updateActiveItem(items, activeIdx);
+                    }
+                } else if (e.key === 'Enter') {
+                    if (activeIdx >= 0 && items[activeIdx]) {
+                        e.preventDefault();
+                        items[activeIdx].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    dropdown.classList.add('d-none');
+                    dropdown.setAttribute('aria-hidden', 'true');
                 }
-            } else if (e.key === 'Escape') {
-                dropdown.classList.add('d-none');
-            }
-        });
+            });
+        }
 
-        // Hide on click outside
-        document.addEventListener('click', (e) => {
-            if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-                dropdown.classList.add('d-none');
-            }
-        });
+        if (this._payFollowDocClick) {
+            document.removeEventListener('click', this._payFollowDocClick, true);
+        }
+        this._payFollowDocClick = (e) => {
+            if (input.contains(e.target) || dropdown.contains(e.target)) return;
+            dropdown.classList.add('d-none');
+            dropdown.setAttribute('aria-hidden', 'true');
+        };
+        document.addEventListener('click', this._payFollowDocClick, true);
+
+        if (!this._payFollowLayoutWired) {
+            this._payFollowLayoutWired = true;
+            this._onPayFollowDdLayout = () => this._positionPayFollowCustomerDropdown();
+            window.addEventListener('scroll', this._onPayFollowDdLayout, true);
+            window.addEventListener('resize', this._onPayFollowDdLayout);
+        }
     },
 
     updateActiveItem(items, idx) {
@@ -604,8 +789,11 @@ const PaymentsUI = {
         const input = document.getElementById('payFollowCustomerFilter');
         if (input) input.value = name;
         const dropdown = document.getElementById('payFollowCustomerDropdown');
-        if (dropdown) dropdown.classList.add('d-none');
-        this.renderPaymentFollowup();
+        if (dropdown) {
+            dropdown.classList.add('d-none');
+            dropdown.setAttribute('aria-hidden', 'true');
+        }
+        this.renderPayFollowResultsOnly();
     }
 };
 
