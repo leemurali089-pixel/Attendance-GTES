@@ -4,7 +4,7 @@
  */
 const UpdateChecker = {
     /** Keep in sync with package.json — web + fallback label. */
-    APP_VERSION: '1.3.27',
+    APP_VERSION: '1.3.28',
 
     /**
      * Version string for UI: packaged Electron uses app.getVersion(); web uses APP_VERSION.
