@@ -1647,6 +1647,8 @@ const EmployeesModule = {
     async viewSalaryHistory(employeeName) {
         console.log('View Salary History for:', employeeName);
 
+        const employees = await DataManager.getEmployees();
+        const employee = employees.find(emp => emp.name === employeeName);
         const revisions = await DataManager.getSalaryRevisionsForEmployee(employeeName);
 
         // Create or get modal
@@ -1742,7 +1744,7 @@ const EmployeesModule = {
                     <p class="text-muted">
                         <i class="bi bi-info-circle"></i>
                         Total revisions: ${revisions.length} | 
-                        Current salary: ₹${revisions[0].newSalary.toLocaleString('en-IN')}
+                        Current salary: ₹${Number((employee && employee.baseSalary) || revisions[0].newSalary || 0).toLocaleString('en-IN')}
                     </p>
                 </div>
             `;

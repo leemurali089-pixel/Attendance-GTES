@@ -1302,9 +1302,14 @@ const DataManager = {
             return [];
         }
 
-        // Sort by date, newest first
+        // Sort by date (newest first). If same date, use changedAt to keep a stable "latest" order.
         return [...employee.salaryRevisions].sort((a, b) => {
-            return new Date(b.date) - new Date(a.date);
+            const bd = Date.parse(b.date || 0) || 0;
+            const ad = Date.parse(a.date || 0) || 0;
+            if (bd !== ad) return bd - ad;
+            const bt = Date.parse(b.changedAt || 0) || 0;
+            const at = Date.parse(a.changedAt || 0) || 0;
+            return bt - at;
         });
     },
 
@@ -1343,6 +1348,12 @@ const DataManager = {
                 newSalary: Number(latest.newSalary || 0),
                 reason: latest.reason || 'Salary revision'
             };
+        } else {
+            // No revisions left → revert to a clean baseline
+            emp.baseSalary = 0;
+            emp.salaryEffectiveDate = null;
+            emp.salaryEffectiveMonth = null;
+            emp.salaryLastAdjustment = null;
         }
         employees[idx] = this.addTimestamp(emp);
         await this.saveEmployees(employees);
