@@ -57,10 +57,10 @@ async function notifyNewFlagged() {
 
 async function runPollOnce() {
     if (pollBusy) return;
-    const st = await auth.status();
-    if (!st.isLoggedIn) return;
-    pollBusy = true;
     try {
+        const st = await auth.status();
+        if (!st.isLoggedIn) return;
+        pollBusy = true;
         broadcast('gmail:sync-status', { running: true });
         const result = await sync.incrementalSync();
         broadcast('gmail:sync-status', { running: false, lastSyncAt: new Date().toISOString(), result });
@@ -74,9 +74,9 @@ async function runPollOnce() {
 
 function startPolling(intervalMs = 90_000) {
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(runPollOnce, intervalMs);
+    pollTimer = setInterval(() => { void runPollOnce(); }, intervalMs);
     // Kick once shortly after start
-    setTimeout(runPollOnce, 3000);
+    setTimeout(() => { void runPollOnce(); }, 3000);
 }
 
 function stopPolling() {
@@ -93,7 +93,7 @@ function ensureTray() {
         tray.setToolTip('MJS PrimeLogic — Mail');
         const menu = Menu.buildFromTemplate([
             { label: 'Show App', click: () => { const w = BrowserWindow.getAllWindows()[0]; if (w) { w.show(); w.focus(); } } },
-            { label: 'Sync Now', click: () => runPollOnce() },
+            { label: 'Sync Now', click: () => { void runPollOnce(); } },
             { type: 'separator' },
             { label: 'Open Mail', click: () => broadcast('gmail:open-view', { view: 'mail' }) },
             { label: 'PO Queue', click: () => broadcast('gmail:open-view', { view: 'poQueue' }) },

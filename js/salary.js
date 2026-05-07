@@ -18,6 +18,12 @@ const SalaryModule = {
         return `₹${(parseFloat(value) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 
+    _getESIDeduction(baseSalary, employee) {
+        const base = Number(baseSalary || 0);
+        if (!employee || employee.esiDeductionEnabled !== true || !isFinite(base) || base <= 0) return 0;
+        return Number((base * 0.0075).toFixed(2)); // 0.75% of basic salary
+    },
+
     async toggleSensitiveData() {
         if (this.showSensitiveData) {
             this.showSensitiveData = false;
@@ -437,8 +443,9 @@ const SalaryModule = {
         const storedDebit = DataManager.getDebitedAdvance(emp.name, this.currentYear, this.currentMonth);
         const remainingBalance = DataManager.getRemainingAdvanceBalance(emp.name, this.currentYear, this.currentMonth);
 
+        const esiDeduction = this._getESIDeduction(baseSalary, emp);
         // Calculate salary before advance deduction
-        const salaryBeforeAdvance = basePay + otPay;
+        const salaryBeforeAdvance = basePay + otPay - esiDeduction;
 
         let debitToApply = 0;
         let finalRemaining = remainingBalance;
@@ -451,7 +458,7 @@ const SalaryModule = {
         }
         // If payout is NOT done, don't show any debit and use full remaining balance
 
-        const finalSalary = salaryBeforeAdvance - debitToApply;
+        const finalSalary = Math.max(salaryBeforeAdvance - debitToApply, 0);
 
         return `
             <tr>
@@ -469,6 +476,7 @@ const SalaryModule = {
                 <td>
                     ${this.formatCurrency(baseSalary)}
                     <small class="text-muted d-block">(${salaryType === 'daily' ? 'Daily' : 'Monthly'})</small>
+                    ${esiDeduction > 0 ? `<small class="text-warning d-block">ESI: -${this.formatCurrency(esiDeduction)}</small>` : ''}
                     <button class="btn btn-sm btn-link p-0 ms-1" onclick="SalaryModule.setBaseSalary('${emp.name}', ${baseSalary}, '${salaryType}')" title="Edit">
                         <i class="bi bi-pencil"></i>
                     </button>
@@ -679,9 +687,9 @@ const SalaryModule = {
         const totalAdvance = await DataManager.getTotalAdvanceForEmployee(employee.name, this.currentYear, this.currentMonth);
         const storedDebit = await DataManager.getDebitedAdvance(employee.name, this.currentYear, this.currentMonth);
 
-        // PF/ESI (Placeholder - currently 0 in main view)
+        // PF/ESI
         const pf = 0;
-        const esi = 0;
+        const esi = this._getESIDeduction(baseSalary, employee);
 
         return {
             basic: earnedBasic,
@@ -1332,13 +1340,66 @@ const SalaryModule = {
     },
 
     downloadAnnualPDF() {
-        const fy = DataManager.getFinancialYear();
-        ReportsModule.showEmployeeSelectionModal(
-            (selectedEmployees) => {
-                ReportsModule.generateAnnualPDF(fy.startYear, fy.endYear, selectedEmployees);
-            },
-            'Select Employees for Annual PDF'
-        );
+        const now = new Date();
+        const fromDefault = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const toDefault = fromDefault;
+        const modalId = 'salaryAnnualRangeModal';
+        document.getElementById(modalId)?.remove();
+        const html = `
+            <div class="modal fade" id="${modalId}" tabindex="-1">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-calendar-range me-2"></i>Annual Report Range</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label class="form-label">Start Month *</label>
+                                    <input type="month" class="form-control" id="salaryAnnualFrom" value="${fromDefault}">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">End Month *</label>
+                                    <input type="month" class="form-control" id="salaryAnnualTo" value="${toDefault}">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-2">Report will include attendance and salary totals between the selected months.</small>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="salaryAnnualContinueBtn">Continue</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', html);
+        const el = document.getElementById(modalId);
+        const bs = new bootstrap.Modal(el);
+        bs.show();
+        document.getElementById('salaryAnnualContinueBtn')?.addEventListener('click', () => {
+            const fromVal = document.getElementById('salaryAnnualFrom')?.value || '';
+            const toVal = document.getElementById('salaryAnnualTo')?.value || '';
+            if (!fromVal || !toVal) {
+                App.showNotification('Please select start and end month.', 'error');
+                return;
+            }
+            if (fromVal > toVal) {
+                App.showNotification('End month must be greater than or equal to start month.', 'error');
+                return;
+            }
+            const [startYear, startMonth] = fromVal.split('-').map(Number);
+            const [endYear, endMonth] = toVal.split('-').map(Number);
+            bs.hide();
+            ReportsModule.showEmployeeSelectionModal(
+                (selectedEmployees) => {
+                    ReportsModule.generateAnnualPDF(startYear, endYear, selectedEmployees, startMonth - 1, endMonth - 1);
+                },
+                `Select Employees for Annual PDF (${fromVal} to ${toVal})`
+            );
+        });
+        el.addEventListener('hidden.bs.modal', () => el.remove(), { once: true });
     },
 
     // Generate payslips only after salary payout is done for the selected month

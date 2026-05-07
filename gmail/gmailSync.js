@@ -21,6 +21,9 @@ async function withSyncLock(label, fn) {
         await _syncRunning.catch(() => {});
     }
     const p = (async () => fn())();
+    // Attach a handler immediately so Node doesn't emit
+    // UnhandledPromiseRejectionWarning before callers await this promise.
+    p.catch(() => {});
     _syncRunning = p.finally(() => { if (_syncRunning === p) _syncRunning = null; });
     return p;
 }
@@ -299,7 +302,12 @@ async function runInBatches(items, worker, concurrency = PARALLEL_FETCH) {
 }
 
 async function initialSync(opts = {}) {
-    return withSyncLock('initialSync', () => _initialSync(opts));
+    try {
+        return await withSyncLock('initialSync', () => _initialSync(opts));
+    } catch (e) {
+        // Never throw from background pollers; surface as a structured result.
+        return { ok: false, error: String(e && e.message ? e.message : e), code: e && e.code ? e.code : null };
+    }
 }
 
 async function _initialSync({ maxPerLabel = 300, onProgress } = {}) {
@@ -364,7 +372,12 @@ async function _initialSync({ maxPerLabel = 300, onProgress } = {}) {
 }
 
 async function incrementalSync(opts = {}) {
-    return withSyncLock('incrementalSync', () => _incrementalSync(opts));
+    try {
+        return await withSyncLock('incrementalSync', () => _incrementalSync(opts));
+    } catch (e) {
+        // Never throw from background pollers; surface as a structured result.
+        return { ok: false, error: String(e && e.message ? e.message : e), code: e && e.code ? e.code : null };
+    }
 }
 
 async function _incrementalSync({ onProgress } = {}) {

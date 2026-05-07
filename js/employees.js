@@ -284,6 +284,16 @@ const EmployeesModule = {
                                                     <option value="cheque">Cheque</option>
                                                 </select>
                                             </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label d-block">Salary Deductions</label>
+                                                <div class="form-check mt-2">
+                                                    <input class="form-check-input" type="checkbox" id="esiDeductionEnabled">
+                                                    <label class="form-check-label" for="esiDeductionEnabled">
+                                                        Deduct ESI @ 0.75% of basic salary
+                                                    </label>
+                                                    <small class="form-text text-muted d-block">Applied during salary calculation and payout.</small>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -529,6 +539,15 @@ const EmployeesModule = {
         App.showView('employeeView', { employeeName: employeeName });
     },
 
+    _cleanupStaleModalState() {
+        try {
+            document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+        } catch (_) { }
+    },
+
     initializeModal() {
         const modalElement = document.getElementById('employeeFormModal');
         if (modalElement) {
@@ -619,10 +638,10 @@ const EmployeesModule = {
             return;
         }
 
-        // Ensure modal is initialized
-        if (!this.modal) {
-            this.initializeModal();
+        if (modalElement.parentElement !== document.body) {
+            document.body.appendChild(modalElement);
         }
+        this.modal = bootstrap.Modal.getOrCreateInstance(modalElement);
 
         const form = document.getElementById('employeeForm');
         const title = document.getElementById('employeeFormTitle');
@@ -642,6 +661,7 @@ const EmployeesModule = {
                 document.getElementById('salaryType').value = employee.salaryType || 'monthly';
                 document.getElementById('baseSalary').value = employee.baseSalary || '';
                 if (document.getElementById('paymentMode')) document.getElementById('paymentMode').value = employee.paymentMode || 'bank';
+                if (document.getElementById('esiDeductionEnabled')) document.getElementById('esiDeductionEnabled').checked = employee.esiDeductionEnabled === true;
 
                 // Bank Tab
                 const bank = employee.bank || {};
@@ -685,6 +705,7 @@ const EmployeesModule = {
             form.reset();
             document.getElementById('employeeId').value = '';
             if (document.getElementById('paymentMode')) document.getElementById('paymentMode').value = 'bank';
+            if (document.getElementById('esiDeductionEnabled')) document.getElementById('esiDeductionEnabled').checked = false;
 
             // Clear photo previews
             this.employeePhotoData = null;
@@ -743,6 +764,7 @@ const EmployeesModule = {
             const salaryType = document.getElementById('salaryType')?.value;
             const baseSalary = parseFloat(document.getElementById('baseSalary')?.value);
             const paymentMode = document.getElementById('paymentMode')?.value;
+            const esiDeductionEnabled = document.getElementById('esiDeductionEnabled')?.checked === true;
 
             // Bank Tab
             const beneficiaryName = document.getElementById('beneficiaryName')?.value?.trim() || "";
@@ -777,6 +799,7 @@ const EmployeesModule = {
                 dateOfRelieving: dateOfRelieving || null,
                 salaryType,
                 baseSalary,
+                esiDeductionEnabled,
                 paymentMode: paymentMode || 'bank',
                 bank: {
                     beneficiaryName,
@@ -1029,6 +1052,9 @@ const EmployeesModule = {
 
         // Ensure it stacks above any stale layers.
         modalEl.style.zIndex = '1080';
+        document.querySelectorAll('.modal-backdrop').forEach((el) => {
+            if (!el.classList.contains('show')) el.remove();
+        });
 
         const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
         bsModal.show();
@@ -1673,6 +1699,7 @@ const EmployeesModule = {
                                 <th>Type</th>
                                 <th>Reason</th>
                                 <th>Changed By</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1695,6 +1722,16 @@ const EmployeesModule = {
                                         <td>${rev.adjustmentType ? `${rev.adjustmentType} (${rev.adjustmentMode || 'amount'})` : 'manual'}</td>
                                         <td>${rev.reason}</td>
                                         <td><small class="text-muted">${rev.changedBy === 'system' ? 'System' : 'Admin'}</small></td>
+                                        <td>
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-outline-danger"
+                                                data-salary-rev-delete="1"
+                                                onclick="EmployeesModule.deleteSalaryRevision(this, '${String(employeeName || '').replace(/'/g, "\\'")}', '${String(rev.id || '').replace(/'/g, "\\'")}')"
+                                            >
+                                                <i class="bi bi-trash"></i> Delete
+                                            </button>
+                                        </td>
                                     </tr>
                                 `;
             }).join('')}
@@ -1711,9 +1748,61 @@ const EmployeesModule = {
             `;
         }
 
-        // Show modal
-        const bsModal = new bootstrap.Modal(modal);
+        // Show modal (reuse existing instance to avoid stacked backdrops)
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
+        modal.addEventListener('hidden.bs.modal', () => this._cleanupStaleModalState(), { once: true });
         bsModal.show();
+    },
+
+    async deleteSalaryRevision(btnOrNull, employeeName, revisionId) {
+        if (!employeeName || !revisionId) return;
+        const btn = btnOrNull && btnOrNull.tagName ? btnOrNull : null;
+        const prevHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Deleting…`;
+        }
+        if (!App.confirmAction('Delete this salary revision? If it is the latest revision, the employee base salary will roll back to the previous value.')) {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = prevHtml;
+            }
+            return;
+        }
+        try {
+            const modalEl = document.getElementById('salaryHistoryModal');
+            if (modalEl) {
+                const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+                inst.hide();
+            }
+
+            const ok = await DataManager.deleteSalaryRevision(employeeName, revisionId);
+            if (!ok) {
+                App.showNotification('Could not delete salary revision.', 'error');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = prevHtml;
+                }
+                return;
+            }
+            App.showNotification('Salary revision deleted successfully.', 'success');
+            if (App.currentView === 'admin') {
+                await AdminModule.load();
+            } else {
+                await this.renderEmployeeList();
+            }
+            this._cleanupStaleModalState();
+            await this.viewSalaryHistory(employeeName);
+        } catch (error) {
+            console.error('Error deleting salary revision:', error);
+            App.showNotification('Could not delete salary revision: ' + error.message, 'error');
+            this._cleanupStaleModalState();
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = prevHtml;
+            }
+        }
     }
 };
 

@@ -5,6 +5,8 @@ const FileStorage = {
     _realtimeListenersAttached: false,
     /** Keys we are writing to disk to mirror RTDB → ignore matching fs.watch invalidation (see syncManager). */
     _mirrorWriteKeys: new Set(),
+    /** Debounced RTDB upload queue: key -> { timer, data, lastQueuedAt } */
+    _pendingCloudSets: new Map(),
 
     markMirrorWriteFromRtdb(key) {
         if (key) this._mirrorWriteKeys.add(key);
@@ -26,16 +28,72 @@ const FileStorage = {
      */
     _deferredRtdbKeys() {
         if (this._deferredRtdbKeySet) return this._deferredRtdbKeySet;
+        // For "sync on every edit across all devices", treat all realtime watch keys
+        // as deferred background uploads (debounced) to avoid UI lag.
         const s = new Set();
-        if (window.DataManager && window.DataManager.KEYS) {
-            const K = window.DataManager.KEYS;
-            if (K.ATTENDANCE) s.add(K.ATTENDANCE);
-            if (K.VOUCHERS) s.add(K.VOUCHERS);
-            if (K.INVOICES) s.add(K.INVOICES);
-            if (K.EXPENSES) s.add(K.EXPENSES);
-        }
+        try {
+            const DM = window.DataManager;
+            if (DM && typeof DM.getRealtimeWatchKeys === 'function') {
+                DM.getRealtimeWatchKeys().forEach((k) => s.add(k));
+            } else if (DM && DM.KEYS) {
+                // Fallback minimal set
+                const K = DM.KEYS;
+                [K.ATTENDANCE, K.VOUCHERS, K.INVOICES, K.EXPENSES, K.EMPLOYEES].filter(Boolean).forEach((k) => s.add(k));
+            }
+        } catch (_) { /* ignore */ }
         this._deferredRtdbKeySet = s;
         return s;
+    },
+
+    _scheduleCloudSet(key, data, opts = {}) {
+        const debounceMs = Number(opts.debounceMs ?? 500);
+        const prev = this._pendingCloudSets.get(key);
+        if (prev && prev.timer) clearTimeout(prev.timer);
+        const next = {
+            data,
+            lastQueuedAt: Date.now(),
+            timer: setTimeout(() => {
+                // Fire-and-forget upload; onRemote listener on other devices will update their local mirrors.
+                try {
+                    window.db.ref(key).set(data)
+                        .then(() => console.log(`✅ Cloud Sync [${key}]: Success`))
+                        .catch((error) => console.error(`🚨 Cloud Sync Failed for ${key}:`, error));
+                } catch (e) {
+                    console.error(`🚨 Cloud Sync Failed for ${key}:`, e);
+                } finally {
+                    const cur = this._pendingCloudSets.get(key);
+                    if (cur && cur.data === data) this._pendingCloudSets.delete(key);
+                }
+            }, Math.max(0, debounceMs))
+        };
+        this._pendingCloudSets.set(key, next);
+    },
+
+    async flushPendingCloudWrites(timeoutMs = 2000) {
+        if (!this.isCloudReady || !window.db) return;
+        const entries = Array.from(this._pendingCloudSets.entries());
+        if (!entries.length) return;
+        // Clear timers and push immediately
+        this._pendingCloudSets.clear();
+        const start = Date.now();
+        const pushes = entries.map(([key, v]) => {
+            try {
+                if (v && v.timer) clearTimeout(v.timer);
+                return window.db.ref(key).set(v.data);
+            } catch (e) {
+                return Promise.reject(e);
+            }
+        });
+        try {
+            await Promise.race([
+                Promise.allSettled(pushes),
+                new Promise((resolve) => setTimeout(resolve, Math.max(0, timeoutMs)))
+            ]);
+        } catch (_) { /* ignore */ }
+        const elapsed = Date.now() - start;
+        if (elapsed > timeoutMs) {
+            console.warn('[FileStorage] flushPendingCloudWrites timed out');
+        }
     },
 
     async init() {
@@ -60,6 +118,13 @@ const FileStorage = {
         }
         this.isCloudReady = true;
         console.log("☁️ Realtime Database cloud connection active.");
+        // Best-effort flush on page/app close so last edits are not lost.
+        if (!this._flushHooked) {
+            this._flushHooked = true;
+            window.addEventListener('beforeunload', () => {
+                try { void this.flushPendingCloudWrites(1500); } catch (_) { }
+            });
+        }
         // Defer dozens of .on('value') listeners to the next task so the UI can paint (login form)
         // before the browser processes every subscription callback in one long synchronous stretch.
         setTimeout(() => {
@@ -213,37 +278,14 @@ const FileStorage = {
         }
 
         const deferSet = this._deferredRtdbKeys();
-        const deferRtdb =
-            deferSet.has(key) && ((window.electronAPI && localSuccess) || !window.electronAPI);
-        if (deferRtdb) {
-            window.db
-                .ref(key)
-                .set(data)
-                .then(() => console.log(`✅ Cloud Sync [${key}]: Success`))
-                .catch((error) => {
-                    console.error(`🚨 Cloud Sync Failed for ${key}:`, error);
-                    if (!window.electronAPI) {
-                        try {
-                            localStorage.setItem(key, JSON.stringify(data));
-                        } catch (e) {
-                            console.warn(`[FileStorage] localStorage fallback for '${key}' failed:`, e);
-                        }
-                    }
-                });
+        const canUpload = (window.electronAPI ? localSuccess : true);
+        if (canUpload) {
+            // Always background-upload for realtime cross-device sync; debounced to avoid lag.
+            const isDeferred = deferSet.has(key);
+            this._scheduleCloudSet(key, data, { debounceMs: isDeferred ? 650 : 350 });
             return true;
         }
-
-        try {
-            await window.db.ref(key).set(data);
-            console.log(`✅ Cloud Sync [${key}]: Success`);
-            return true;
-        } catch (error) {
-            console.error(`🚨 Cloud Sync Failed for ${key}:`, error);
-            if (!window.electronAPI) {
-                localStorage.setItem(key, JSON.stringify(data));
-            }
-            return localSuccess; // Still return true if local succeeded but cloud failed (partial success)
-        }
+        return localSuccess;
     },
 
     async loadData(key) {

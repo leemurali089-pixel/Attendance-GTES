@@ -927,6 +927,7 @@ const InvoicesUI = {
             : (isGST ? 'Tax Invoice (GST)' : 'Plain Invoice (Non-GST)');
         const partyLabel = isSales ? 'Customer/Cash' : 'Supplier/Cash';
         const accountLabel = isSales ? 'Sales Account' : 'Purchase Account';
+        const showLedgerAccount = isPurchase || isGST;
         const docNoLabel = isPurchase ? 'Purchase No' : 'Invoice #';
         const submitBtnText = isPurchase ? 'CREATE PURCHASE' : 'CREATE INVOICE';
 
@@ -1033,9 +1034,8 @@ const InvoicesUI = {
                         opacity: 0.7;
                     }
                     .gtes-create-invoice-body {
-                        min-height: 0;
-                        flex: 1 1 auto;
                         max-height: calc(100vh - 52px);
+                        overflow-y: auto;
                     }
                     .gtes-invoice-items-scroll {
                         min-height: 120px;
@@ -1054,8 +1054,8 @@ const InvoicesUI = {
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
 
-                        <div class="modal-body p-4 bg-dark d-flex flex-column overflow-hidden gtes-create-invoice-body">
-                            <form id="createInvoiceForm" class="d-flex flex-column flex-grow-1" style="min-height:0;" onsubmit="event.preventDefault(); InvoicesUI.saveInvoice(event)">
+                        <div class="modal-body p-4 bg-dark overflow-auto gtes-create-invoice-body">
+                            <form id="createInvoiceForm" class="d-block" onsubmit="event.preventDefault(); InvoicesUI.saveInvoice(event)">
                                 <datalist id="invCustomerList">${customerOptions}</datalist>
                                 <datalist id="invInventoryList">${inventoryOptions}</datalist>
                                 <datalist id="invServiceList">${serviceOptions}</datalist>
@@ -1117,9 +1117,9 @@ const InvoicesUI = {
 
                                 <div class="row g-3 mb-4 p-3 rounded border border-secondary" style="background: rgba(255,255,255,0.03);">
                                     <div class="col-12 mb-1"><span class="text-white-50 small"><i class="bi bi-journal-text me-1"></i> Ledger &amp; tax (Book Keeper style)</span></div>
-                                    <div class="col-md-3">
+                                    <div class="col-md-3" style="${showLedgerAccount ? '' : 'display:none;'}">
                                         <div class="bk-form-label">${accountLabel}</div>
-                                        <select class="bk-form-control w-100" name="ledgerAccount">${ledgerSelOpts}</select>
+                                        <select class="bk-form-control w-100" name="ledgerAccount" ${showLedgerAccount ? '' : 'disabled'}>${ledgerSelOpts}</select>
                                     </div>
                                     <div class="col-md-2">
                                         <div class="bk-form-label">Due Date</div>
@@ -2000,6 +2000,8 @@ const InvoicesUI = {
         }
 
         const isPurchaseFlow = String(type).includes('purchase');
+        const enteredLedgerAccount = (formData.get('ledgerAccount') || '').trim();
+        const salesLedgerForType = isPurchaseFlow ? enteredLedgerAccount : (isGST ? enteredLedgerAccount : null);
         const hId = party.id;
         const acctType = isPurchaseFlow ? 'Supplier' : 'Customer';
         const resolvedPartyId = (typeof CustomerManager !== 'undefined' && CustomerManager.resolvePartyId)
@@ -2030,7 +2032,9 @@ const InvoicesUI = {
                 roundOff: parseFloat(document.getElementById('roundOff')?.value) || 0,
                 items,
                 billType: isGST ? 'gst' : 'plain',
-                ledgerAccount: (formData.get('ledgerAccount') || '').trim(),
+                ledgerAccount: salesLedgerForType,
+                gstLedgerAccount: isGST ? enteredLedgerAccount : null,
+                plainLedgerAccount: !isGST ? enteredLedgerAccount : null,
                 placeOfSupply: (formData.get('placeOfSupply') || '').trim(),
                 taxScheme: (formData.get('taxScheme') || '').trim() || 'DEFAULT',
                 taxSupplyType: (formData.get('taxSupplyType') || 'local').trim(),
@@ -2098,7 +2102,9 @@ const InvoicesUI = {
             },
             status: 'pending',
             jobCardId: form.getAttribute('data-source-jc') || null,
-            ledgerAccount: (formData.get('ledgerAccount') || '').trim() || null,
+            ledgerAccount: salesLedgerForType,
+            gstLedgerAccount: isGST ? enteredLedgerAccount : null,
+            plainLedgerAccount: !isGST ? enteredLedgerAccount : null,
             dueDate: formData.get('dueDate') || null,
             placeOfSupply: (formData.get('placeOfSupply') || '').trim() || null,
             taxScheme: (formData.get('taxScheme') || '').trim() || null,
@@ -2345,6 +2351,8 @@ const InvoicesUI = {
         }
 
         const addrEd = (formData.get('customerAddress') || '').trim();
+        const enteredLedgerAccount = (formData.get('ledgerAccount') || '').trim();
+        const salesLedgerForType = isGST ? enteredLedgerAccount : null;
         const updates = {
             invoiceNo: formData.get('invoiceNo'),
             date: formData.get('date'),
@@ -2356,7 +2364,9 @@ const InvoicesUI = {
             customerAddress: addrEd || party.address || '',
             poNumber: formData.get('poNumber'),
             narration: formData.get('narration'),
-            ledgerAccount: (formData.get('ledgerAccount') || '').trim() || null,
+            ledgerAccount: salesLedgerForType,
+            gstLedgerAccount: isGST ? enteredLedgerAccount : null,
+            plainLedgerAccount: !isGST ? enteredLedgerAccount : null,
             placeOfSupply: (formData.get('placeOfSupply') || '').trim() || null,
             taxScheme: (formData.get('taxScheme') || '').trim() || null,
             taxSupplyType: (formData.get('taxSupplyType') || 'local').trim(),

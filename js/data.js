@@ -331,7 +331,6 @@ const DataManager = {
                 'gtes_users'
             ],
             background: [
-                this.KEYS.EMPLOYEES,
                 this.KEYS.ATTENDANCE,
                 this.KEYS.HOLIDAYS,
                 this.KEYS.ADVANCES,
@@ -344,6 +343,8 @@ const DataManager = {
                 this.KEYS.RECURRING_INVOICES,
                 this.KEYS.RECYCLE_BIN,
                 'gtes_tasks',
+                // Employees can be very large (tens of MB). Keep it lazy-loaded:
+                // it will be fetched on first call to getEmployees() or when opening Employees/Salary.
                 'customers',
                 'invoices',
                 'vouchers',
@@ -763,7 +764,24 @@ const DataManager = {
 
         if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
             const loc = Array.isArray(localParsed) ? localParsed : [];
-            const merged = this._mergeRecordArraysById(loc, data, storageKey);
+            let merged = this._mergeRecordArraysById(loc, data, storageKey);
+            // Critical recovery path:
+            // For large lists we often mirror to IDB only (localStorage removed). If cloud write was
+            // deferred and app closed early, cloud can be stale-but-non-empty. Without this IDB merge,
+            // recent local writes disappear after restart.
+            if (loc.length === 0) {
+                try {
+                    let idbArr = await this.getFromIDB(storageKey);
+                    if ((!idbArr || idbArr.length === 0) && storageKey === this.KEYS.CHALLANS) {
+                        idbArr = await this.getFromIDB('challans');
+                    }
+                    if (Array.isArray(idbArr) && idbArr.length > 0) {
+                        merged = this._mergeRecordArraysById(idbArr, merged, storageKey);
+                    }
+                } catch (e) {
+                    console.warn(`[DataManager] IDB merge skipped for '${storageKey}':`, e);
+                }
+            }
             if (merged.length !== data.length || merged.length !== loc.length) {
                 console.debug(
                     `[DataManager] Merged '${storageKey}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
@@ -1288,6 +1306,47 @@ const DataManager = {
         return [...employee.salaryRevisions].sort((a, b) => {
             return new Date(b.date) - new Date(a.date);
         });
+    },
+
+    /**
+     * Delete a salary revision by id and recalculate current base salary.
+     * If the latest revision is removed, employee.baseSalary rolls back to the previous revision value.
+     */
+    async deleteSalaryRevision(employeeName, revisionId) {
+        const employees = await this.getEmployees();
+        const idx = employees.findIndex(emp => emp.name === employeeName);
+        if (idx === -1) return false;
+        const emp = employees[idx];
+        const list = Array.isArray(emp.salaryRevisions) ? emp.salaryRevisions.slice() : [];
+        const next = list.filter(r => String(r.id || '') !== String(revisionId || ''));
+        if (next.length === list.length) return false;
+
+        emp.salaryRevisions = next;
+        if (next.length > 0) {
+            const sorted = next.slice().sort((a, b) => {
+                const ad = Date.parse(a.date || 0) || 0;
+                const bd = Date.parse(b.date || 0) || 0;
+                if (ad !== bd) return ad - bd;
+                const at = Date.parse(a.changedAt || 0) || 0;
+                const bt = Date.parse(b.changedAt || 0) || 0;
+                return at - bt;
+            });
+            const latest = sorted[sorted.length - 1];
+            emp.baseSalary = Number(latest.newSalary || 0);
+            emp.salaryEffectiveDate = latest.date || null;
+            emp.salaryEffectiveMonth = latest.effectiveMonth || (latest.date ? String(latest.date).slice(0, 7) : null);
+            emp.salaryLastAdjustment = {
+                type: latest.adjustmentType || 'manual',
+                mode: latest.adjustmentMode || 'amount',
+                value: Number(latest.adjustmentValue || 0),
+                oldSalary: Number(latest.oldSalary || 0),
+                newSalary: Number(latest.newSalary || 0),
+                reason: latest.reason || 'Salary revision'
+            };
+        }
+        employees[idx] = this.addTimestamp(emp);
+        await this.saveEmployees(employees);
+        return true;
     },
 
     /**

@@ -5,6 +5,45 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const gmailIpc = require('./gmail/gmailIpc');
 
+// Reduce Chromium cache/quota issues on OneDrive paths by pinning cache
+// inside Electron userData. Must be called before app.whenReady.
+try {
+    const ud = app.getPath('userData');
+    const cacheDir = path.join(ud, 'Cache');
+    app.setPath('cache', cacheDir);
+    // Chromium still sometimes tries to relocate disk cache; force it.
+    app.commandLine.appendSwitch('disk-cache-dir', cacheDir);
+    // Avoid GPU shader cache errors (common on restricted folders).
+    app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+} catch (e) {
+    console.warn('[main] setPath(cache) skipped:', e && e.message);
+}
+
+// Prevent noisy Node warnings from background Gmail OAuth/network failures.
+// These errors are already surfaced to the renderer via gmail IPC status.
+let _lastUnhandledRejectionLogAt = 0;
+process.on('unhandledRejection', (reason) => {
+    try {
+        const msg = String((reason && reason.message) ? reason.message : reason || '');
+        const isGmailAuthNoise =
+            msg.includes('invalid_grant') ||
+            msg.includes('oauth2.googleapis.com') ||
+            msg.includes('getaddrinfo ENOTFOUND oauth2.googleapis.com');
+        const now = Date.now();
+        if (isGmailAuthNoise) {
+            // Throttle to avoid log spam if polling retries.
+            if (now - _lastUnhandledRejectionLogAt > 30_000) {
+                _lastUnhandledRejectionLogAt = now;
+                console.warn('[main] Gmail sync auth/network error (handled):', msg);
+            }
+            return;
+        }
+        console.error('[main] Unhandled promise rejection:', reason);
+    } catch (e) {
+        console.error('[main] Unhandled rejection handler failed:', e);
+    }
+});
+
 // Auto-update: the desktop app pulls new installers from the GitHub
 // Release configured under "build.publish" in package.json. Skipped in
 // dev (`npm start`) because there is no packaged app to replace.

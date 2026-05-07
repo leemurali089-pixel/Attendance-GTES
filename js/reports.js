@@ -735,6 +735,7 @@ const ReportsModule = {
             const baseSalary = parseFloat(emp.baseSalary || baseSalaries[emp.name] || 0);
             const salaryType = emp.salaryType || 'monthly';
             const perDaySalary = salaryType === 'daily' ? baseSalary : (daysInMonth ? baseSalary / daysInMonth : 0);
+            const esiDeduction = (emp.esiDeductionEnabled === true && baseSalary > 0) ? Number((baseSalary * 0.0075).toFixed(2)) : 0;
 
             // Monthly: each H-Working = 2 paid days (same as salary grid / historical payout statement)
             let paidDays;
@@ -754,7 +755,7 @@ const ReportsModule = {
             const otPay = otBreakdown.totalPay;
             const standardOtPay = otBreakdown.standardPay || 0;
             const hWorkingOtPay = otBreakdown.hWorkingPay || 0;
-            const salaryBeforeAdvance = basePay + otPay;
+            const salaryBeforeAdvance = Math.max(basePay + otPay - esiDeduction, 0);
 
             const advanceThisMonth = await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
             const totalAdvanceFY = await DataManager.getTotalAdvanceForEmployeeFY(emp.name, year, month);
@@ -789,6 +790,7 @@ const ReportsModule = {
                 paidDays,
                 basePay,
                 otPay,
+                esiDeduction,
                 salaryBeforeAdvance,
                 advanceThisMonth,
                 totalAdvanceFY,
@@ -911,6 +913,7 @@ const ReportsModule = {
                 const employee = allEmps.find(e => e.name === emp.name);
                 const baseSalary = parseFloat(employee?.baseSalary || baseSalaries[emp.name] || 0);
                 const salaryType = employee?.salaryType || 'monthly';
+                const esiDeduction = (employee?.esiDeductionEnabled === true && baseSalary > 0) ? Number((baseSalary * 0.0075).toFixed(2)) : 0;
 
                 // Calculate per day salary
                 let perDaySalary;
@@ -933,7 +936,7 @@ const ReportsModule = {
                 const hOtPay = otBreakdown.hWorkingPay || 0;
                 const totalAdvance = await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
                 const remainingAdvanceBalance = await DataManager.getRemainingAdvanceBalance(emp.name, year, month);
-                const finalSalary = basePay + otPay - totalAdvance;
+                const finalSalary = basePay + otPay - esiDeduction - totalAdvance;
 
                 return `
                 <div class="summary" style="color: #000000 !important;">
@@ -954,6 +957,7 @@ const ReportsModule = {
                         ${standardOtPay > 0 ? `<tr><td style="color: #000000 !important;">Standard OT Pay</td><td class="text-right" style="color: #000000 !important;">₹${standardOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
                         ${hOtPay > 0 ? `<tr><td style="color: #000000 !important;">H-OT Pay</td><td class="text-right" style="color: #000000 !important;">₹${hOtPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
                         ${otPay > 0 ? `<tr><td style="color: #000000 !important;"><strong style="color: #000000 !important;">Total OT Pay</strong></td><td class="text-right" style="color: #000000 !important;"><strong style="color: #000000 !important;">₹${otPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>` : ''}
+                        ${esiDeduction > 0 ? `<tr><td style="color: #000000 !important;">ESI Deduction (0.75%)</td><td class="text-right" style="color: #000000 !important;">₹${esiDeduction.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
                         ${totalAdvance > 0 ? `<tr><td style="color: #000000 !important;">Total Advance (This Month)</td><td class="text-right" style="color: #000000 !important;">₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
                         ${remainingAdvanceBalance > 0 ? `<tr><td style="color: #000000 !important;">Pending Advance Balance</td><td class="text-right" style="color: #000000 !important;">₹${remainingAdvanceBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>` : ''}
                         <tr><td style="color: #000000 !important;"><strong style="color: #000000 !important;">Final Salary</strong></td><td class="text-right" style="color: #000000 !important;"><strong style="color: #000000 !important;">₹${finalSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td></tr>
@@ -1015,13 +1019,13 @@ const ReportsModule = {
         }
     },
 
-    async generateAnnualPDF(startYear, endYear, selectedEmployees = null) {
+    async generateAnnualPDF(startYear, endYear, selectedEmployees = null, startMonth = 3, endMonth = 2) {
         console.log('Starting Annual PDF generation for', startYear, '-', endYear);
         try {
             const allEmployees = await DataManager.getActiveEmployees();
             const employees = selectedEmployees ? allEmployees.filter(emp => selectedEmployees.includes(emp.name)) : allEmployees;
-            const startDate = new Date(startYear, 3, 1); // April 1
-            const endDate = new Date(endYear, 2, 31); // March 31
+            const startDate = new Date(startYear, startMonth, 1);
+            const endDate = new Date(endYear, endMonth + 1, 0);
             const attendance = await DataManager.getAttendance();
             const filteredAttendance = attendance.filter(a => {
                 const date = new Date(a.date);
@@ -1053,7 +1057,7 @@ const ReportsModule = {
             let datesHtml = '<strong>Salary Credit Dates:</strong><br>';
             let hasDates = false;
             for (let year = startYear; year <= endYear; year++) {
-                for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
+                for (let month = (year === startYear ? startMonth : 0); month <= (year === endYear ? endMonth : 11); month++) {
                     const details = await DataManager.getSalaryPayoutDetails(year, month);
                     if (details && details.creditDate) {
                         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -1064,6 +1068,7 @@ const ReportsModule = {
             }
             const creditDatesHtml = hasDates ? datesHtml.slice(0, -3) : '';
 
+            const rangeLabel = `${new Date(startYear, startMonth, 1).toLocaleString('default', { month: 'short' })} ${startYear} - ${new Date(endYear, endMonth, 1).toLocaleString('default', { month: 'short' })} ${endYear}`;
             let htmlContent = `
             <!DOCTYPE html>
             <html>
@@ -1095,7 +1100,7 @@ const ReportsModule = {
                             GSTIN: ${company.gstin} | PAN: ${company.pan} | IEC: ${company.iec}
                         </div>
                     </div>
-                    <div class="report-title" style="color: #000000 !important;">Annual Salary Report - Financial Year ${startYear}-${endYear}</div>
+                    <div class="report-title" style="color: #000000 !important;">Annual Salary Report - ${rangeLabel}</div>
                     <div class="report-meta" style="text-align: center; font-size: 12px; margin-bottom: 20px; color: #000000 !important;">
                         ${creditDatesHtml}
                     </div>
@@ -1139,7 +1144,7 @@ const ReportsModule = {
                 // Calculate total advances
                 let totalAdvance = 0;
                 for (let year = startYear; year <= endYear; year++) {
-                    for (let month = (year === startYear ? 3 : 0); month <= (year === endYear ? 2 : 11); month++) {
+                    for (let month = (year === startYear ? startMonth : 0); month <= (year === endYear ? endMonth : 11); month++) {
                         totalAdvance += await DataManager.getTotalAdvanceForEmployee(emp.name, year, month);
                     }
                 }
@@ -1215,7 +1220,7 @@ const ReportsModule = {
 
                 const opt = {
                     margin: [0.5, 0.5, 0.5, 0.5],
-                    filename: `Annual_Report_${startYear}-${endYear}.pdf`,
+                    filename: `Annual_Report_${startYear}-${String(startMonth + 1).padStart(2, '0')}_to_${endYear}-${String(endMonth + 1).padStart(2, '0')}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: {
                         scale: 2,
