@@ -183,10 +183,19 @@ const SalaryModule = {
             </div>
         `;
 
-        // Initialize modal
+        // Initialize modal (keep under <body> and cleanup backdrops to avoid "can't click inputs" freezes)
         const modalElement = document.getElementById('salarySettingsModal');
         if (modalElement) {
-            this.modal = new bootstrap.Modal(modalElement);
+            if (modalElement.parentElement !== document.body) {
+                document.body.appendChild(modalElement);
+            }
+            this.modal = bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: true, keyboard: true, focus: true });
+            modalElement.addEventListener('hidden.bs.modal', () => {
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('overflow');
+                document.body.style.removeProperty('padding-right');
+            });
         }
 
         // Trigger async rendering
@@ -1297,34 +1306,50 @@ const SalaryModule = {
         }
     },
 
-    saveBaseSalary() {
-        const employeeName = document.getElementById('salaryEmployeeName').value;
-        const baseSalary = parseFloat(document.getElementById('baseSalary').value);
+    async saveBaseSalary() {
+        const employeeName = document.getElementById('salaryEmployeeName')?.value || '';
+        const baseSalary = parseFloat(document.getElementById('baseSalary')?.value);
 
-        if (!employeeName || isNaN(baseSalary) || baseSalary < 0) {
+        if (!employeeName || Number.isNaN(baseSalary) || baseSalary < 0) {
             App.showNotification('Please enter a valid basic salary', 'error');
             return;
         }
 
-        // Update employee record instead of settings
-        const employees = DataManager.getEmployees();
-        const employee = employees.find(e => e.name === employeeName);
-        if (employee) {
-            employee.baseSalary = baseSalary;
-            DataManager.saveEmployees(employees);
-        } else {
-            // Fallback to settings for backward compatibility
-            const settings = DataManager.getSettings();
-            if (!settings.baseSalaries) {
-                settings.baseSalaries = {};
-            }
-            settings.baseSalaries[employeeName] = baseSalary;
-            DataManager.saveSettings(settings);
+        const modalEl = document.getElementById('salarySettingsModal');
+        const saveBtn = modalEl ? modalEl.querySelector('button.btn.btn-primary') : null;
+        const prevBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Saving…`;
         }
 
-        this.modal.hide();
-        this.renderSalaryRowsAsync(); // Refresh rows
-        App.showNotification('Basic salary saved successfully', 'success');
+        try {
+            // Update employee record (correct async access)
+            const employees = await DataManager.getEmployees();
+            const employee = Array.isArray(employees) ? employees.find(e => e && e.name === employeeName) : null;
+            if (employee) {
+                employee.baseSalary = baseSalary;
+                await DataManager.saveEmployees(employees);
+            } else {
+                // Fallback to settings for backward compatibility
+                const settings = await DataManager.getSettings();
+                if (!settings.baseSalaries) settings.baseSalaries = {};
+                settings.baseSalaries[employeeName] = baseSalary;
+                await DataManager.saveSettings(settings);
+            }
+
+            this.modal?.hide();
+            await this.renderSalaryRowsAsync(); // Refresh rows
+            App.showNotification('Basic salary saved successfully', 'success');
+        } catch (e) {
+            console.error('[SalaryModule] saveBaseSalary failed:', e);
+            App.showNotification('Failed to save basic salary. Please try again.', 'error');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = prevBtnHtml;
+            }
+        }
     },
 
     downloadMonthlyPDF() {
