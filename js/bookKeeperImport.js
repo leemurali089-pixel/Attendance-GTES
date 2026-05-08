@@ -510,7 +510,7 @@ const BookKeeperImport = {
             imported++;
         });
 
-        DataManager.saveData('customers', existingCustomers);
+        await DataManager.saveData('customers', existingCustomers);
         return { imported };
     },
 
@@ -561,7 +561,7 @@ const BookKeeperImport = {
             imported++;
         });
 
-        DataManager.saveData('inventory', existingInventory);
+        await DataManager.saveData('inventory', existingInventory);
         return { imported };
     },
 
@@ -763,7 +763,7 @@ const BookKeeperImport = {
         settings.gstin = company.tax_regn || settings.gstin;
         settings.pan = company.tax_regn2 || settings.pan;
 
-        DataManager.saveData(DataManager.KEYS.SETTINGS, settings);
+        await DataManager.saveData(DataManager.KEYS.SETTINGS, settings);
 
         return {
             name: company.c_name,
@@ -931,7 +931,7 @@ const BookKeeperImport = {
             });
 
             if (gtesWarehouses.length > 0) {
-                DataManager.saveData('warehouses', gtesWarehouses);
+                await DataManager.saveData('warehouses', gtesWarehouses);
             }
             return { imported: gtesWarehouses.length };
         } catch (e) {
@@ -969,7 +969,7 @@ const BookKeeperImport = {
                 }
             });
 
-            DataManager.saveData('inventory', existingInventory);
+            await DataManager.saveData('inventory', existingInventory);
             return { imported: imported };
         } catch (e) {
             return { imported: 0, error: e.message };
@@ -1016,7 +1016,7 @@ const BookKeeperImport = {
                 imported++;
             });
 
-            DataManager.saveData('orders', existingOrders);
+            await DataManager.saveData('orders', existingOrders);
             return { imported: imported };
         } catch (e) {
             return { imported: 0, error: e.message };
@@ -3346,7 +3346,7 @@ const BookKeeperImport = {
             imported++;
         });
 
-        DataManager.saveData(DataManager.KEYS.ESTIMATES, existingEstimates);
+        await DataManager.saveData(DataManager.KEYS.ESTIMATES, existingEstimates);
         return { imported, skipped, total: estVouchers.length };
     },
 
@@ -3410,7 +3410,7 @@ const BookKeeperImport = {
             imported++;
         });
 
-        DataManager.saveData('challans', existingChallans);
+        await DataManager.saveData('challans', existingChallans);
         return { imported, skipped, total: dcVouchers.length };
     },
 
@@ -3427,7 +3427,7 @@ const BookKeeperImport = {
             inputCredit: tax.input_credit === 'yes'
         }));
 
-        DataManager.saveData('taxSchemes', taxSchemes);
+        await DataManager.saveData('taxSchemes', taxSchemes);
 
         return { imported: taxes.length };
     },
@@ -3487,7 +3487,7 @@ const BookKeeperImport = {
                 source: 'bookkeeper'
             }));
 
-            DataManager.saveData('gtes_batches', newBatches);
+            await DataManager.saveData('gtes_batches', newBatches);
             return { imported: batches.length };
         } catch (e) {
             console.warn('Batch table not found or error importing batches', e);
@@ -4238,7 +4238,7 @@ const BookKeeperImport = {
                     return !isBookkeeper;
                 });
                 cleared += (all.length - kept.length);
-                DataManager.saveData(key, kept);
+                await DataManager.saveData(key, kept);
             } catch (e) {
                 console.warn(`[BK] Could not clear ${type}:`, e.message);
             }
@@ -4249,7 +4249,7 @@ const BookKeeperImport = {
             const allCust = CustomerManager.getAllCustomers();
             const keptCust = allCust.filter(c => c.source !== 'bookkeeper');
             cleared += (allCust.length - keptCust.length);
-            DataManager.saveData('customers', keptCust);
+            await DataManager.saveData('customers', keptCust);
         } catch (e) {}
 
         console.log(`[BK] Cleared ${cleared} BookKeeper records. Ready for fresh import.`);

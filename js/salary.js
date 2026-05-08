@@ -1126,7 +1126,8 @@ const SalaryModule = {
             return null;
         }
 
-        const salaryPayouts = context ? context.salaryPayouts : (DataManager.getSettings().salaryPayouts || {});
+        // Context is required for correctness (this function is sync). Never call async getters here.
+        const salaryPayouts = (context && context.salaryPayouts) ? context.salaryPayouts : {};
 
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
