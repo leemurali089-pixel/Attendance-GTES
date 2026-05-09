@@ -414,17 +414,33 @@ const PaymentsUI = {
     applyFilters(invoices) {
         let filtered = [...invoices];
 
+        const isInvoiceGST = (inv) => {
+            if (!inv) return false;
+            // Prefer normalized InvoiceManager type logic when available.
+            if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isGSTType === 'function') {
+                const t = inv.type || inv.billType || (inv.hasGst === false ? 'without-bill' : 'with-bill');
+                return InvoiceManager.isGSTType(t);
+            }
+            const t = String(inv.type || inv.billType || '').toLowerCase();
+            if (t.includes('non-gst') || t === 'without-bill') return false;
+            if (t.includes('gst') || t === 'with-bill') return true;
+            if (inv.hasGst === true) return true;
+            if (inv.hasGst === false) return false;
+            const gstTotal = Number(inv.gstAmount || 0)
+                + Number(inv.cgstAmount || 0)
+                + Number(inv.sgstAmount || 0)
+                + Number(inv.igstAmount || 0)
+                + Number(inv?.gst?.cgst || 0)
+                + Number(inv?.gst?.sgst || 0)
+                + Number(inv?.gst?.igst || 0);
+            return gstTotal > 0.001;
+        };
+
         // Type Filter
         if (this.currentFilters.type === 'gst') {
-            filtered = filtered.filter(inv => {
-                const isGST = inv.type === 'with-bill' || inv.type === 'gst-invoice' || inv.type === 'sales-gst';
-                return isGST;
-            });
+            filtered = filtered.filter(inv => isInvoiceGST(inv));
         } else if (this.currentFilters.type === 'plain') {
-            filtered = filtered.filter(inv => {
-                const isGST = inv.type === 'with-bill' || inv.type === 'gst-invoice' || inv.type === 'sales-gst';
-                return !isGST;
-            });
+            filtered = filtered.filter(inv => !isInvoiceGST(inv));
         }
 
         // Status Filter
