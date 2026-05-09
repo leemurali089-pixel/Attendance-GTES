@@ -825,7 +825,7 @@ const VouchersUI = {
                                             <div class="vch-form-label text-warning">TDS Amount</div>
                                             <input type="number" class="form-control bg-dark border-warning text-warning" name="tdsAmount" id="tdsAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="TDS">
                                         </div>
-                                        <div class="col-md-2" id="discountContainer" style="${this.currentMode !== 'gst' ? 'display:none;' : ''}">
+                                        <div class="col-md-2" id="discountContainer">
                                             <div class="vch-form-label text-info">Discount</div>
                                             <input type="number" class="form-control bg-dark border-info text-info" name="discountAmount" id="discountAmount" value="0" min="0" step="0.01" oninput="VouchersUI.calculateTotal()" placeholder="Discount">
                                         </div>

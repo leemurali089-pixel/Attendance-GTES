@@ -4212,7 +4212,7 @@ const BookKeeperImport = {
      * Clear all BookKeeper-sourced data before a fresh sync.
      * This ensures deleted records in BookKeeper are removed here too.
      */
-    clearBookKeeperData() {
+    async clearBookKeeperData() {
         console.log('[BK] Clearing previous BookKeeper data...');
 
         const keys = {
