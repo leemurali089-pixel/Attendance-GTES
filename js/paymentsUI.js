@@ -8,7 +8,8 @@ const PaymentsUI = {
         type: 'all', // 'all', 'gst', 'plain'
         customer: '',
         financialYear: '',
-        status: 'pending' // 'all', 'pending', 'partial', 'paid'
+        status: 'pending', // 'all', 'pending', 'partial', 'paid'
+        viewMode: 'customer' // 'customer', 'bill', 'pending'
     },
     dataCache: null,
     selectedCustomers: new Set(),
@@ -35,14 +36,10 @@ const PaymentsUI = {
             this.dataCache = InvoiceManager.getInvoicesWithBalance();
         }
         
-        // Filter out fully paid invoices
-        let pendingInvoices = this.dataCache.filter(inv => inv.balance > 0.05);
-
-        // Apply UI Filters
-        pendingInvoices = this.applyFilters(pendingInvoices);
-
-        // Group by Customer - Use a more robust grouping to fix mapping bug
-        const customerSummary = this.groupInvoicesByCustomer(pendingInvoices);
+        // Apply UI filters first; do not pre-filter by pending here (breaks Paid tab).
+        const filteredInvoices = this.applyFilters(this.dataCache || []);
+        const effectiveViewMode = this.currentFilters.viewMode === 'pending' ? 'bill' : this.currentFilters.viewMode;
+        const customerSummary = this.groupInvoicesByCustomer(filteredInvoices);
 
         // Render HTML
         container.innerHTML = `
@@ -104,6 +101,21 @@ const PaymentsUI = {
                                             onclick="PaymentsUI.setStatusFilter('paid')" title="Fully paid">Paid</button>
                                     </div>
 
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn ${this.currentFilters.viewMode === 'pending' ? 'btn-secondary' : 'btn-outline-secondary'}"
+                                            onclick="PaymentsUI.setViewMode('pending')" title="Quick view of pending bills">
+                                            Pending View
+                                        </button>
+                                        <button type="button" class="btn ${effectiveViewMode === 'bill' ? 'btn-secondary' : 'btn-outline-secondary'}"
+                                            onclick="PaymentsUI.setViewMode('bill')">
+                                            Bill-wise
+                                        </button>
+                                        <button type="button" class="btn ${effectiveViewMode === 'customer' ? 'btn-secondary' : 'btn-outline-secondary'}"
+                                            onclick="PaymentsUI.setViewMode('customer')">
+                                            Customer-wise
+                                        </button>
+                                    </div>
+
                                     <button class="btn btn-outline-secondary btn-sm" onclick="PaymentsUI.refreshData()" title="Refresh Data">
                                         <i class="bi bi-arrow-clockwise"></i>
                                     </button>
@@ -114,7 +126,7 @@ const PaymentsUI = {
                 </div>
 
                 <div id="payFollowResultsBlock" class="pay-followup-results-stack" style="position:relative;z-index:1;">
-                ${this._buildPayFollowResultsHtml(customerSummary)}
+                ${effectiveViewMode === 'bill' ? this._buildPayFollowBillResultsHtml(filteredInvoices) : this._buildPayFollowResultsHtml(customerSummary, filteredInvoices)}
                 </div>
             </div>
         `;
@@ -134,7 +146,7 @@ const PaymentsUI = {
         if (!this.dataCache) {
             this.dataCache = InvoiceManager.getInvoicesWithBalance();
         }
-        let pendingInvoices = this.dataCache.filter(inv => inv.balance > 0.05);
+        let filteredInvoices = this.dataCache || [];
         const custEl = document.getElementById('payFollowCustomerFilter');
         if (custEl) {
             this.currentFilters.customer = custEl.value;
@@ -143,28 +155,33 @@ const PaymentsUI = {
         if (yearEl) {
             this.currentFilters.financialYear = yearEl.value;
         }
-        pendingInvoices = this.applyFilters(pendingInvoices);
-        const customerSummary = this.groupInvoicesByCustomer(pendingInvoices);
-        block.innerHTML = this._buildPayFollowResultsHtml(customerSummary);
+        filteredInvoices = this.applyFilters(filteredInvoices);
+        const effectiveViewMode = this.currentFilters.viewMode === 'pending' ? 'bill' : this.currentFilters.viewMode;
+        const customerSummary = this.groupInvoicesByCustomer(filteredInvoices);
+        block.innerHTML = effectiveViewMode === 'bill'
+            ? this._buildPayFollowBillResultsHtml(filteredInvoices)
+            : this._buildPayFollowResultsHtml(customerSummary, filteredInvoices);
         requestAnimationFrame(() => this._positionPayFollowCustomerDropdown());
     },
 
-    _buildPayFollowResultsHtml(customerSummary) {
+    _buildPayFollowResultsHtml(customerSummary, filteredInvoices = []) {
+        const totalAmount = (filteredInvoices || []).reduce((sum, inv) => sum + (parseFloat(inv.balance) || 0), 0);
+        const totalBills = (filteredInvoices || []).length;
         return `
                 <div class="row g-3 mb-4">
                     <div class="col-md-4">
                          <div class="card bg-dark border-info border-opacity-25 h-100 shadow-sm">
                             <div class="card-body">
-                                <h6 class="text-white-50 small mb-2 uppercase tracking-wider">TOTAL PENDING AMOUNT</h6>
-                                <h3 class="text-info fw-bold mb-0">₹ ${this.formatCurrency(customerSummary.reduce((sum, c) => sum + c.totalPending, 0))}</h3>
+                                <h6 class="text-white-50 small mb-2 uppercase tracking-wider">TOTAL AMOUNT</h6>
+                                <h3 class="text-info fw-bold mb-0">₹ ${this.formatCurrency(totalAmount)}</h3>
                             </div>
                          </div>
                     </div>
                     <div class="col-md-4">
                          <div class="card bg-dark border-warning border-opacity-25 h-100 shadow-sm">
                             <div class="card-body">
-                                <h6 class="text-white-50 small mb-2 uppercase tracking-wider">TOTAL PENDING BILLS</h6>
-                                <h3 class="text-warning fw-bold mb-0">${customerSummary.reduce((sum, c) => sum + c.billCount, 0)}</h3>
+                                <h6 class="text-white-50 small mb-2 uppercase tracking-wider">TOTAL BILLS</h6>
+                                <h3 class="text-warning fw-bold mb-0">${totalBills}</h3>
                             </div>
                          </div>
                     </div>
@@ -233,6 +250,47 @@ const PaymentsUI = {
         `;
     },
 
+    _buildPayFollowBillResultsHtml(invoices) {
+        const rows = Array.isArray(invoices) ? [...invoices] : [];
+        rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+        return `
+                <div class="card glass-panel border-secondary overflow-hidden shadow">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover mb-0 align-middle">
+                            <thead class="bg-dark text-white-50 small uppercase">
+                                <tr>
+                                    <th class="ps-4">Invoice No.</th>
+                                    <th>Date</th>
+                                    <th>Customer</th>
+                                    <th class="text-end">Bill Amount</th>
+                                    <th class="text-end">Balance</th>
+                                    <th class="text-end pe-4">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows.length === 0 ? `
+                                    <tr><td colspan="6" class="p-5 text-center text-muted">No invoices found matching filters.</td></tr>
+                                ` : rows.map(inv => `
+                                    <tr>
+                                        <td class="ps-4 fw-bold">${inv.invoiceNo || inv.id || '-'}</td>
+                                        <td>${this.formatDate(inv.date)}</td>
+                                        <td>${(inv.customerName || '-').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                        <td class="text-end text-white-50">₹ ${this.formatCurrency(inv.total)}</td>
+                                        <td class="text-end fw-bold text-info">₹ ${this.formatCurrency(inv.balance)}</td>
+                                        <td class="text-end pe-4">
+                                            <button class="btn btn-outline-info btn-sm" onclick="InvoicesUI.previewInvoice('${inv.id}')">
+                                                View
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+        `;
+    },
+
     /**
      * Customer Specific Details View
      * @param {string} encodedGroupKey Base64 encoded group key (name|id or just name)
@@ -245,13 +303,16 @@ const PaymentsUI = {
         // Match by groupKey (robust matching)
         let customerInvoices = this.dataCache.filter(inv => {
             const currentKey = (inv.customerId || 'ID') + '::' + (inv.customerName || 'NAME');
-            return currentKey === groupKey && inv.balance > 0.05;
+            return currentKey === groupKey;
         });
         
         if (customerInvoices.length === 0) {
             // Fallback for direct name match if key fails
-            customerInvoices = this.dataCache.filter(inv => (inv.customerName === groupKey || inv.customerId === groupKey) && inv.balance > 0.05);
+            customerInvoices = this.dataCache.filter(inv => (inv.customerName === groupKey || inv.customerId === groupKey));
         }
+
+        // Respect active filters for this customer drilldown (except customer text search itself).
+        customerInvoices = customerInvoices.filter(inv => this._matchesTypeFilter(inv) && this._matchesStatusFilter(inv) && this._matchesYearFilter(inv));
 
         if (customerInvoices.length === 0) {
             this.renderPaymentFollowup();
@@ -393,6 +454,14 @@ const PaymentsUI = {
         this.renderPaymentFollowup();
     },
 
+    setViewMode(mode) {
+        this.currentFilters.viewMode = mode;
+        if (mode === 'pending') {
+            this.currentFilters.status = 'pending';
+        }
+        this.renderPaymentFollowup();
+    },
+
     setStatusFilter(status) {
         this.currentFilters.status = status;
         this.renderPaymentFollowup();
@@ -413,44 +482,7 @@ const PaymentsUI = {
 
     applyFilters(invoices) {
         let filtered = [...invoices];
-
-        const isInvoiceGST = (inv) => {
-            if (!inv) return false;
-            // Prefer normalized InvoiceManager type logic when available.
-            if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isGSTType === 'function') {
-                const t = inv.type || inv.billType || (inv.hasGst === false ? 'without-bill' : 'with-bill');
-                return InvoiceManager.isGSTType(t);
-            }
-            const t = String(inv.type || inv.billType || '').toLowerCase();
-            if (t.includes('non-gst') || t === 'without-bill') return false;
-            if (t.includes('gst') || t === 'with-bill') return true;
-            if (inv.hasGst === true) return true;
-            if (inv.hasGst === false) return false;
-            const gstTotal = Number(inv.gstAmount || 0)
-                + Number(inv.cgstAmount || 0)
-                + Number(inv.sgstAmount || 0)
-                + Number(inv.igstAmount || 0)
-                + Number(inv?.gst?.cgst || 0)
-                + Number(inv?.gst?.sgst || 0)
-                + Number(inv?.gst?.igst || 0);
-            return gstTotal > 0.001;
-        };
-
-        // Type Filter
-        if (this.currentFilters.type === 'gst') {
-            filtered = filtered.filter(inv => isInvoiceGST(inv));
-        } else if (this.currentFilters.type === 'plain') {
-            filtered = filtered.filter(inv => !isInvoiceGST(inv));
-        }
-
-        // Status Filter
-        if (this.currentFilters.status === 'pending') {
-            filtered = filtered.filter(inv => !inv.isPaid && !inv.isPartial);
-        } else if (this.currentFilters.status === 'partial') {
-            filtered = filtered.filter(inv => inv.isPartial);
-        } else if (this.currentFilters.status === 'paid') {
-            filtered = filtered.filter(inv => inv.isPaid);
-        }
+        filtered = filtered.filter(inv => this._matchesTypeFilter(inv) && this._matchesStatusFilter(inv));
 
         // Customer Search - Filter the whole group if a match is found
         if (this.currentFilters.customer) {
@@ -459,14 +491,49 @@ const PaymentsUI = {
         }
 
         // Financial Year
-        if (this.currentFilters.financialYear) {
-            filtered = filtered.filter(inv => {
-                const fy = DataManager.getFinancialYear(inv.date);
-                return fy === this.currentFilters.financialYear;
-            });
-        }
+        filtered = filtered.filter(inv => this._matchesYearFilter(inv));
 
         return filtered;
+    },
+
+    _isInvoiceGST(inv) {
+        if (!inv) return false;
+        if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isGSTType === 'function') {
+            const t = inv.type || inv.billType || (inv.hasGst === false ? 'without-bill' : 'with-bill');
+            if (InvoiceManager.isGSTType(t)) return true;
+        }
+        if (inv.hasGst === true) return true;
+        if (inv.hasGst === false) return false;
+        const t = String(inv.type || inv.billType || '').toLowerCase();
+        if (t.includes('non-gst') || t === 'without-bill') return false;
+        if (t.includes('gst') || t === 'with-bill') return true;
+        const gstTotal = Number(inv.gstAmount || 0)
+            + Number(inv.cgstAmount || 0)
+            + Number(inv.sgstAmount || 0)
+            + Number(inv.igstAmount || 0)
+            + Number(inv?.gst?.cgst || 0)
+            + Number(inv?.gst?.sgst || 0)
+            + Number(inv?.gst?.igst || 0);
+        return gstTotal > 0.001;
+    },
+
+    _matchesTypeFilter(inv) {
+        if (this.currentFilters.type === 'gst') return this._isInvoiceGST(inv);
+        if (this.currentFilters.type === 'plain') return !this._isInvoiceGST(inv);
+        return true;
+    },
+
+    _matchesStatusFilter(inv) {
+        if (this.currentFilters.status === 'pending') return !inv.isPaid && !inv.isPartial;
+        if (this.currentFilters.status === 'partial') return !!inv.isPartial;
+        if (this.currentFilters.status === 'paid') return !!inv.isPaid;
+        return true;
+    },
+
+    _matchesYearFilter(inv) {
+        if (!this.currentFilters.financialYear) return true;
+        const fy = DataManager.getFinancialYear(inv.date);
+        return fy === this.currentFilters.financialYear;
     },
 
     getYearOptions() {
