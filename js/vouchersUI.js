@@ -713,6 +713,9 @@ const VouchersUI = {
     },
 
     showCreateModal(type = 'receipt') {
+        // Clear any stale backdrop before opening a fresh voucher modal
+        this.cleanupBackdrops();
+
         let customers = [];
         if (typeof CustomerManager !== 'undefined') {
             customers = CustomerManager.getAllCustomers();
@@ -732,6 +735,7 @@ const VouchersUI = {
             const inst = bootstrap.Modal.getInstance(existing);
             if (inst) inst.dispose();
             existing.remove();
+            this.cleanupBackdrops();
         }
 
         const modalHtml = `
@@ -889,8 +893,9 @@ const VouchersUI = {
         // Setup the custom dropdown logic
         this.setupPartyDropdown();
         
-        modalEl.addEventListener('hidden.bs.modal', function() {
-            this.remove(); // Self-destruct after hiding to clean up DOM
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            this.cleanupBackdrops();
+            modalEl.remove(); // Self-destruct after hiding to clean up DOM
         });
 
         modal.show();
@@ -1243,8 +1248,9 @@ const VouchersUI = {
         modal.show();
 
         // Ensure clicking close cleans up
-        modalEl.addEventListener('hidden.bs.modal', function() {
-            this.remove(); 
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            this.cleanupBackdrops();
+            modalEl.remove(); 
         });
 
         // Store transactions temporarily
@@ -1515,7 +1521,10 @@ const VouchersUI = {
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         const modalEl = document.getElementById('assignPartyModal');
-        modalEl.addEventListener('hidden.bs.modal', () => modalEl.remove());
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            this.cleanupBackdrops();
+            modalEl.remove();
+        });
         const modal = new bootstrap.Modal(modalEl);
         modal.show();
 
@@ -1927,7 +1936,10 @@ const VouchersUI = {
         renderResults(searchInput.value); // Initial load with pre-filled party
 
         modal.show();
-        modalEl.addEventListener('hidden.bs.modal', () => modalEl.remove());
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            this.cleanupBackdrops();
+            modalEl.remove();
+        });
     },
 
     async confirmAssignToVoucher(txIndex, voucherId, adjustment = null) {
@@ -2568,10 +2580,12 @@ const VouchersUI = {
 
             if (modalEl) {
                 modalEl.addEventListener('hidden.bs.modal', () => {
+                    this.cleanupBackdrops();
                     this.updateTable();
                 }, { once: true });
                 modal?.hide();
             } else {
+                this.cleanupBackdrops();
                 queueMicrotask(() => this.updateTable());
             }
 
