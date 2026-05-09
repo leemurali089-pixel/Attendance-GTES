@@ -1039,8 +1039,18 @@ const VoucherManager = {
 
             // 1. Check explicit allocations (register BOTH id and bill/invoice no — lookups use either)
             if (v.allocations && v.allocations.length > 0) {
+                const vTds = parseFloat(v.tdsAmount) || 0;
+                const vDisc = parseFloat(v.discountAmount) || 0;
+                const totalAllocAmt = v.allocations.reduce((s, a) => s + (parseFloat(a?.amount) || 0), 0);
+                const hasAnyAllocTds = v.allocations.some(a => (parseFloat(a?.tdsAmount) || 0) > 0);
+                const hasAnyAllocDisc = v.allocations.some(a => (parseFloat(a?.discountAmount) || 0) > 0);
+
                 v.allocations.forEach(a => {
-                    const amount = (parseFloat(a.amount) || 0) + (parseFloat(a.tdsAmount) || 0) + (parseFloat(a.discountAmount) || 0);
+                    const baseAmt = (parseFloat(a.amount) || 0);
+                    const ratio = totalAllocAmt > 0 ? (baseAmt / totalAllocAmt) : 0;
+                    const tdsAmt = (parseFloat(a.tdsAmount) || 0) + ((!hasAnyAllocTds && vTds > 0) ? (vTds * ratio) : 0);
+                    const discAmt = (parseFloat(a.discountAmount) || 0) + ((!hasAnyAllocDisc && vDisc > 0) ? (vDisc * ratio) : 0);
+                    const amount = baseAmt + tdsAmt + discAmt;
                     if (amount <= 0) return;
                     const keySet = new Set();
                     [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
