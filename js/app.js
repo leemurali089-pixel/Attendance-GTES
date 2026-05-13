@@ -1,6 +1,8 @@
 // Main Application Logic and Routing
 const App = {
     currentView: 'dashboard',
+    /** Last params passed to showView (for shell active states). */
+    currentViewParams: {},
     previousView: 'dashboard',
     viewHistory: ['dashboard'], // Track navigation history
     currentEmployee: null,
@@ -10,11 +12,150 @@ const App = {
     /** Fingerprint for Tasks-style live attendance polling (dashboard / attendance / filter views). */
     _attendanceLivePollFp: null,
     _attendanceLivePollTimer: null,
+    /** During sync/import, coalesce view refreshes until sync completes. */
+    _deferredDataRefreshKeys: null,
+    _deferredDataRefreshTimer: null,
+    /** First cold start: show staged % + elapsed on #globalLoader; suppress nested showView loaders. */
+    _bootSequenceActive: false,
+    _bootElapsedTimer: null,
+    _globalLoaderDismissWired: false,
+
+    _wireGlobalLoaderDismissOnce() {
+        if (this._globalLoaderDismissWired) return;
+        const btn = document.getElementById('globalLoaderDismissBtn');
+        if (!btn) return;
+        this._globalLoaderDismissWired = true;
+        btn.addEventListener('click', () => {
+            const err = document.getElementById('globalLoaderError');
+            if (err) err.classList.add('d-none');
+            btn.classList.add('d-none');
+            this.hideLoader(0);
+        });
+    },
+
+    _startBootElapsedTimer() {
+        if (!this._bootSequenceActive) return;
+        if (this._bootElapsedTimer) clearInterval(this._bootElapsedTimer);
+        const start = performance.now();
+        const tick = () => {
+            const el = document.getElementById('globalLoaderElapsed');
+            if (el) el.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s`;
+        };
+        tick();
+        this._bootElapsedTimer = setInterval(tick, 200);
+    },
+
+    _stopBootElapsedTimer() {
+        if (this._bootElapsedTimer) {
+            clearInterval(this._bootElapsedTimer);
+            this._bootElapsedTimer = null;
+        }
+    },
+
+    _setInitialBootProgress(pct, stageText) {
+        if (!this._bootSequenceActive) return;
+        const n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+        const pEl = document.getElementById('globalLoaderPct');
+        const bar = document.getElementById('globalLoaderProgressBar');
+        const st = document.getElementById('globalLoaderStage');
+        if (pEl) pEl.textContent = `${n}%`;
+        if (bar) bar.style.width = `${n}%`;
+        if (st) st.textContent = stageText || 'Loading…';
+    },
+
+    _applyDefaultDashboardFyEarly() {
+        try {
+            let fy = '';
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.defaultFyKey) {
+                fy = GTESFinancialYearUi.defaultFyKey() || '';
+            }
+            if (!fy && typeof DataManager !== 'undefined' && typeof DataManager.getFinancialYear === 'function') {
+                fy = DataManager.getFinancialYear(new Date()) || '';
+            }
+            if (!fy || typeof window === 'undefined') return;
+            const cur = String(window.__gtesDashFY || '').trim();
+            if (!cur) window.__gtesDashFY = fy;
+        } catch (_) { /* ignore */ }
+    },
+
+    _showInitialBootError(err) {
+        const msg = err && err.message ? String(err.message) : 'Startup failed.';
+        const loader = document.getElementById('globalLoader');
+        if (loader) loader.classList.add('gtes-boot-error');
+        const box = document.getElementById('globalLoaderError');
+        const btn = document.getElementById('globalLoaderDismissBtn');
+        if (box) {
+            box.textContent = msg;
+            box.classList.remove('d-none');
+        }
+        if (btn) btn.classList.remove('d-none');
+        this._setInitialBootProgress(100, 'Error');
+        this._wireGlobalLoaderDismissOnce();
+    },
+
+    _queueDeferredDataRefresh(key) {
+        if (!key) return;
+        if (!this._deferredDataRefreshKeys) this._deferredDataRefreshKeys = new Set();
+        this._deferredDataRefreshKeys.add(key);
+        if (this._deferredDataRefreshTimer) return;
+        this._deferredDataRefreshTimer = setTimeout(() => {
+            this.flushDeferredDataRefresh().catch(() => {});
+        }, 800);
+    },
+
+    async flushDeferredDataRefresh() {
+        try {
+            if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
+                if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
+            }
+        } catch (_) {
+            return;
+        }
+        if (this._deferredDataRefreshTimer) {
+            clearTimeout(this._deferredDataRefreshTimer);
+            this._deferredDataRefreshTimer = null;
+        }
+        const keys = this._deferredDataRefreshKeys ? Array.from(this._deferredDataRefreshKeys) : [];
+        if (!keys.length) return;
+
+        const SM = window.SyncManager;
+        if (SM && SM.status === 'syncing') {
+            // Still syncing; try again shortly.
+            this._deferredDataRefreshTimer = setTimeout(() => {
+                this.flushDeferredDataRefresh().catch(() => {});
+            }, 900);
+            return;
+        }
+
+        try { this._deferredDataRefreshKeys.clear(); } catch (_) { /* ignore */ }
+
+        // Dashboard refresh is expensive — do it once.
+        if (this.currentView === 'dashboard') {
+            try {
+                await this.loadDashboard();
+                this._refreshPremiumDashboardShell();
+            } catch (e) {
+                console.warn('[App] flushDeferredDataRefresh dashboard:', e && e.message);
+            }
+            return;
+        }
+
+        for (let i = 0; i < keys.length; i++) {
+            await this._refreshUIFromDataKey(keys[i]);
+            // Yield so long bursts don't block paints.
+            if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
+        }
+    },
 
     showLoader() {
         const loader = document.getElementById('globalLoader');
         if (loader) {
             loader.classList.remove('d-none');
+            if (this._bootSequenceActive) {
+                loader.classList.add('gtes-boot-loader-active');
+                this._wireGlobalLoaderDismissOnce();
+                this._startBootElapsedTimer();
+            }
         }
     },
 
@@ -23,8 +164,15 @@ const App = {
         if (loader) {
             setTimeout(() => {
                 loader.classList.add('d-none');
+                loader.classList.remove('gtes-boot-loader-active');
+                loader.classList.remove('gtes-boot-error');
+                const err = document.getElementById('globalLoaderError');
+                const btn = document.getElementById('globalLoaderDismissBtn');
+                if (err) err.classList.add('d-none');
+                if (btn) btn.classList.add('d-none');
             }, delay);
         }
+        this._stopBootElapsedTimer();
     },
 
     async init() {
@@ -41,7 +189,9 @@ const App = {
         const nav = document.querySelector('.navbar');
         if (nav) nav.style.display = 'none';
 
+        this._bootSequenceActive = true;
         this.showLoader();
+        this._setInitialBootProgress(8, 'Preparing…');
 
         const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.31';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
@@ -49,14 +199,21 @@ const App = {
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
 
         let loginScreenReady = false;
+        let bootFailed = false;
         // Wire UI first so login still works if cloud/prefetch throws later
         this.setupNavigation();
         this.setupEventListeners();
+        this._wireShellLogoutCapture();
         this.initTheme();
+        this._setInitialBootProgress(12, 'Interface ready…');
 
         try {
+            this._setInitialBootProgress(22, 'Reading storage…');
             await DataManager.init();
+            this._applyDefaultDashboardFyEarly();
+            this._setInitialBootProgress(48, 'Core data loaded…');
             const loggedIn = await this.checkLoginStatus();
+            this._setInitialBootProgress(66, 'Session checked…');
 
             if (!loggedIn) {
                 // Core data (users/settings) is already in cache. First-run has no user rows: must
@@ -64,6 +221,7 @@ const App = {
                 const rawUsers = DataManager.getData('gtes_users') || DataManager.getData(UserManager.STORAGE_KEY);
                 const hasUsers = Array.isArray(rawUsers) && rawUsers.length > 0;
                 if (hasUsers) {
+                    this._setInitialBootProgress(100, 'Ready');
                     this.hideLoader(0);
                     loginScreenReady = true;
                     void UserManager.init().then(() => {
@@ -71,29 +229,41 @@ const App = {
                     });
                     setTimeout(() => this._initDeferredModules(), 0);
                 } else {
+                    this._setInitialBootProgress(78, 'First-time setup…');
                     await UserManager.init();
                     await this.updateCompanyBranding();
+                    this._setInitialBootProgress(100, 'Ready');
                     this.hideLoader(0);
                     loginScreenReady = true;
                     setTimeout(() => this._initDeferredModules(), 0);
                 }
             } else {
+                this._setInitialBootProgress(74, 'User profile…');
                 await UserManager.init();
+                this._setInitialBootProgress(86, 'Branding…');
                 await this.updateCompanyBranding();
+                this._setInitialBootProgress(94, 'Background services…');
                 this._initDeferredModules();
+                this._setInitialBootProgress(100, 'Ready');
             }
         } catch (error) {
+            bootFailed = true;
             console.error('App initialization error:', error);
             try {
                 await UserManager.init();
             } catch (e2) {
                 console.error('UserManager.init fallback failed:', e2);
             }
-            alert('Application failed to initialize: ' + error.message);
+            this._showInitialBootError(error);
+            try {
+                alert('Application failed to initialize: ' + (error && error.message ? error.message : 'Unknown error'));
+            } catch (_) { /* ignore */ }
         } finally {
-            if (!loginScreenReady) {
+            if (!loginScreenReady && !bootFailed) {
                 this.hideLoader(300);
             }
+            this._bootSequenceActive = false;
+            this._stopBootElapsedTimer();
         }
     },
 
@@ -104,7 +274,16 @@ const App = {
         }
 
         window.addEventListener('load', () => setTimeout(() => this.updateMagicIndicator(), 100));
-        window.addEventListener('resize', () => this.updateMagicIndicator());
+        if (!this._magicIndicatorResizeBound) {
+            this._magicIndicatorResizeBound = true;
+            window.addEventListener('resize', () => {
+                if (this._magicIndicatorResizeRaf) return;
+                this._magicIndicatorResizeRaf = requestAnimationFrame(() => {
+                    this._magicIndicatorResizeRaf = 0;
+                    this.updateMagicIndicator();
+                });
+            });
+        }
 
         if (typeof AnalyticsUI !== 'undefined') {
             AnalyticsUI.init();
@@ -116,6 +295,32 @@ const App = {
             TasksUI.init();
         }
         this._ensureAttendanceLivePoll();
+
+        if (!document.documentElement.dataset.gtesBkVisBound) {
+            document.documentElement.dataset.gtesBkVisBound = '1';
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible') return;
+                if (window.BookKeeperSync && typeof BookKeeperSync.onAppForeground === 'function') {
+                    BookKeeperSync.onAppForeground();
+                }
+            });
+        }
+
+        // Large invoice/voucher loads finish after first paint — refresh BookKeeper KPIs once data is warm.
+        [120, 450, 1100].forEach((ms) => {
+            setTimeout(() => {
+                try {
+                    if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
+                        if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
+                    }
+                } catch (_) {
+                    return;
+                }
+                try {
+                    this._refreshPremiumDashboardShell();
+                } catch (_) { /* ignore */ }
+            }, ms);
+        });
     },
 
     /**
@@ -145,6 +350,13 @@ const App = {
             return `${list.length}:${latestTs}:${checksum}`;
         };
         this._attendanceLivePollTimer = setInterval(async () => {
+            try {
+                if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
+                    if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
+                }
+            } catch (_) {
+                return;
+            }
             const v = this.currentView;
             if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard') return;
             try {
@@ -158,7 +370,10 @@ const App = {
                 this._attendanceLivePollFp = next;
                 if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
                 else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
-                else if (v === 'dashboard') await this.loadDashboard();
+                else if (v === 'dashboard') {
+                    await this.loadDashboard();
+                    this._refreshPremiumDashboardShell();
+                }
             } catch (e) {
                 console.warn('[App] attendance live poll:', e && e.message);
             }
@@ -199,6 +414,12 @@ const App = {
             }
             if (key === K.SETTINGS && v === 'admin' && typeof AdminModule !== 'undefined') {
                 await AdminModule.load();
+                return;
+            }
+            if (key === K.SETTINGS && v === 'dashboard') {
+                await this.updateCompanyBranding();
+                await this.loadDashboard();
+                this._refreshPremiumDashboardShell();
                 return;
             }
             if (v === 'salary' && typeof SalaryModule !== 'undefined') {
@@ -261,6 +482,7 @@ const App = {
             }
             if (v === 'dashboard') {
                 await this.loadDashboard();
+                this._refreshPremiumDashboardShell();
             }
         } catch (e) {
             console.warn('[App] _refreshUIFromDataKey:', key, e && e.message);
@@ -432,15 +654,19 @@ const App = {
                 landingThemeToggle.checked = savedTheme === 'light';
             }
 
-            // Load landing view by default
-            this.showLandingPage();
+            // Load dashboard view by default (premium dashboard shell)
+            this._setInitialBootProgress(55, 'Opening dashboard…');
+            await this.showView('dashboard', {}, { suppressLoader: !!this._bootSequenceActive });
+            if (typeof window.__gtesSyncShellVisibility === 'function') {
+                window.__gtesSyncShellVisibility();
+            }
+            if (window.BookKeeperSync && typeof BookKeeperSync.onAppForeground === 'function') {
+                setTimeout(() => BookKeeperSync.onAppForeground(), 400);
+            }
             return true;
         }
 
-        if (loginOverlay) {
-            loginOverlay.classList.remove('hidden');
-            loginOverlay.style.display = 'flex'; // Restore display
-        }
+        this.presentLoginOverlay();
         if (userInfo) userInfo.classList.add('d-none');
         if (logoutBtn) logoutBtn.style.display = 'none';
 
@@ -448,12 +674,22 @@ const App = {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.style.display = 'none';
         });
-        // Ensure login overlay is visible
-        if (loginOverlay) {
-            loginOverlay.classList.remove('hidden');
-            loginOverlay.style.display = 'flex';
-        }
         return false;
+    },
+
+    presentLoginOverlay() {
+        const loginOverlay = document.getElementById('loginOverlay');
+        const loginUsername = document.getElementById('loginUsername');
+        const loginPassword = document.getElementById('loginPassword');
+        if (!loginOverlay) return;
+        loginOverlay.classList.remove('hidden');
+        loginOverlay.style.display = 'flex';
+        loginOverlay.style.opacity = '1';
+        loginOverlay.style.visibility = 'visible';
+        loginOverlay.style.zIndex = '20000';
+        loginOverlay.style.pointerEvents = 'auto';
+        if (loginUsername) loginUsername.disabled = false;
+        if (loginPassword) loginPassword.disabled = false;
     },
 
     initTheme() {
@@ -472,26 +708,37 @@ const App = {
             themeToggle.checked = savedTheme === 'light';
             themeToggle.addEventListener('change', () => this.toggleTheme());
         }
+        if (typeof window.__gtesSyncDashThemeRoll === 'function') {
+            window.__gtesSyncDashThemeRoll();
+        }
     },
 
     toggleTheme() {
         const currentTheme = document.documentElement.getAttribute('data-theme');
         const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        this._pendingTheme = newTheme;
+        if (this._themeToggleRaf) return;
+        this._themeToggleRaf = requestAnimationFrame(() => {
+            this._themeToggleRaf = 0;
+            const t = this._pendingTheme;
+            this._pendingTheme = null;
+            if (!t) return;
 
-        document.documentElement.setAttribute('data-theme', newTheme);
-        document.documentElement.setAttribute('data-bs-theme', newTheme);
-        localStorage.setItem('theme', newTheme);
+            document.documentElement.setAttribute('data-theme', t);
+            document.documentElement.setAttribute('data-bs-theme', t);
+            localStorage.setItem('theme', t);
 
-        // Sync Main Toggle
-        const themeToggle = document.getElementById('theme-toggle');
-        if (themeToggle) themeToggle.checked = newTheme === 'light';
+            const themeToggle = document.getElementById('theme-toggle');
+            if (themeToggle) themeToggle.checked = t === 'light';
 
-        // Sync Landing Toggle
-        const landingThemeToggle = document.getElementById('landing-theme-toggle');
-        if (landingThemeToggle) landingThemeToggle.checked = newTheme === 'light';
+            const landingThemeToggle = document.getElementById('landing-theme-toggle');
+            if (landingThemeToggle) landingThemeToggle.checked = t === 'light';
 
-        // Update magic indicator after theme change
-        setTimeout(() => this.updateMagicIndicator(), 50);
+            if (typeof window.__gtesSyncDashThemeRoll === 'function') {
+                window.__gtesSyncDashThemeRoll();
+            }
+            requestAnimationFrame(() => this.updateMagicIndicator());
+        });
     },
 
     setupNavigation() {
@@ -503,6 +750,72 @@ const App = {
                 this.showView(view);
             });
         });
+
+        // Premium shell sidebar (#gtesSidebar): same SPA routes as main nav (data-shell-view + optional JSON params).
+        const shellNav = (root) => root.querySelectorAll('#gtesSidebar [data-shell-view]');
+        const bindShell = (root = document) => {
+            shellNav(root).forEach((btn) => {
+                if (btn.dataset.gtesShellNavBound === '1') return;
+                btn.dataset.gtesShellNavBound = '1';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const view = btn.getAttribute('data-shell-view');
+                    if (!view) return;
+                    let params = {};
+                    const raw = btn.getAttribute('data-shell-params');
+                    if (raw) {
+                        try {
+                            params = JSON.parse(raw);
+                        } catch (_) { /* ignore malformed */ }
+                    }
+                    this.showView(view, params);
+                    document.body.classList.remove('shell-menu-open');
+                });
+            });
+        };
+        bindShell();
+
+        // Jump to Page: dropdown lives under #gtesJumpListMirror (dashboard toolbar).
+        // Delegate on document (capture) so jump rows use the same App.showView path.
+        if (document.documentElement.dataset.gtesJumpDocNavBound !== '1') {
+            document.documentElement.dataset.gtesJumpDocNavBound = '1';
+            document.addEventListener(
+                'click',
+                (e) => {
+                    const row = e.target && e.target.closest && e.target.closest('.gtes-shell-jump-row[data-gtes-jump-view]');
+                    if (!row) return;
+                    const inList = row.closest('#gtesJumpListMirror');
+                    if (!inList) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const view = row.getAttribute('data-gtes-jump-view');
+                    if (!view) return;
+                    let params = {};
+                    const raw = row.getAttribute('data-gtes-jump-params');
+                    if (raw) {
+                        try {
+                            params = JSON.parse(raw);
+                        } catch (_) {
+                            params = {};
+                        }
+                    }
+                    void this.showView(view, params);
+                    const list = document.getElementById('gtesJumpListMirror');
+                    if (list) {
+                        list.classList.remove('show');
+                        list.innerHTML = '';
+                    }
+                    const jm = document.getElementById('gtesJumpInputMirror');
+                    if (jm) jm.value = '';
+                    document.body.classList.remove('shell-menu-open');
+                    if (typeof window.__gtesSyncShellNavFromApp === 'function') {
+                        window.__gtesSyncShellNavFromApp();
+                    }
+                },
+                true
+            );
+        }
     },
 
     setupEventListeners() {
@@ -512,6 +825,9 @@ const App = {
             if (!d) return;
             const v = this.currentView;
             try {
+                const SM = window.SyncManager;
+                const isSyncing = !!(SM && SM.status === 'syncing');
+
                 if (d.key === 'gtes_attendance') {
                     if (v === 'attendance' && typeof AttendanceModule !== 'undefined') {
                         AttendanceModule.loadAttendanceForDate().catch((e) => console.warn('[App] attendance refresh:', e && e.message));
@@ -519,10 +835,28 @@ const App = {
                         FilterAttendanceModule.load().catch((e) => console.warn('[App] filter attendance refresh:', e && e.message));
                     } else if (v === 'dashboard') {
                         this.loadDashboard().catch((e) => console.warn('[App] dashboard refresh:', e && e.message));
+                        this._refreshPremiumDashboardShell();
                     }
                     if (v !== 'attendance' && v !== 'filterAttendance' && v !== 'dashboard' && typeof this.showNotification === 'function') {
                         this.showNotification('Attendance was updated elsewhere. Numbers refresh when you open Attendance or Dashboard.', 'info');
                     }
+                    return;
+                }
+                // During sync/import, defer heavy view reloads until sync completes.
+                if (isSyncing) {
+                    this._queueDeferredDataRefresh(d.key);
+                    return;
+                }
+                // Dashboard KPIs (BookKeeper / invoices / stock) must react to disk/local hydration too — not only firebase-listener.
+                const K = DataManager.KEYS;
+                const dashDataKeys = new Set([
+                    'invoices', 'vouchers', 'customers', 'purchases', 'challans', K.CHALLANS, 'inventory', 'inventoryTransactions',
+                    K.INVENTORY_ITEMS, K.SERVICES, K.WAREHOUSES, K.ACCOUNTS, 'gtes_expenses', K.EXPENSE_CATEGORIES,
+                    K.ESTIMATES, K.PURCHASE_ORDERS, K.RECURRING_INVOICES, K.RECYCLE_BIN,
+                    K.SETTINGS, K.EMPLOYEES, 'gtes_tasks', 'orders'
+                ]);
+                if (v === 'dashboard' && dashDataKeys.has(d.key)) {
+                    this._refreshUIFromDataKey(d.key).catch(() => {});
                     return;
                 }
                 if (d.source !== 'firebase-listener') return;
@@ -536,11 +870,19 @@ const App = {
             if (!key) return;
             try {
                 await DataManager.loadData(key, { forceRefresh: true });
+                const SM = window.SyncManager;
+                if (SM && SM.status === 'syncing' && key !== DataManager.KEYS.ATTENDANCE) {
+                    this._queueDeferredDataRefresh(key);
+                    return;
+                }
                 if (key === DataManager.KEYS.ATTENDANCE) {
                     const v = this.currentView;
                     if (v === 'attendance' && typeof AttendanceModule !== 'undefined') await AttendanceModule.loadAttendanceForDate();
                     else if (v === 'filterAttendance' && typeof FilterAttendanceModule !== 'undefined') await FilterAttendanceModule.load();
-                    else if (v === 'dashboard') await this.loadDashboard();
+                    else if (v === 'dashboard') {
+                        await this.loadDashboard();
+                        this._refreshPremiumDashboardShell();
+                    }
                     return;
                 }
                 await this._refreshUIFromDataKey(key);
@@ -689,8 +1031,11 @@ const App = {
                         // Update UI state immediately
                         await this.checkLoginStatus();
 
-                        // Redirect to Landing Page
-                        this.showLandingPage();
+                        // Redirect to dashboard by default
+                        this.showView('dashboard');
+                        if (typeof window.__gtesSyncShellVisibility === 'function') {
+                            window.__gtesSyncShellVisibility();
+                        }
 
                         this.showNotification(`Welcome back, ${user.fullName || user.username}!`, 'success');
                         // Clear form
@@ -726,13 +1071,25 @@ const App = {
             });
         }
 
-        // Logout button
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', () => this.logout());
-        }
-
         this._setupBackspaceBackShortcut();
+    },
+
+    /** All logout entry points (navbar + premium shell): capture phase so clicks always run. */
+    _wireShellLogoutCapture() {
+        if (this._shellLogoutCaptureBound) return;
+        this._shellLogoutCaptureBound = true;
+        document.addEventListener(
+            'click',
+            (e) => {
+                const t = e.target && e.target.closest && e.target.closest('#logoutBtn, #dashLogoutBtn, #gtesLogoutBtn, [data-gtes-logout]');
+                if (!t) return;
+                // `const App` does not set `window.App` in classic scripts — do not gate on window.App only.
+                if (typeof App !== 'undefined' && App && typeof App.logout === 'function') {
+                    void App.logout();
+                }
+            },
+            true
+        );
     },
 
     /**
@@ -780,42 +1137,18 @@ const App = {
 
     // Centralized Logout Logic
     async logout() {
-        await UserManager.logout();
-        const loginOverlay = document.getElementById('loginOverlay');
-        const loginUsername = document.getElementById('loginUsername');
-        const loginPassword = document.getElementById('loginPassword');
-
-        // Clear login form
-        if (loginUsername) loginUsername.value = '';
-        if (loginPassword) loginPassword.value = '';
-
-        // Show Landing Page (which will be hidden by login overlay)
-        this.showLandingPage();
-
-        if (loginOverlay) {
-            loginOverlay.classList.remove('hidden');
-            loginOverlay.style.display = 'flex';
-
-            // Force pointer events reset immediately
-            loginOverlay.style.pointerEvents = 'auto';
-
-            // Ensure inputs are enabled
-            if (loginUsername) loginUsername.disabled = false;
-            if (loginPassword) loginPassword.disabled = false;
+        if (this._logoutInProgress) return;
+        this._logoutInProgress = true;
+        try {
+            await this.forceLoginScreen();
+            try {
+                this.showNotification('Logged out successfully', 'success');
+            } catch (e) {
+                console.warn('[App] showNotification after logout:', e && e.message);
+            }
+        } finally {
+            this._logoutInProgress = false;
         }
-
-        // Hide all nav items
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.style.display = 'none';
-        });
-
-        const userInfo = document.getElementById('userInfo');
-        if (userInfo) userInfo.classList.add('d-none');
-
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) logoutBtn.style.display = 'none';
-
-        this.showNotification('Logged out successfully', 'success');
     },
 
     // NEW: Open a specific top-level module
@@ -846,7 +1179,9 @@ const App = {
         }
     },
 
-    showLandingPage() {
+    showLandingPage(options = {}) {
+        const retainLoginOverlay = options && options.retainLoginOverlay === true;
+
         this.currentView = 'landing';
         this.viewHistory = ['landing'];
         
@@ -867,28 +1202,97 @@ const App = {
             if (footer) footer.style.display = '';
         }
 
-        // Hide overlay
-        const loginOverlay = document.getElementById('loginOverlay');
-        if (loginOverlay) {
-            loginOverlay.classList.add('hidden');
-            loginOverlay.style.display = 'none';
+        if (!retainLoginOverlay) {
+            let hideLoginChrome = true;
+            try {
+                hideLoginChrome = !!(typeof UserManager !== 'undefined' && UserManager.SESSION_KEY
+                    && sessionStorage.getItem(UserManager.SESSION_KEY));
+            } catch (_) {
+                hideLoginChrome = true;
+            }
+            if (hideLoginChrome) {
+                const loginOverlay = document.getElementById('loginOverlay');
+                if (loginOverlay) {
+                    loginOverlay.classList.add('hidden');
+                    loginOverlay.style.display = 'none';
+                }
+            }
         }
 
         this.updateBackButton();
     },
 
-    async showView(viewName, params = {}) {
+    /**
+     * Single path: clear session, cancel deferred dashboard work, show landing + login, hide shell.
+     */
+    async forceLoginScreen(options = {}) {
+        const skipSessionClear = options && options.skipSessionClear === true;
+        if (!skipSessionClear) {
+            try {
+                await UserManager.logout();
+            } catch (e) {
+                console.warn('[App] UserManager.logout (forceLoginScreen):', e && e.message);
+            }
+        }
+        if (this._premiumDashRetrySeq) {
+            this._premiumDashRetrySeq += 1;
+        } else {
+            this._premiumDashRetrySeq = 1;
+        }
+        if (this._deferredDataRefreshTimer) {
+            clearTimeout(this._deferredDataRefreshTimer);
+            this._deferredDataRefreshTimer = null;
+        }
+        if (this._deferredDataRefreshKeys) {
+            try {
+                this._deferredDataRefreshKeys.clear();
+            } catch (_) { /* ignore */ }
+        }
+
+        const loginUsername = document.getElementById('loginUsername');
+        const loginPassword = document.getElementById('loginPassword');
+        if (loginUsername) loginUsername.value = '';
+        if (loginPassword) loginPassword.value = '';
+
+        this.showLandingPage({ retainLoginOverlay: true });
+        this.presentLoginOverlay();
+
+        try {
+            if (typeof window.__gtesSyncShellVisibility === 'function') {
+                window.__gtesSyncShellVisibility();
+            }
+        } catch (e) {
+            console.warn('[App] __gtesSyncShellVisibility (forceLoginScreen):', e && e.message);
+        }
+
+        try {
+            await this.checkLoginStatus();
+        } catch (e) {
+            console.warn('[App] checkLoginStatus (forceLoginScreen):', e && e.message);
+        }
+    },
+
+    async showView(viewName, params = {}, navOpts = {}) {
+        const suppressLoader = !!(navOpts && navOpts.suppressLoader);
         // Special case for landing
         if (viewName === 'landing') {
             this.showLandingPage();
             return;
         }
 
+        if (typeof UserManager !== 'undefined' && UserManager.isLoggedIn) {
+            const loggedIn = await UserManager.isLoggedIn();
+            if (!loggedIn) {
+                await this.forceLoginScreen();
+                return;
+            }
+        }
+
         // Hide landing view explicitly if it's open
         const landingView = document.getElementById('landingView');
         if (landingView) landingView.classList.add('d-none');
 
-        this.showLoader();
+        if (!suppressLoader) this.showLoader();
         try {
             // Permission Check - Must be at the top to prevent unauthorized access
             let hasPermission = false;
@@ -977,21 +1381,35 @@ const App = {
                 }
             }
             this.currentView = viewName;
+            this.currentViewParams = params && typeof params === 'object' ? { ...params } : {};
 
             // Hide all views
             document.querySelectorAll('.view-section').forEach(section => {
                 section.classList.add('d-none');
             });
 
+            // Delivery / challan hub uses #deliveryView for challans, job card, customers, inventory, services
+            const deliveryAppViews = new Set(['challans', 'jobcard', 'customers', 'inventory', 'services']);
+            const containerId = deliveryAppViews.has(viewName) ? 'deliveryView' : `${viewName}View`;
+
             // Show selected view
-            const targetView = document.getElementById(`${viewName}View`);
-            if (targetView) {
-                targetView.classList.remove('d-none');
-                // Ensure it's visible
-                targetView.style.display = '';
-            } else {
-                console.error(`View element not found: ${viewName}View`);
+            const targetView = document.getElementById(containerId);
+            if (!targetView) {
+                console.error(`View element not found: ${containerId}`);
+                if (this.viewHistory.length && this.viewHistory[this.viewHistory.length - 1] === viewName) {
+                    this.viewHistory.pop();
+                }
+                this.currentView = this.viewHistory[this.viewHistory.length - 1] || 'dashboard';
+                this.showNotification('This page could not be opened.', 'warning');
+                if (viewName !== 'dashboard') {
+                    await this.showView('dashboard');
+                } else {
+                    this.showLandingPage();
+                }
+                return;
             }
+            targetView.classList.remove('d-none');
+            targetView.style.display = '';
 
             // Update active nav (main navbar only — do not strip .active from Analytics sub-tabs, dropdowns, etc.)
             document.querySelectorAll('a.nav-link[data-view]').forEach(link => {
@@ -1006,12 +1424,20 @@ const App = {
             this.updateBackButton();
 
             // Load view-specific content
-            await this.loadViewContent(viewName, params);
+            try {
+                await this.loadViewContent(viewName, params);
+            } catch (err) {
+                console.error('[App] loadViewContent', viewName, err);
+                this.showNotification(
+                    'Could not finish loading this page. Try again or use Back.',
+                    'error'
+                );
+            }
 
             // Update magic indicator
             setTimeout(() => this.updateMagicIndicator(), 50);
         } finally {
-            this.hideLoader();
+            if (!suppressLoader) this.hideLoader();
         }
     },
 
@@ -1082,6 +1508,8 @@ const App = {
         switch (viewName) {
             case 'dashboard':
                 await this.loadDashboard();
+                this._refreshPremiumDashboardShell();
+                this._schedulePremiumDashboardShellRetry();
                 break;
             case 'employees':
                 await EmployeesModule.load();
@@ -1110,18 +1538,47 @@ const App = {
             case 'challans':
             case 'jobcard':
             case 'customers':
+            case 'inventory':
+            case 'services':
                 try {
                     await DeliveryUI.initManagersOnly();
                     const dView = document.getElementById('deliveryView');
-                    if (dView) {
-                        document.querySelectorAll('.view-section').forEach(el => el.classList.add('d-none'));
-                        dView.classList.remove('d-none');
-                        DeliveryUI.showLanding();
-                    } else {
-                        // Fallback if deliveryView is missing
+                    if (!dView) {
                         if (viewName === 'challans') DeliveryUI.loadHistory('challansView');
                         else if (viewName === 'jobcard') DeliveryUI.loadJobCards('jobcardView');
                         else DeliveryUI.loadCustomers('customersView');
+                        break;
+                    }
+                    document.querySelectorAll('.view-section').forEach((el) => el.classList.add('d-none'));
+                    dView.classList.remove('d-none');
+                    dView.style.display = '';
+
+                    const p = params && typeof params === 'object' ? params : {};
+                    const legacySection =
+                        viewName === 'jobcard'
+                            ? 'jobcard'
+                            : viewName === 'customers'
+                              ? 'customers'
+                              : viewName === 'inventory'
+                                ? 'inventory'
+                                : viewName === 'services'
+                                  ? 'services'
+                                  : null;
+                    const section = p.deliverySection || p.section || legacySection;
+                    const ct = p.challanType;
+
+                    if (ct === 'dc' && typeof DeliveryUI.viewChallanType === 'function') {
+                        DeliveryUI.viewChallanType('delivery');
+                    } else if (ct === 'sc' && typeof DeliveryUI.viewChallanType === 'function') {
+                        DeliveryUI.viewChallanType('service');
+                    } else if (section === 'create' || section === 'history' || section === 'jobcard' || section === 'customers' || section === 'inventory' || section === 'services' || section === 'invoices' || section === 'vouchers') {
+                        DeliveryUI.showSection(section);
+                    } else if (section === 'challanMenu' && typeof DeliveryUI.showChallanMenu === 'function') {
+                        DeliveryUI.showChallanMenu();
+                    } else if (!section && typeof DeliveryUI.showLanding === 'function') {
+                        DeliveryUI.showLanding();
+                    } else if (typeof DeliveryUI.showLanding === 'function') {
+                        DeliveryUI.showLanding();
                     }
                 } catch (error) {
                     const v = document.getElementById(viewName + 'View');
@@ -1162,6 +1619,12 @@ const App = {
                 break;
             case 'admin':
                 await AdminModule.load();
+                if (typeof AdminModule.activateTab === 'function' && params.adminTab) {
+                    AdminModule.activateTab(params.adminTab);
+                }
+                if (params.focus === 'backup' && typeof AdminModule.focusDataManagement === 'function') {
+                    setTimeout(() => AdminModule.focusDataManagement(), 200);
+                }
                 break;
             case 'mail':
                 if (window.MailUI) await MailUI.load();
@@ -1227,6 +1690,25 @@ const App = {
             const todayAbsence = employeesWithoutRecords + nonPresentCount;
             todayAbsenceEl.textContent = todayAbsence;
         }
+        const outOfStockEl = document.getElementById('dashOutOfStock');
+        if (outOfStockEl) {
+            if (window.DashboardQueries && typeof DashboardQueries.getStockAlertRows === 'function') {
+                outOfStockEl.textContent = DashboardQueries.getStockAlertRows(1).totalCount;
+            } else if (DataManager.getData) {
+                const tx = DataManager.getData('inventoryTransactions') || [];
+                const byMat = new Map();
+                tx.forEach((r) => {
+                    const mid = r.materialId || r.itemId;
+                    if (!mid) return;
+                    const q = Number(r?.closingStock ?? r?.quantity ?? 0);
+                    if (Number.isNaN(q)) return;
+                    const prev = byMat.get(mid);
+                    if (!prev || q < prev) byMat.set(mid, q);
+                });
+                outOfStockEl.textContent = [...byMat.values()].filter((q) => q <= 5).length;
+            }
+        }
+
         const totalAdvEl = document.getElementById('dashTotalAdvances');
         if (totalAdvEl) {
             const advances = await DataManager.getAdvances();
@@ -1234,8 +1716,128 @@ const App = {
         }
     },
 
+    /** Active All/GST/Plain scope for premium dashboard (toolbar pills). */
+    getDashboardShellScope() {
+        const a =
+            document.querySelector('.gtes-dash-toolbar .scope-pills .active[data-shell-scope]') ||
+            document.querySelector('[data-shell-scope].active');
+        const v = a && a.getAttribute('data-shell-scope');
+        return v === 'gst' || v === 'plain' ? v : 'all';
+    },
+
+    /** Full pending invoices / supplier dues / due tasks from live dashboard queries. */
+    async openDashboardKpiDetail(detailKey, opts = {}) {
+        const el = document.getElementById('gtesDashKpiModal');
+        if (!el || typeof bootstrap === 'undefined') return;
+        if (el.parentElement !== document.body) document.body.appendChild(el);
+        const titleEl = document.getElementById('gtesDashKpiModalLabel');
+        const bodyEl = document.getElementById('gtesDashKpiModalBody');
+        const footEl = document.getElementById('gtesDashKpiModalFooter');
+        const scope = this.getDashboardShellScope();
+        const groupBy = opts && opts.groupBy === 'party' ? 'party' : 'bill';
+        const rowLimit = 15000;
+        const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const fmt = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        let title = '';
+        let html = '';
+        let foot = '';
+
+        if (detailKey === 'pendingInvoices' && window.DashboardQueries) {
+            const rows =
+                groupBy === 'party'
+                    ? DashboardQueries.getPendingSalesPartyRows(scope, rowLimit)
+                    : DashboardQueries.getPendingSalesRows(scope, rowLimit);
+            const t = DashboardQueries.getPendingSalesTotals(scope);
+            title = `Pending sales invoices (${scope.toUpperCase()})`;
+            const th1 = groupBy === 'party' ? 'Party' : 'Invoice / Party';
+            const th3 = groupBy === 'party' ? 'Invoices' : 'Status';
+            const toggle = `<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Group pending sales">
+                    <button type="button" class="btn btn-outline-info${groupBy === 'bill' ? ' active' : ''}" onclick="App.openDashboardKpiDetail('pendingInvoices',{groupBy:'bill'})">Bill-wise</button>
+                    <button type="button" class="btn btn-outline-info${groupBy === 'party' ? ' active' : ''}" onclick="App.openDashboardKpiDetail('pendingInvoices',{groupBy:'party'})">Party-wise</button>
+                </div>
+                <span class="small text-muted ms-md-auto">Total: <strong>${fmt(t.totalBalance)}</strong> · <strong>${t.count}</strong> invoice(s)</span>
+            </div>`;
+            html = `${toggle}
+                <div class="table-responsive" style="max-height:55vh"><table class="table table-sm table-dark align-middle mb-0">
+                <thead><tr><th>${th1}</th><th class="text-end">Balance</th><th>${th3}</th></tr></thead><tbody>
+                ${rows.map((r) => `<tr><td>${esc(r.n)}</td><td class="text-end">${fmt(r.a)}</td><td><span class="badge bg-secondary">${esc(r.d)}</span></td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-muted">No rows</td></tr>'}
+                </tbody></table></div>`;
+            if (scope === 'all') {
+                foot = `<button type="button" class="btn btn-outline-light me-2" data-bs-dismiss="modal" onclick="App.showView('invoices',{mode:'gst'})">GST Invoices</button>
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="App.showView('invoices',{mode:'non-gst'})">Plain Invoices</button>`;
+            } else {
+                const mode = scope === 'plain' ? 'non-gst' : 'gst';
+                foot = `<button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="App.showView('invoices',{mode:'${mode}'})">Open Invoices</button>`;
+            }
+        } else if (detailKey === 'supplierDues' && window.DashboardQueries) {
+            const rows =
+                groupBy === 'party'
+                    ? DashboardQueries.getSupplierDuePartyRows(scope, rowLimit)
+                    : DashboardQueries.getSupplierDueRows(scope, rowLimit);
+            const t = DashboardQueries.getSupplierDueTotals(scope);
+            title = `Supplier / vendor payable (${scope.toUpperCase()})`;
+            const th1 = groupBy === 'party' ? 'Vendor' : 'Bill — Vendor';
+            const th3 = groupBy === 'party' ? 'Bills' : 'Note';
+            const toggle = `<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Group supplier dues">
+                    <button type="button" class="btn btn-outline-info${groupBy === 'bill' ? ' active' : ''}" onclick="App.openDashboardKpiDetail('supplierDues',{groupBy:'bill'})">Bill-wise</button>
+                    <button type="button" class="btn btn-outline-info${groupBy === 'party' ? ' active' : ''}" onclick="App.openDashboardKpiDetail('supplierDues',{groupBy:'party'})">Party-wise</button>
+                </div>
+                <span class="small text-muted ms-md-auto">Total: <strong>${fmt(t.totalBalance)}</strong> · <strong>${t.count}</strong> document(s)</span>
+            </div>`;
+            html = `${toggle}
+                <div class="table-responsive" style="max-height:55vh"><table class="table table-sm table-dark align-middle mb-0">
+                <thead><tr><th>${th1}</th><th class="text-end">Balance</th><th>${th3}</th></tr></thead><tbody>
+                ${rows.map((r) => `<tr><td>${esc(r.n)}</td><td class="text-end">${fmt(r.a)}</td><td class="small">${esc(r.d)}</td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-muted">No rows</td></tr>'}
+                </tbody></table></div>`;
+            foot = `<button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="App.showView('purchases')">Open Purchases</button>`;
+        } else if (detailKey === 'dueTasks') {
+            const taskKey = (DataManager.KEYS && DataManager.KEYS.TASKS) || 'gtes_tasks';
+            const tasks = (DataManager.getData(taskKey) || []).filter((t) => t.status !== 'completed');
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
+            const isDue = (t) => {
+                if (!t.followupDate) return false;
+                const due = new Date(t.followupDate + 'T' + (t.followupTime || '00:00'));
+                return due < now || t.followupDate === todayStr;
+            };
+            const open = tasks.filter(isDue).sort((a, b) => String(a.followupDate).localeCompare(String(b.followupDate)));
+            title = 'Due & today tasks';
+            html = `<p class="small text-muted mb-2"><strong>${open.length}</strong> open task(s) due today or overdue.</p>
+                <div class="table-responsive" style="max-height:55vh"><table class="table table-sm table-dark align-middle mb-0">
+                <thead><tr><th>Follow-up</th><th>Narration</th><th>Status</th></tr></thead><tbody>
+                ${open.map((t) => `<tr><td>${esc(t.followupDate || '—')}</td><td>${esc(String(t.narration || 'Task').slice(0, 120))}</td><td>${esc(t.status || '')}</td></tr>`).join('') || '<tr><td colspan="3" class="text-center text-muted">No matching tasks</td></tr>'}
+                </tbody></table></div>`;
+            foot = `<button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="App.showView('tasks')">Open Tasks</button>`;
+        } else if (detailKey === 'stockAlerts' && window.DashboardQueries) {
+            const stock = DashboardQueries.getStockAlertRows(8000);
+            title = 'Low & out-of-stock items';
+            html = `<p class="small text-muted mb-2"><strong>${stock.totalCount}</strong> line(s) with stock ≤ 5 units (includes zero and negative).</p>
+                <div class="table-responsive" style="max-height:55vh"><table class="table table-sm table-dark align-middle mb-0">
+                <thead><tr><th>Item</th><th>Qty / closing</th></tr></thead><tbody>
+                ${stock.rows.map((r) => `<tr><td>${esc(r.n)}</td><td class="text-end">${esc(String(r.a))}</td></tr>`).join('') || '<tr><td colspan="2" class="text-center text-muted">None</td></tr>'}
+                </tbody></table></div>`;
+            foot = `<button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="App.showView('inventory')">Open Inventory</button>`;
+        } else {
+            title = 'Details';
+            html = '<p class="text-muted">Live dashboard data is not available.</p>';
+        }
+
+        if (titleEl) titleEl.textContent = title;
+        if (bodyEl) bodyEl.innerHTML = html;
+        if (footEl) footEl.innerHTML = foot;
+        const inst = bootstrap.Modal.getOrCreateInstance(el, { backdrop: true, keyboard: true, focus: true });
+        inst.show();
+    },
+
     async showEmployeeDetailsModal(type) {
-        const modal = new bootstrap.Modal(document.getElementById('employeeDetailsModal'));
+        const el = document.getElementById('employeeDetailsModal');
+        if (!el || typeof bootstrap === 'undefined') return;
+        if (el.parentElement !== document.body) {
+            document.body.appendChild(el);
+        }
+        const modal = bootstrap.Modal.getOrCreateInstance(el, { backdrop: true, keyboard: true, focus: true });
         const modalTitle = document.getElementById('employeeDetailsModalLabel');
         const modalBody = document.getElementById('employeeDetailsModalBody');
 
@@ -1398,8 +2000,8 @@ const App = {
                 break;
         }
 
-        modalTitle.textContent = title;
-        modalBody.innerHTML = content;
+        if (modalTitle) modalTitle.textContent = title;
+        if (modalBody) modalBody.innerHTML = content;
         modal.show();
     },
     
@@ -1467,26 +2069,20 @@ const App = {
         return confirm(message);
     },
 
-    async logout() {
-        if (confirm('Are you sure you want to logout?')) {
-            await UserManager.logout();
-            const loginOverlay = document.getElementById('loginOverlay');
-            const logoutBtn = document.getElementById('logoutBtn');
-
-            if (loginOverlay) {
-                loginOverlay.classList.remove('hidden');
-                loginOverlay.style.display = 'flex';
-            }
-            document.getElementById('userInfo').classList.add('d-none');
-            if (logoutBtn) logoutBtn.style.display = 'none';
-            this.showNotification('Logged out successfully', 'success');
-        }
-    },
-
     async updateCompanyBranding() {
         try {
             const settings = await DataManager.getSettings();
             const companyName = settings.companyName || DataManager.COMPANY_PROFILE.name;
+            const registeredAddress = settings.registeredAddress || settings.address || DataManager.COMPANY_PROFILE.address;
+            const workAddress = settings.workAddress || settings.address2 || '';
+            const gstin = settings.gstin || DataManager.COMPANY_PROFILE.gstin || '';
+            const pan = settings.pan || DataManager.COMPANY_PROFILE.pan || '';
+            const iec = settings.iec || '';
+            const supportContact = settings.supportContact || 'leemurali089@gmail.com / +91 99529 70089';
+            const phones = settings.phones || settings.phone || '';
+            const emailList = String(settings.emails || settings.email || '').split(',').map((v) => v.trim()).filter(Boolean);
+            const primaryEmail = emailList[0] || 'gastechengservice@gmail.com';
+            const secondaryEmail = emailList[1] || primaryEmail;
 
             // Update Title
             document.title = `${companyName} - Attendance & Salary Management`;
@@ -1518,6 +2114,30 @@ const App = {
             // Update Footer
             const footerName = document.getElementById('footerCompanyName');
             if (footerName) footerName.textContent = companyName;
+            const footerRegisteredAddress = document.getElementById('footerRegisteredAddress');
+            if (footerRegisteredAddress) footerRegisteredAddress.textContent = registeredAddress || '—';
+            const footerWorkAddress = document.getElementById('footerWorkAddress');
+            if (footerWorkAddress) footerWorkAddress.textContent = workAddress || '—';
+            const footerGstin = document.getElementById('footerGstin');
+            if (footerGstin) footerGstin.textContent = gstin || '—';
+            const footerPan = document.getElementById('footerPan');
+            if (footerPan) footerPan.textContent = pan || '—';
+            const footerIec = document.getElementById('footerIec');
+            if (footerIec) footerIec.textContent = iec || '—';
+            const footerPhones = document.getElementById('footerPhones');
+            if (footerPhones) footerPhones.textContent = phones || '—';
+            const footerEmailPrimary = document.getElementById('footerEmailPrimary');
+            if (footerEmailPrimary) {
+                footerEmailPrimary.textContent = primaryEmail;
+                footerEmailPrimary.setAttribute('href', `mailto:${primaryEmail}`);
+            }
+            const footerEmailSecondary = document.getElementById('footerEmailSecondary');
+            if (footerEmailSecondary) {
+                footerEmailSecondary.textContent = secondaryEmail;
+                footerEmailSecondary.setAttribute('href', `mailto:${secondaryEmail}`);
+            }
+            const footerSupportContact = document.getElementById('footerSupportContact');
+            if (footerSupportContact) footerSupportContact.textContent = `Support: ${supportContact}`;
 
             // Update Copyright
             const copyrightName = document.getElementById('copyrightCompanyName');
@@ -1526,11 +2146,74 @@ const App = {
             const copyrightYear = document.getElementById('copyrightYear');
             if (copyrightYear) copyrightYear.textContent = new Date().getFullYear();
 
+            // Premium shell dashboard footer (#dashboardView)
+            const setDash = (id, text) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = text != null && text !== '' ? text : '—';
+            };
+            const tagline =
+                settings.tagline ||
+                settings.companyTagline ||
+                'Excellence in Engineering & Service Solutions.';
+            const phoneStr = Array.isArray(settings.phones)
+                ? settings.phones.filter(Boolean).join(', ')
+                : (settings.phones || settings.phone || DataManager.COMPANY_PROFILE.phones.join(', ') || '—');
+            setDash('dashFCompanyName', companyName);
+            setDash('dashFTagline', tagline);
+            setDash('dashFRegisteredAddress', registeredAddress ? `Registered: ${registeredAddress}` : '—');
+            setDash('dashFWorksAddress', workAddress ? `Works: ${workAddress}` : '—');
+            setDash('dashFEmail', primaryEmail);
+            setDash('dashFAltEmail', secondaryEmail);
+            setDash('dashFPhone', phoneStr);
+            setDash('dashFGstin', gstin || '—');
+            setDash('dashFIec', iec || '—');
+            setDash('dashFPan', pan || '—');
+            setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
+            setDash('dashFVersionLine', `Version 1.3.31 | Developed by Murali D | Support: ${supportContact}`);
+
+            const shellCo = document.getElementById('shellBrandCompanyName');
+            if (shellCo) shellCo.textContent = companyName;
+            const shellTag = document.getElementById('shellBrandTagline');
+            if (shellTag) shellTag.textContent = tagline;
         } catch (error) {
             console.error('Error updating company branding:', error);
         }
+    },
+
+    /** Refreshes premium dashboard KPIs/chart (dashboardShell + DashboardQueries). */
+    _refreshPremiumDashboardShell() {
+        try {
+            if (typeof window.__gtesRefreshPremiumDashboard === 'function') {
+                window.__gtesRefreshPremiumDashboard();
+            }
+        } catch (e) {
+            console.warn('[App] premium dashboard refresh:', e && e.message);
+        }
+    },
+
+    /**
+     * After a cold load, invoices/vouchers may hydrate a few hundred ms after the first KPI paint.
+     * Re-run the premium dashboard refresh a few times while the user stays on Dashboard.
+     */
+    _schedulePremiumDashboardShellRetry() {
+        if (this._premiumDashRetrySeq) {
+            this._premiumDashRetrySeq += 1;
+        } else {
+            this._premiumDashRetrySeq = 1;
+        }
+        const seq = this._premiumDashRetrySeq;
+        [80, 160, 320, 600, 1200, 2200, 4500, 9000].forEach((ms) => {
+            setTimeout(() => {
+                if (this.currentView !== 'dashboard') return;
+                if (this._premiumDashRetrySeq !== seq) return;
+                this._refreshPremiumDashboardShell();
+            }, ms);
+        });
     }
 };
+
+/** Classic script: top-level `const App` is not `window.App` — shell/Electron helpers rely on this. */
+window.App = App;
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

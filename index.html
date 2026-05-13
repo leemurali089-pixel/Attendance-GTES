@@ -10,6 +10,7 @@
 
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
@@ -20,9 +21,10 @@
     <link rel="apple-touch-icon" href="icon.png">
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="css/style.css?v=1.7">
+    <link rel="stylesheet" href="css/style.css?v=2.5">
     <link rel="stylesheet" href="css/login.css">
     <link rel="stylesheet" href="css/landing.css">
+    <link rel="stylesheet" href="css/dashboard-shell.css?v=2.4">
 
 
     <!-- Google Fonts -->
@@ -251,19 +253,17 @@
                             </li>
                             <li>
                                 <a class="dropdown-item text-info" href="#"
-                                    onclick="event.preventDefault(); if(confirm('Wait! This will initialize MJS PrimeLogic with the official BookKeeper seed dataset. Continue?')){ SeedData.seedSystem().then(() => { App.showNotification('System Seeded!', 'success'); setTimeout(() => location.reload(), 1500); }); }">
-                                    <i class="bi bi-rocket-takeoff me-2"></i>Seed System
+                                    onclick="event.preventDefault(); SyncManager.resetData();">
+                                    <i class="bi bi-arrow-clockwise me-2"></i>Reset Data
                                 </a>
                             </li>
                         </ul>
                     </li>
-                </ul>
-                </li>
-                <li class="nav-item">
-                    <button class="btn btn-outline-light btn-sm" id="logoutBtn" style="display: none;">
-                        <i class="bi bi-box-arrow-right"></i> Logout
-                    </button>
-                </li>
+                    <li class="nav-item">
+                        <button type="button" class="btn btn-outline-light btn-sm" id="logoutBtn" style="display: none;">
+                            <i class="bi bi-box-arrow-right"></i> Logout
+                        </button>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -271,103 +271,249 @@
     <input type="file" id="navImportFile" accept=".json,.csv,.xml" class="d-none">
     <input type="file" id="bkImportFile" accept=".db,.sqlite" class="d-none">
 
+    <div id="gtesAppShell" class="gtes-app-shell d-none">
+        <header class="gtes-shell-topbar">
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" id="gtesMenuLaunchBtn" class="gtes-shell-btn"><i class="bi bi-list"></i></button>
+                <div class="gtes-shell-brand">
+                    <div class="gtes-shell-brand-title"><span id="shellBrandCompanyName">MJS PrimeLogic</span></div>
+                    <div class="gtes-shell-brand-sub"><span id="shellBrandTagline">Attendance &amp; operations</span></div>
+                </div>
+            </div>
+            <div class="gtes-shell-utilities">
+                <button type="button" id="dashSyncBtn" class="gtes-shell-btn success"><i class="bi bi-arrow-repeat me-1"></i>Sync Status</button>
+                <button type="button" id="dashThemeBtn" class="gtes-theme-roll-btn" title="Toggle theme" aria-label="Toggle light and dark theme">
+                    <span class="gtes-theme-roll-track">
+                        <span class="gtes-theme-roll-thumb" id="dashThemeRollThumb"><i class="bi bi-moon-stars-fill"></i></span>
+                        <span class="gtes-theme-roll-label">Dark</span>
+                        <span class="gtes-theme-roll-label">Light</span>
+                    </span>
+                </button>
+                <button type="button" id="dashRefreshBtn" class="gtes-shell-btn"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+                <div class="gtes-shell-dd" id="dashCloudDd">
+                    <button type="button" class="gtes-shell-btn"><i class="bi bi-cloud-sync me-1"></i>Cloud Sync <i class="bi bi-caret-down-fill ms-1 small"></i></button>
+                    <div class="gtes-shell-dd-menu">
+                        <button type="button" id="dashCloudImport"><i class="bi bi-cloud-arrow-down-fill me-2 text-info"></i>Import from Cloud</button>
+                        <button type="button" id="dashCloudExport"><i class="bi bi-cloud-arrow-up-fill me-2 text-warning"></i>Export to Cloud</button>
+                    </div>
+                </div>
+                <div class="gtes-shell-dd" id="dashBackupDd">
+                    <button type="button" class="gtes-shell-btn"><i class="bi bi-hdd-network me-1"></i>Backup <i class="bi bi-caret-down-fill ms-1 small"></i></button>
+                    <div class="gtes-shell-dd-menu">
+                        <button type="button" id="dashBackupImport"><i class="bi bi-upload me-2"></i>Import</button>
+                        <button type="button" id="dashBackupExport"><i class="bi bi-download me-2"></i>Export</button>
+                        <button type="button" id="dashResetData" class="danger"><i class="bi bi-arrow-clockwise me-2"></i>Reset Data</button>
+                    </div>
+                </div>
+                <button type="button" id="dashLogoutBtn" class="gtes-shell-btn" title="Sign out" data-gtes-logout="1"><i class="bi bi-box-arrow-right me-1"></i>Logout</button>
+            </div>
+        </header>
+
+        <aside id="gtesSidebar" class="gtes-shell-sidebar">
+            <nav class="gtes-shell-nav">
+                <div class="gtes-side-brand">
+                    <div class="gtes-side-brand-icon"><i class="bi bi-grid-3x3-gap-fill"></i></div>
+                    <div><h6 class="mb-0">MJS PrimeLogic</h6><small>Refresh shell concept</small></div>
+                </div>
+                <details class="gtes-side-group" open data-nav-group="hr-daily">
+                    <summary><span><i class="bi bi-people-fill me-2"></i>HR & Daily Ops</span><i class="bi bi-chevron-down"></i></summary>
+                    <div class="gtes-side-links">
+                        <button type="button" class="gtes-shell-link active" data-shell-view="dashboard" data-shell-active-key="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="employees" data-shell-active-key="employees"><i class="bi bi-people"></i> Employees</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="attendance" data-shell-active-key="attendance"><i class="bi bi-calendar-check"></i> Attendance</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="filterAttendance" data-shell-active-key="filterAttendance"><i class="bi bi-funnel"></i> Filter Attendance</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="holidays" data-shell-active-key="holidays"><i class="bi bi-calendar-event"></i> Holidays</button>
+                    </div>
+                </details>
+                <details class="gtes-side-group" data-nav-group="payroll">
+                    <summary><span><i class="bi bi-wallet2 me-2"></i>Payroll & Dues</span><i class="bi bi-chevron-down"></i></summary>
+                    <div class="gtes-side-links">
+                        <button type="button" class="gtes-shell-link" data-shell-view="salary" data-shell-active-key="salary"><i class="bi bi-cash-stack"></i> Salary</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="advances" data-shell-active-key="advances"><i class="bi bi-wallet2"></i> Advances</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="bonus" data-shell-active-key="bonus"><i class="bi bi-gift"></i> Bonus</button>
+                    </div>
+                </details>
+                <details class="gtes-side-group" data-nav-group="accounting">
+                    <summary><span><i class="bi bi-bank me-2"></i>Accounting</span><i class="bi bi-chevron-down"></i></summary>
+                    <div class="gtes-side-links">
+                        <details class="gtes-side-group gtes-side-nested">
+                            <summary><span><i class="bi bi-file-earmark-text me-2"></i>Invoices</span><i class="bi bi-chevron-down"></i></summary>
+                            <div class="gtes-side-links gtes-side-nested-links">
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="invoices" data-shell-params='{"mode":"gst"}' data-shell-active-key="invoices:gst"><i class="bi bi-receipt-cutoff"></i> GST Invoices</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="invoices" data-shell-params='{"mode":"non-gst"}' data-shell-active-key="invoices:non-gst"><i class="bi bi-file-earmark"></i> Plain Invoices</button>
+                            </div>
+                        </details>
+                        <details class="gtes-side-group gtes-side-nested">
+                            <summary><span><i class="bi bi-journal-richtext me-2"></i>Vouchers</span><i class="bi bi-chevron-down"></i></summary>
+                            <div class="gtes-side-links gtes-side-nested-links">
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="vouchers" data-shell-params='{"mode":"gst"}' data-shell-active-key="vouchers:gst"><i class="bi bi-journal-text"></i> GST Voucher</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="vouchers" data-shell-params='{"mode":"non-gst"}' data-shell-active-key="vouchers:non-gst"><i class="bi bi-journal"></i> Plain Voucher</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="vouchers" data-shell-params='{"mode":"purchase"}' data-shell-active-key="vouchers:purchase"><i class="bi bi-cart-check"></i> Purchase Voucher</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="vouchers" data-shell-params='{"mode":"credit-note"}' data-shell-active-key="vouchers:credit-note"><i class="bi bi-arrow-return-left"></i> Credit Note / Sales Return</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="vouchers" data-shell-params='{"mode":"debit-note"}' data-shell-active-key="vouchers:debit-note"><i class="bi bi-arrow-return-right"></i> Debit Note / Purchase Return</button>
+                            </div>
+                        </details>
+                        <button type="button" class="gtes-shell-link" data-shell-view="purchases" data-shell-active-key="purchases"><i class="bi bi-cart"></i> Purchases</button>
+                        <details class="gtes-side-group gtes-side-nested">
+                            <summary><span><i class="bi bi-truck me-2"></i>Challans</span><i class="bi bi-chevron-down"></i></summary>
+                            <div class="gtes-side-links gtes-side-nested-links">
+                                <details class="gtes-side-group gtes-side-nested gtes-side-nested-deep">
+                                    <summary><span><i class="bi bi-file-earmark-plus me-2"></i>Challan</span><i class="bi bi-chevron-down"></i></summary>
+                                    <div class="gtes-side-links gtes-side-nested-links">
+                                        <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="challans" data-shell-params='{"deliverySection":"create"}' data-shell-active-key="challans:create"><i class="bi bi-plus-circle"></i> Create Challan</button>
+                                        <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="challans" data-shell-params='{"challanType":"dc"}' data-shell-active-key="challans:dc"><i class="bi bi-box-arrow-right"></i> View DC</button>
+                                        <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="challans" data-shell-params='{"challanType":"sc"}' data-shell-active-key="challans:sc"><i class="bi bi-box-arrow-in-right"></i> View SC</button>
+                                    </div>
+                                </details>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="jobcard" data-shell-active-key="challans:jobcard"><i class="bi bi-card-heading"></i> Job Card</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="challans" data-shell-params='{"deliverySection":"history"}' data-shell-active-key="challans:history"><i class="bi bi-clock-history"></i> History</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="customers" data-shell-active-key="challans:customers"><i class="bi bi-building"></i> Customers</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="inventory" data-shell-active-key="challans:inventory"><i class="bi bi-box-seam"></i> Inventory</button>
+                                <button type="button" class="gtes-shell-link gtes-shell-sublink" data-shell-view="services" data-shell-active-key="challans:services"><i class="bi bi-tools"></i> Services</button>
+                            </div>
+                        </details>
+                    </div>
+                </details>
+                <details class="gtes-side-group" data-nav-group="workflows">
+                    <summary><span><i class="bi bi-diagram-3 me-2"></i>Workflows</span><i class="bi bi-chevron-down"></i></summary>
+                    <div class="gtes-side-links">
+                        <button type="button" class="gtes-shell-link" data-shell-view="mail" data-shell-active-key="mail"><i class="bi bi-envelope"></i> Mail</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="poQueue" data-shell-active-key="poQueue"><i class="bi bi-receipt"></i> PO Queue</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="bankMail" data-shell-active-key="bankMail"><i class="bi bi-bank2"></i> Bank Mail</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="tasks" data-shell-active-key="tasks"><i class="bi bi-check-square"></i> Tasks</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="payments" data-shell-active-key="payments"><i class="bi bi-cash-coin"></i> Payments</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="analytics" data-shell-active-key="analytics"><i class="bi bi-graph-up"></i> Analytics</button>
+                    </div>
+                </details>
+                <details class="gtes-side-group" data-nav-group="admin">
+                    <summary><span><i class="bi bi-gear me-2"></i>Admin</span><i class="bi bi-chevron-down"></i></summary>
+                    <div class="gtes-side-links">
+                        <button type="button" class="gtes-shell-link" data-shell-view="admin" data-shell-params='{"adminTab":"settings"}' data-shell-active-key="admin:settings"><i class="bi bi-sliders"></i> Settings</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="admin" data-shell-params='{"adminTab":"users"}' data-shell-active-key="admin:users"><i class="bi bi-person-badge"></i> Users &amp; Roles</button>
+                        <button type="button" class="gtes-shell-link" data-shell-view="admin" data-shell-params='{"adminTab":"settings","focus":"backup"}' data-shell-active-key="admin:backup"><i class="bi bi-cloud-arrow-down"></i> Backup &amp; Sync</button>
+                    </div>
+                </details>
+            </nav>
+        </aside>
+    </div>
+
     <!-- Main Content -->
     <!-- Main Content -->
-    <div class="container-fluid main-content-container">
+    <div id="mainContentContainer" class="container-fluid main-content-container">
         <!-- Dashboard View -->
-        <div id="dashboardView" class="view-section">
-            <div class="col-12 text-center mb-4">
-                <h1 class="display-4 fw-bold">Welcome Back</h1>
-                <p class="lead text-muted">MJS PrimeLogic - Management Portal</p>
-            </div>
+        <div id="dashboardView" class="view-section gtes-dashboard-view">
+            <section class="gtes-dash-glass gtes-dash-toolbar">
+                <div>
+                    <h3>Dashboard Controls</h3>
+                    <div class="small-muted">Only the 3 options + Jump to Page.</div>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap ms-auto">
+                    <div class="btn-group scope-pills">
+                        <button type="button" class="btn btn-sm btn-outline-info active" data-shell-scope="all">All</button>
+                        <button type="button" class="btn btn-sm btn-outline-info" data-shell-scope="gst">GST</button>
+                        <button type="button" class="btn btn-sm btn-outline-info" data-shell-scope="plain">Plain</button>
+                    </div>
+                    <select id="gtesDashFySelect" class="form-select form-select-sm" style="width:auto; min-width:120px;" aria-label="Financial year"></select>
+                    <div class="gtes-shell-jump-wrap">
+                        <input type="text" id="gtesJumpInputMirror" class="form-control form-control-sm" placeholder="Jump to Page" autocomplete="off">
+                        <div id="gtesJumpListMirror" class="gtes-shell-jump-list"></div>
+                    </div>
+                </div>
+            </section>
 
-            <!-- Stats Row -->
-            <div class="row g-4 mb-5">
+            <section class="row g-3 mb-3 gtes-hr-kpi-row">
                 <div class="col-md-4">
-                    <div id="statCardActive" class="card h-100 stat-card clickable-card"
-                        onclick="App.showEmployeeDetailsModal('active')">
-                        <div class="card-body text-center">
-                            <div class="stat-icon mb-3">
-                                <i class="bi bi-people-fill"></i>
-                            </div>
-                            <h2 id="dashActiveEmployees">0</h2>
-                            <p>Active Employees</p>
-                        </div>
+                    <div class="gtes-hr-kpi-card" onclick="App.showEmployeeDetailsModal('active')" role="button" tabindex="0">
+                        <div class="gtes-hr-kpi-icon"><i class="bi bi-people-fill"></i></div>
+                        <div class="gtes-hr-kpi-value" id="dashActiveEmployees">0</div>
+                        <div class="gtes-hr-kpi-label">Active Employees</div>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div id="statCardPresent" class="card h-100 stat-card clickable-card"
-                        onclick="App.showEmployeeDetailsModal('present')">
-                        <div class="card-body text-center">
-                            <div class="stat-icon mb-3 text-success">
-                                <i class="bi bi-check-circle-fill"></i>
-                            </div>
-                            <h2 id="dashTodayAttendance">0</h2>
-                            <p>Today's Present</p>
-                        </div>
+                    <div class="gtes-hr-kpi-card" onclick="App.showEmployeeDetailsModal('present')" role="button" tabindex="0">
+                        <div class="gtes-hr-kpi-icon text-success"><i class="bi bi-check-circle-fill"></i></div>
+                        <div class="gtes-hr-kpi-value" id="dashTodayAttendance">0</div>
+                        <div class="gtes-hr-kpi-label">Today's Present</div>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div id="statCardAbsent" class="card h-100 stat-card clickable-card"
-                        onclick="App.showEmployeeDetailsModal('absence')">
-                        <div class="card-body text-center">
-                            <div class="stat-icon mb-3 text-danger">
-                                <i class="bi bi-x-circle-fill"></i>
-                            </div>
-                            <h2 id="dashTodayAbsence">0</h2>
-                            <p>Today's Absence</p>
-                        </div>
+                    <div class="gtes-hr-kpi-card" onclick="App.showEmployeeDetailsModal('absence')" role="button" tabindex="0">
+                        <div class="gtes-hr-kpi-icon text-danger"><i class="bi bi-x-circle-fill"></i></div>
+                        <div class="gtes-hr-kpi-value" id="dashTodayAbsence">0</div>
+                        <div class="gtes-hr-kpi-label">Today's Absence</div>
                     </div>
                 </div>
+            </section>
 
-            </div>
+            <section class="row g-3 mb-3">
+                <div class="col-md-6 col-xl-3"><div class="gtes-kpi-card" data-detail="pendingInvoices"><div class="kpi-label">Pending Invoices</div><div class="kpi-value" id="kpiPending">-</div><div class="kpi-meta" id="kpiPendingMeta">Click for details</div></div></div>
+                <div class="col-md-6 col-xl-3"><div class="gtes-kpi-card" data-detail="supplierDues"><div class="kpi-label">Supplier / Vendor Due</div><div class="kpi-value text-warning" id="kpiSupplier">-</div><div class="kpi-meta">Click for breakdown</div></div></div>
+                <div class="col-md-6 col-xl-3"><div class="gtes-kpi-card" data-detail="dueTasks"><div class="kpi-label">Due Tasks</div><div class="kpi-value text-danger" id="kpiTasks">-</div><div class="kpi-meta">Click for details</div></div></div>
+                <div class="col-md-6 col-xl-3"><div class="gtes-kpi-card" data-detail="stockAlerts"><div class="kpi-label">Out of Stock</div><div class="kpi-value text-danger" id="kpiStock">-</div><div class="kpi-meta">Critical alerts</div></div></div>
+            </section>
 
-            <!-- Quick Actions -->
-            <h4 class="mb-4 text-white fw-bold px-2">Quick Actions</h4>
-            <div class="row g-4 mb-5">
-                <div class="col-md-2 col-6">
-                    <a href="#" onclick="event.preventDefault(); App.showView('attendance')" class="quick-action-btn">
-                        <i class="bi bi-calendar-check"></i>
-                        <span>Mark Attendance</span>
-                    </a>
+            <section class="gtes-dash-glass gtes-dash-detail mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                    <h4 class="mb-0" id="detailTitle">Pending invoice details</h4>
+                    <span class="small-muted">Switch by clicking KPI cards</span>
                 </div>
-                <div class="col-md-2 col-6">
-                    <a href="#" onclick="event.preventDefault(); App.showView('filterAttendance')"
-                        class="quick-action-btn">
-                        <i class="bi bi-funnel"></i>
-                        <span>Filter Attendance</span>
-                    </a>
+                <div id="gtesDashDetailStrip" class="mb-2"></div>
+                <div id="gtesDashDetailList" class="gtes-dash-list"></div>
+            </section>
+
+            <section class="row g-3 mb-3">
+                <div class="col-xl-8">
+                    <div class="gtes-dash-glass gtes-chart-wrap">
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                            <h4 class="mb-0 gtes-pl-heading">Compact P&L / Revenue / Expense</h4>
+                            <span class="gtes-pl-meta" id="chartScope">Scope: ALL</span>
+                        </div>
+                        <div class="gtes-pl-chart-host">
+                            <canvas id="gtesPlChart" aria-label="Monthly income and expense chart"></canvas>
+                        </div>
+                        <div id="gtesPlMonthTable" class="mt-2"></div>
+                    </div>
                 </div>
-                <div class="col-md-2 col-6">
-                    <a href="#" onclick="event.preventDefault(); App.showView('employees')" class="quick-action-btn">
-                        <i class="bi bi-people"></i>
-                        <span>Manage Employees</span>
-                    </a>
+                <div class="col-xl-4">
+                    <div class="gtes-dash-glass gtes-dash-detail h-100">
+                        <h4 class="mb-2"><i class="bi bi-bell-fill text-danger me-1"></i>Stock Alerts</h4>
+                        <div class="small-muted mb-2">Quick warning list.</div>
+                        <div id="stockQuick" class="gtes-dash-list"></div>
+                    </div>
                 </div>
-                <div class="col-md-2 col-6">
-                    <a href="#" onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('salary'))"
-                        class="quick-action-btn">
-                        <i class="bi bi-calculator"></i>
-                        <span>Calculate Salary</span>
-                    </a>
-                </div>
-                <div class="col-md-2 col-6">
-                    <a href="#"
-                        onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('advances'))"
-                        class="quick-action-btn">
-                        <i class="bi bi-cash-coin"></i>
-                        <span>Manage Advances</span>
-                    </a>
-                </div>
-                <div class="col-md-2 col-6">
-                    <a href="#" onclick="event.preventDefault(); AuthManager.requireAuth(() => App.showView('admin'))"
-                        class="quick-action-btn">
-                        <i class="bi bi-gear"></i>
-                        <span>Admin Panel</span>
-                    </a>
-                </div>
-            </div>
+            </section>
+
         </div>
+
+        <footer id="gtesShellCompanyFooter" class="gtes-dash-glass gtes-dash-footer gtes-shell-company-footer" aria-label="Company and legal">
+            <div class="gtes-footer-top">
+                <div class="gtes-footer-card gtes-footer-card-3d">
+                    <h6 id="dashFCompanyName">Gas Tech Engineering Service</h6>
+                    <p id="dashFTagline">Excellence in Engineering & Service Solutions.</p>
+                    <p id="dashFRegisteredAddress">Registered: No.233/233, Nageshwar Rao Road, Athipet, Chennai - 600058</p>
+                    <p id="dashFWorksAddress">Works: 23/4/A, 1st Street, Nageshwar Rao Road, Athipet, Chennai - 600058</p>
+                </div>
+                <div class="gtes-footer-card gtes-footer-card-3d">
+                    <h6>Contact Us</h6>
+                    <p id="dashFEmail">gastechengservice@gmail.com</p>
+                    <p id="dashFAltEmail">rajmohan67raj@gmail.com</p>
+                    <p id="dashFPhone">+91 96000 19838, +91 95682 02896</p>
+                </div>
+                <div class="gtes-footer-card gtes-footer-card-3d">
+                    <h6>Legal Information</h6>
+                    <p><strong>GSTIN</strong></p>
+                    <p id="dashFGstin">33AFKPR2353A3ZF</p>
+                    <p><strong>IEC</strong></p>
+                    <p id="dashFIec">AFKPR2353A</p>
+                    <p><strong>PAN</strong></p>
+                    <p id="dashFPan">AFKPR2353A</p>
+                </div>
+            </div>
+            <div class="gtes-footer-bottom">
+                <span id="dashFCopyright">© 2026 Gas Tech Engineering Service. All rights reserved.</span>
+                <span id="dashFVersionLine">Version 1.3.31 | Developed by Murali D | Support: leemurali001@gmail.com / +91 99529 70089</span>
+            </div>
+        </footer>
 
         <!-- Employees View -->
         <div id="employeesView" class="view-section d-none"></div>
@@ -402,10 +548,27 @@
 
         <!-- LANDING PAGE VIEW -->
         <div id="landingView" class="view-section d-none">
+            <aside id="landingQuickSidebar" class="landing-quick-sidebar">
+                <div class="landing-quick-head">
+                    <span class="fw-semibold"><i class="bi bi-stars me-1"></i>Quick Controls</span>
+                </div>
+                <div class="btn-group w-100 mb-2" role="group" aria-label="Scope">
+                    <button type="button" class="btn btn-sm btn-outline-info active" data-landing-scope="all">All</button>
+                    <button type="button" class="btn btn-sm btn-outline-info" data-landing-scope="gst">GST</button>
+                    <button type="button" class="btn btn-sm btn-outline-info" data-landing-scope="plain">Plain</button>
+                </div>
+                <div class="landing-jump-wrap">
+                    <input type="text" id="landingJumpInput" class="form-control form-control-sm" placeholder="Jump to page">
+                    <div id="landingJumpList" class="landing-jump-list"></div>
+                </div>
+            </aside>
             <!-- Custom Landing Header -->
             <div class="landing-top-bar container-fluid d-flex justify-content-between align-items-center mb-5"
                 style="position: absolute; top: 0; left: 0; width: 100%; padding: 1.5rem 2rem; z-index: 10;">
                 <div class="d-flex align-items-center text-white">
+                    <button type="button" id="landingMenuLaunchBtn" class="btn btn-outline-info btn-sm rounded-pill px-2 py-1 me-2">
+                        <i class="bi bi-list"></i>
+                    </button>
                     <i class="bi bi-building fs-3 me-2 text-primary"></i>
                     <h5 class="mb-0 fw-bold" id="landingCompanyName">MJS PrimeLogic</h5>
                 </div>
@@ -464,6 +627,12 @@
                             <li><a class="dropdown-item text-white" href="#"
                                     onclick="event.preventDefault(); document.getElementById('navImportFile').click();"><i
                                         class="bi bi-upload me-2"></i>Import</a></li>
+                            <li>
+                                <hr class="dropdown-divider border-secondary opacity-25">
+                            </li>
+                            <li><a class="dropdown-item text-danger" href="#"
+                                    onclick="event.preventDefault(); SyncManager.resetData();"><i
+                                        class="bi bi-arrow-clockwise me-2"></i>Reset Data</a></li>
                         </ul>
                     </div>
 
@@ -471,7 +640,7 @@
                         <i class="bi bi-person-circle me-1"></i>
                         <span id="landingUserName">User</span>
                     </div>
-                    <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="App.logout()">
+                    <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="event.preventDefault(); void App.logout();">
                         <i class="bi bi-power me-1"></i> Logout
                     </button>
                 </div>
@@ -1338,11 +1507,11 @@
                         <div class="footer-address small text-muted">
                             <p class="mb-1"><i class="fas fa-map-marker-alt me-2 text-primary"></i>
                                 <strong>Registered:</strong><br>
-                                No.232/233, Nageshwara Road, Athipet, Chennai – 600058
+                                <span id="footerRegisteredAddress">No.232/233, Nageshwara Road, Athipet, Chennai – 600058</span>
                             </p>
                             <p class="mb-0 mt-2"><i class="fas fa-building me-2 text-primary"></i>
                                 <strong>Work:</strong><br>
-                                236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai – 600058
+                                <span id="footerWorkAddress">236/1A, 1st Street, Nageshwara Rao Road, Athipet, Chennai – 600058</span>
                             </p>
                         </div>
                     </div>
@@ -1356,16 +1525,16 @@
                             <li class="mb-2">
                                 <i class="fas fa-envelope me-2 text-primary"></i>
                                 <a href="mailto:gastechengservice@gmail.com"
-                                    class="text-decoration-none text-muted">gastechengservice@gmail.com</a>
+                                    class="text-decoration-none text-muted" id="footerEmailPrimary">gastechengservice@gmail.com</a>
                             </li>
                             <li class="mb-2">
                                 <i class="fas fa-envelope me-2 text-primary"></i>
                                 <a href="mailto:rajmohan67raj@gmail.com"
-                                    class="text-decoration-none text-muted">rajmohan67raj@gmail.com</a>
+                                    class="text-decoration-none text-muted" id="footerEmailSecondary">rajmohan67raj@gmail.com</a>
                             </li>
                             <li class="mb-2">
                                 <i class="fas fa-phone me-2 text-primary"></i>
-                                <span class="text-muted">+91 96000 19839, +91 95662 02896</span>
+                                <span class="text-muted" id="footerPhones">+91 96000 19839, +91 95662 02896</span>
                             </li>
                         </ul>
                     </div>
@@ -1378,15 +1547,15 @@
                         <div class="row small text-muted">
                             <div class="col-6 mb-2">
                                 <strong class="d-block text-primary">GSTIN</strong>
-                                <span>33AFXPR3235A3ZF</span>
+                                <span id="footerGstin">33AFXPR3235A3ZF</span>
                             </div>
                             <div class="col-6 mb-2">
                                 <strong class="d-block text-primary">PAN</strong>
-                                <span>AFXPR3235A</span>
+                                <span id="footerPan">AFXPR3235A</span>
                             </div>
                             <div class="col-6 mb-2">
                                 <strong class="d-block text-primary">IEC</strong>
-                                <span>AFXPR3235A</span>
+                                <span id="footerIec">AFXPR3235A</span>
                             </div>
                         </div>
                     </div>
@@ -1402,7 +1571,7 @@
                 <div class="text-center text-md-end">
                     <span class="d-block d-md-inline me-md-3" id="footerAppVersion">Version …</span>
                     <span class="d-block d-md-inline me-md-3">Developed by Murali D</span>
-                    <span class="d-block d-md-inline">Support: leemurali089@gmail.com / +91 99529 70089</span>
+                    <span class="d-block d-md-inline" id="footerSupportContact">Support: leemurali001@gmail.com / +91 99529 70089</span>
                 </div>
             </div>
         </div>
@@ -1557,6 +1726,19 @@
         </div>
     </div>
 
+    <div class="modal fade" id="gtesDashKpiModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="gtesDashKpiModalLabel">Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="gtesDashKpiModalBody"></div>
+                <div class="modal-footer border-secondary" id="gtesDashKpiModalFooter"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5 JS -->
     <!-- Global Loader -->
     <div id="globalLoader" class="global-loader d-none">
@@ -1565,7 +1747,20 @@
             <div class="loader-logo">
                 <i class="bi bi-building"></i>
             </div>
-            <div class="loader-text">Loading...</div>
+            <div class="loader-text">Loading</div>
+            <div class="gtes-boot-progress mt-3 w-100">
+                <div class="d-flex justify-content-between align-items-center mb-1 small">
+                    <span id="globalLoaderStage" class="text-secondary">Preparing</span>
+                    <span class="text-secondary"><span id="globalLoaderElapsed">0.0s</span> <span id="globalLoaderPct" class="fw-bold text-body">0%</span></span>
+                </div>
+                <div class="progress" style="height: 6px;">
+                    <div id="globalLoaderProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width: 0%;" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div id="globalLoaderError" class="alert alert-danger small mt-3 mb-0 d-none text-start" role="alert"></div>
+                <div class="text-center mt-2">
+                    <button type="button" id="globalLoaderDismissBtn" class="btn btn-sm btn-outline-secondary d-none">Dismiss</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1695,15 +1890,16 @@
     <script src="js/fileStorage.js?v=2.3"></script>
 
     <!-- Application Scripts -->
-    <script src="js/data.js?v=2.4"></script>
+    <script src="js/data.js?v=2.8"></script>
+    <script src="js/integration/financialYearUi.js?v=1.1"></script>
     <script src="js/updateChecker.js?v=2.1"></script>
     <script src="js/userManager.js?v=1.2"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/appUpdater.js?v=1.0"></script>
 
     <!-- Book Keeper Integration (Load before SyncManager) -->
-    <script src="js/bookKeeperSync.js?v=1.8"></script>
-    <script src="js/syncManager.js?v=2.0"></script>
+    <script src="js/bookKeeperSync.js?v=2.1"></script>
+    <script src="js/syncManager.js?v=2.7"></script>
     
     <!-- Hidden input for web file import fallback -->
     <input type="file" id="bkImportFile" accept=".db,.sqlite,.sqlite3" style="display: none;">
@@ -1713,7 +1909,7 @@
     <script src="js/holidays.js?v=1.1"></script>
     <script src="js/attendance.js?v=1.3"></script>
     <script src="js/filterAttendance.js?v=1.2"></script>
-    <script src="js/advances.js?v=1.2"></script>
+    <script src="js/advances.js?v=1.3"></script>
     <script src="js/bonus.js?v=1.2"></script>
     <script src="js/emailService.js?v=1.1"></script>
     <script src="js/salary.js?v=1.3"></script>
@@ -1722,15 +1918,15 @@
     <script src="js/inventory.js?v=1.2"></script>
     <script src="js/delivery.js?v=1.1"></script>
     <script src="js/jobcard.js?v=1.1"></script>
-    <script src="js/invoices.js?v=1.4"></script>
+    <script src="js/invoices.js?v=1.5"></script>
     <script src="js/vouchers.js?v=1.7"></script>
-    <script src="js/vouchersUI.js?v=2.5"></script>
-    <script src="js/paymentsUI.js?v=1.8"></script>
+    <script src="js/vouchersUI.js?v=3.0"></script>
+    <script src="js/paymentsUI.js?v=1.9"></script>
     <script src="js/whatsappService.js?v=1.1"></script>
     <script src="js/tasksUI.js?v=1.5"></script>
     <script src="js/businessAnalytics.js?v=1.8"></script>
-    <script src="js/invoicesUI.js?v=3.0"></script>
-    <script src="js/deliveryUI.js?v=2.0"></script>
+    <script src="js/invoicesUI.js?v=3.5"></script>
+    <script src="js/deliveryUI.js?v=2.1"></script>
     <script src="js/accountingUI.js?v=1.2"></script>
     <script src="js/admin.js?v=1.6"></script>
     <script src="js/mailUI.js?v=1.6"></script>
@@ -1740,14 +1936,17 @@
     <script src="js/analyticsUI.js?v=1.9"></script>
     <script src="js/bankImportHelper.js?v=1.1"></script>
     <script src="js/exportImportHelper.js?v=1.1"></script>
-    <script src="js/bookKeeperImport.js?v=3.9"></script>
+    <script src="js/bookKeeperImport.js?v=4.2"></script>
     <script src="js/seedData.js?v=1.1"></script>
-    <script src="js/app.js?v=3.0"></script>
+    <script src="js/integration/dashboardQueries.js?v=1.5"></script>
+    <script src="js/integration/dashboardAdapter.js?v=1.0"></script>
+    <script src="js/dashboardShell.js?v=3.6"></script>
+    <script src="js/app.js?v=5.1"></script>
 
     <!-- Employee Details Modal -->
     <div class="modal fade" id="employeeDetailsModal" tabindex="-1" aria-labelledby="employeeDetailsModalLabel"
         aria-hidden="true">
-        <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="employeeDetailsModalLabel">Details</h5>
