@@ -269,6 +269,19 @@ body:not(.shell-layout-enabled) .gtes-shell-sidebar {
   background: linear-gradient(145deg, rgba(34, 211, 238, 0.28), rgba(139, 92, 246, 0.36));
 }
 
+.gtes-side-jump {
+  margin-bottom: 0.55rem;
+}
+
+.gtes-side-jump .form-control-sm {
+  font-size: 0.8rem;
+}
+
+#gtesJumpListSidebar {
+  left: 0;
+  right: 0;
+}
+
 .gtes-side-group {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -964,7 +977,8 @@ html[data-theme="light"] body.shell-layout-enabled .gtes-shell-link:hover {
   background: #e0f2fe;
 }
 
-body.shell-layout-enabled #gtesJumpInputMirror {
+body.shell-layout-enabled #gtesJumpInputMirror,
+body.shell-layout-enabled #gtesJumpInputSidebar {
   background: var(--surface-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-strong);

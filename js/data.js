@@ -497,6 +497,30 @@ const DataManager = {
         } catch (_) { /* ignore */ }
     },
 
+    /** loadData does not emit gtes:data-changed; refresh premium KPIs when sales data hydrates in the background. */
+    _notifyPremiumDashAfterFinancialHydrate(storageKey) {
+        const sk = typeof storageKey === 'string' ? storageKey : this.resolveStorageKey(storageKey);
+        if (sk !== 'invoices' && sk !== 'vouchers') return;
+        try {
+            const App = typeof window !== 'undefined' && window.App;
+            if (!App || App.currentView !== 'dashboard') return;
+        } catch (_) {
+            return;
+        }
+        try {
+            if (this._premiumDashHydrateT) clearTimeout(this._premiumDashHydrateT);
+        } catch (_) { /* ignore */ }
+        this._premiumDashHydrateT = setTimeout(() => {
+            this._premiumDashHydrateT = null;
+            try {
+                const App = typeof window !== 'undefined' && window.App;
+                if (!App || App.currentView !== 'dashboard') return;
+                App._refreshPremiumDashboardShell();
+                if (typeof App.loadDashboard === 'function') void App.loadDashboard();
+            } catch (_) { /* ignore */ }
+        }, 100);
+    },
+
     invalidateDataCache(key) {
         if (key === undefined || key === null) {
             this._cache = {};
@@ -884,6 +908,7 @@ const DataManager = {
             if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
 
             await this._mirrorToLocalOrIDB(storageKey, data);
+            this._notifyPremiumDashAfterFinancialHydrate(storageKey);
         }
         return data;
     },

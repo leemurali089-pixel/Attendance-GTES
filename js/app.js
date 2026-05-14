@@ -248,7 +248,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.35';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.36';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -712,6 +712,15 @@ const App = {
                 landingThemeToggle.checked = savedTheme === 'light';
             }
 
+            // Pending-invoice KPIs need invoices + vouchers in cache; prefetch alone does not emit data-changed.
+            this._setInitialBootProgress(50, 'Loading sales data…');
+            try {
+                await Promise.all([
+                    DataManager.loadData('invoices').catch((e) => console.warn('[App] boot invoices:', e && e.message)),
+                    DataManager.loadData('vouchers').catch((e) => console.warn('[App] boot vouchers:', e && e.message)),
+                ]);
+            } catch (_) { /* ignore */ }
+
             // Load dashboard view by default (premium dashboard shell)
             this._setInitialBootProgress(55, 'Opening dashboard…');
             await this.showView('dashboard', {}, { suppressLoader: !!this._bootSequenceActive });
@@ -834,7 +843,7 @@ const App = {
         };
         bindShell();
 
-        // Jump to Page: dropdown lives under #gtesJumpListMirror (dashboard toolbar).
+        // Jump to Page: dropdown under #gtesJumpListMirror (dashboard) and #gtesJumpListSidebar (sidebar).
         // Delegate on document (capture) so jump rows use the same App.showView path.
         if (document.documentElement.dataset.gtesJumpDocNavBound !== '1') {
             document.documentElement.dataset.gtesJumpDocNavBound = '1';
@@ -843,7 +852,7 @@ const App = {
                 (e) => {
                     const row = e.target && e.target.closest && e.target.closest('.gtes-shell-jump-row[data-gtes-jump-view]');
                     if (!row) return;
-                    const inList = row.closest('#gtesJumpListMirror');
+                    const inList = row.closest('#gtesJumpListMirror') || row.closest('#gtesJumpListSidebar');
                     if (!inList) return;
                     e.preventDefault();
                     e.stopPropagation();
@@ -859,13 +868,17 @@ const App = {
                         }
                     }
                     void this.showView(view, params);
-                    const list = document.getElementById('gtesJumpListMirror');
-                    if (list) {
-                        list.classList.remove('show');
-                        list.innerHTML = '';
-                    }
-                    const jm = document.getElementById('gtesJumpInputMirror');
-                    if (jm) jm.value = '';
+                    ['gtesJumpListMirror', 'gtesJumpListSidebar'].forEach((id) => {
+                        const list = document.getElementById(id);
+                        if (list) {
+                            list.classList.remove('show');
+                            list.innerHTML = '';
+                        }
+                    });
+                    ['gtesJumpInputMirror', 'gtesJumpInputSidebar'].forEach((id) => {
+                        const jm = document.getElementById(id);
+                        if (jm) jm.value = '';
+                    });
                     document.body.classList.remove('shell-menu-open');
                     if (typeof window.__gtesSyncShellNavFromApp === 'function') {
                         window.__gtesSyncShellNavFromApp();
@@ -1568,6 +1581,12 @@ const App = {
     async loadViewContent(viewName, params) {
         switch (viewName) {
             case 'dashboard':
+                try {
+                    await Promise.all([
+                        DataManager.loadData('invoices').catch(() => {}),
+                        DataManager.loadData('vouchers').catch(() => {}),
+                    ]);
+                } catch (_) { /* ignore */ }
                 await this.loadDashboard();
                 this._refreshPremiumDashboardShell();
                 this._schedulePremiumDashboardShellRetry();
@@ -2230,7 +2249,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.35';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.36';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');
@@ -2264,7 +2283,7 @@ const App = {
             this._premiumDashRetrySeq = 1;
         }
         const seq = this._premiumDashRetrySeq;
-        [80, 160, 320, 600, 1200, 2200, 4500, 9000].forEach((ms) => {
+        [80, 160, 320, 600, 1200, 2200, 4500, 9000, 15000, 25000, 45000, 90000, 120000].forEach((ms) => {
             setTimeout(() => {
                 if (this.currentView !== 'dashboard') return;
                 if (this._premiumDashRetrySeq !== seq) return;
