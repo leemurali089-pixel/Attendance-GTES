@@ -4,6 +4,11 @@
  * Integrated with Synced Data (Customers, Inventory)
  */
 const InvoicesUI = {
+    _salesListVisibleLimit: 150,
+    _salesSkipLimitReset: false,
+    _purchaseListVisibleLimit: 150,
+    _purchaseSkipLimitReset: false,
+
     /** `businessAnalytics.js` assigns `window.BusinessAnalytics`; use that so ledger works regardless of script tag order. */
     _ba() {
         if (typeof window !== 'undefined' && window.BusinessAnalytics) return window.BusinessAnalytics;
@@ -422,6 +427,146 @@ const InvoicesUI = {
     /** Sales list: filter by whether receipt vouchers allocate to this bill (explains bill vs ledger gaps). */
     currentVoucherLinkFilter: 'all',
     searchTimeout: null,
+    _salesTableRaf: null,
+    _purchaseTableRaf: null,
+    salesSortKey: 'invoiceNo',
+    salesSortDir: 'asc',
+    purchaseSortKey: 'billNo',
+    purchaseSortDir: 'asc',
+
+    _tailNumberFromDocNo(s) {
+        const raw = String(s || '').trim();
+        const m = raw.match(/(\d{1,12})\s*$/);
+        if (m) return parseInt(m[1], 10) || 0;
+        const d = raw.replace(/\D/g, '');
+        return d ? parseInt(d.slice(-12), 10) || 0 : 0;
+    },
+
+    _statusSortVal(inv) {
+        if (inv.isPaid) return 2;
+        if (inv.isPartial) return 1;
+        return 0;
+    },
+
+    _purchaseStatusSortVal(p) {
+        if (p.isDebitNote) return 3;
+        if (p.isPaid) return 2;
+        if (p.isPartial) return 1;
+        return 0;
+    },
+
+    setSalesSort(key) {
+        if (this.salesSortKey === key) {
+            this.salesSortDir = this.salesSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.salesSortKey = key;
+            this.salesSortDir = 'asc';
+        }
+        this.updateTable();
+    },
+
+    setPurchasesSort(key) {
+        if (this.purchaseSortKey === key) {
+            this.purchaseSortDir = this.purchaseSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.purchaseSortKey = key;
+            this.purchaseSortDir = 'asc';
+        }
+        this.updatePurchasesTable();
+    },
+
+    _salesTh(key, label, extraClass = '') {
+        const active = this.salesSortKey === key;
+        const mark = active ? (this.salesSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+        const ec = extraClass ? ` ${extraClass.trim()}` : '';
+        return `<th role="button" tabindex="0" class="gtes-sortable-th user-select-none${ec}" style="cursor:pointer" title="Sort column" onclick="InvoicesUI.setSalesSort('${key}')">${label}${mark}</th>`;
+    },
+
+    _purchaseTh(key, label, extraClass = '') {
+        const active = this.purchaseSortKey === key;
+        const mark = active ? (this.purchaseSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+        const ec = extraClass ? ` ${extraClass.trim()}` : '';
+        return `<th role="button" tabindex="0" class="gtes-sortable-th user-select-none${ec}" style="cursor:pointer" title="Sort column" onclick="InvoicesUI.setPurchasesSort('${key}')">${label}${mark}</th>`;
+    },
+
+    _applySalesSort(forTable, getLedgerDueForInv, canLedger) {
+        const key = this.salesSortKey || 'invoiceNo';
+        const dir = this.salesSortDir === 'desc' ? -1 : 1;
+        const num = (x) => parseFloat(x) || 0;
+        const invKey = (inv) => this._tailNumberFromDocNo(inv.invoiceNo || inv.id);
+        forTable.sort((a, b) => {
+            let cmp = 0;
+            switch (key) {
+                case 'date':
+                    cmp = (new Date(a.date).getTime() || 0) - (new Date(b.date).getTime() || 0);
+                    break;
+                case 'invoiceNo':
+                    cmp = invKey(a) - invKey(b);
+                    if (cmp === 0) {
+                        cmp = String(a.invoiceNo || a.id || '').localeCompare(String(b.invoiceNo || b.id || ''), undefined, { numeric: true, sensitivity: 'base' });
+                    }
+                    break;
+                case 'customer':
+                    cmp = String(a.customerName || '').localeCompare(String(b.customerName || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'total':
+                    cmp = num(a.total ?? a.amount) - num(b.total ?? b.amount);
+                    break;
+                case 'balance':
+                    cmp = num(a.balance) - num(b.balance);
+                    break;
+                case 'ledger':
+                    if (!canLedger || typeof getLedgerDueForInv !== 'function') {
+                        cmp = invKey(a) - invKey(b);
+                    } else {
+                        cmp = (getLedgerDueForInv(a) || 0) - (getLedgerDueForInv(b) || 0);
+                    }
+                    break;
+                case 'status':
+                    cmp = this._statusSortVal(a) - this._statusSortVal(b);
+                    break;
+                default:
+                    cmp = invKey(a) - invKey(b);
+            }
+            return cmp * dir;
+        });
+    },
+
+    _applyPurchasesSort(rows) {
+        const key = this.purchaseSortKey || 'billNo';
+        const dir = this.purchaseSortDir === 'desc' ? -1 : 1;
+        const num = (x) => parseFloat(x) || 0;
+        const billKey = (p) => this._tailNumberFromDocNo(p.billNo || p.vch_no || p.invoiceNo || p.id);
+        rows.sort((a, b) => {
+            let cmp = 0;
+            switch (key) {
+                case 'date':
+                    cmp = (new Date(a.date).getTime() || 0) - (new Date(b.date).getTime() || 0);
+                    break;
+                case 'billNo':
+                    cmp = billKey(a) - billKey(b);
+                    if (cmp === 0) {
+                        cmp = String(a.billNo || a.id || '').localeCompare(String(b.billNo || b.id || ''), undefined, { numeric: true, sensitivity: 'base' });
+                    }
+                    break;
+                case 'vendor':
+                    cmp = String(a.vendor || '').localeCompare(String(b.vendor || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'total':
+                    cmp = num(a.total ?? a.amount ?? a.vch_amt) - num(b.total ?? b.amount ?? b.vch_amt);
+                    break;
+                case 'balance':
+                    cmp = num(a.balance) - num(b.balance);
+                    break;
+                case 'status':
+                    cmp = this._purchaseStatusSortVal(a) - this._purchaseStatusSortVal(b);
+                    break;
+                default:
+                    cmp = billKey(a) - billKey(b);
+            }
+            return cmp * dir;
+        });
+    },
 
     async init() {
         console.log('Invoices UI Initialized');
@@ -439,6 +584,17 @@ const InvoicesUI = {
         return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
     },
 
+    /** Indian FY labels (e.g. 2025-26): union of FYs from actual row dates only (Apr–Mar). */
+    _indianFyOptionListFromDates(dateValues) {
+        const seen = new Set();
+        (dateValues || []).forEach((d) => {
+            if (d == null || d === '') return;
+            const fy = DataManager.getFinancialYear(d);
+            if (fy) seen.add(fy);
+        });
+        return [...seen].sort((a, b) => parseInt(String(b).slice(0, 4), 10) - parseInt(String(a).slice(0, 4), 10));
+    },
+
     _salesLedgerRangeFromFilters(yearFilter, calMonth) {
         if (calMonth && /^\d{4}-\d{2}$/.test(String(calMonth))) {
             const y = parseInt(String(calMonth).slice(0, 4), 10);
@@ -450,6 +606,92 @@ const InvoicesUI = {
             };
         }
         return this._parseFinancialYearRange(yearFilter);
+    },
+
+    _fyOptionLabel(fyKey) {
+        return (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.fyLabelDisplay)
+            ? GTESFinancialYearUi.fyLabelDisplay(fyKey)
+            : String(fyKey || '');
+    },
+
+    syncSalesMonthSelect() {
+        const fyEl = document.getElementById('filterSalesFY');
+        const mEl = document.getElementById('filterSalesMonth');
+        if (!mEl) return;
+        const fy = (fyEl?.value || '').trim();
+        const cur = mEl.value;
+        if (typeof GTESFinancialYearUi !== 'undefined' && fy) {
+            mEl.innerHTML = GTESFinancialYearUi.indianFyMonthOptionsHtml(fy, cur);
+            if (cur && ![...mEl.options].some((o) => o.value === cur)) mEl.value = '';
+        } else {
+            mEl.innerHTML = '<option value="">All months</option>';
+        }
+    },
+
+    onSalesFyChange() {
+        this.syncSalesMonthSelect();
+        this.updateTable();
+    },
+
+    loadMoreSalesInvoices() {
+        this._salesListVisibleLimit = (this._salesListVisibleLimit || 150) + 150;
+        this._salesSkipLimitReset = true;
+        this.updateTable();
+    },
+
+    syncPurchaseMonthSelect() {
+        const fyEl = document.getElementById('filterPurchaseFY');
+        const mEl = document.getElementById('filterPurchaseMonth');
+        if (!mEl) return;
+        const fy = (fyEl?.value || '').trim();
+        const cur = mEl.value;
+        if (typeof GTESFinancialYearUi !== 'undefined' && fy) {
+            mEl.innerHTML = GTESFinancialYearUi.indianFyMonthOptionsHtml(fy, cur);
+            if (cur && ![...mEl.options].some((o) => o.value === cur)) mEl.value = '';
+        } else {
+            mEl.innerHTML = '<option value="">All months</option>';
+        }
+    },
+
+    onPurchaseFyChange() {
+        this.syncPurchaseMonthSelect();
+        this.updatePurchasesTable();
+    },
+
+    loadMorePurchases() {
+        this._purchaseListVisibleLimit = (this._purchaseListVisibleLimit || 150) + 150;
+        this._purchaseSkipLimitReset = true;
+        this.updatePurchasesTable();
+    },
+
+    _afterRenderSalesFilters() {
+        const fyEl = document.getElementById('filterSalesFY');
+        const mEl = document.getElementById('filterSalesMonth');
+        if (!fyEl || !mEl) return;
+        const fyList = [...fyEl.options].map((o) => o.value).filter(Boolean);
+        const pref = (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.defaultFyMonthSelectionForUi)
+            ? GTESFinancialYearUi.defaultFyMonthSelectionForUi(fyList)
+            : { fyKey: '', monthYm: '' };
+        if (pref.fyKey && fyList.includes(pref.fyKey)) fyEl.value = pref.fyKey;
+        this.syncSalesMonthSelect();
+        if ((fyEl.value || '').trim() && pref.monthYm && [...mEl.options].some((o) => o.value === pref.monthYm)) {
+            mEl.value = pref.monthYm;
+        }
+    },
+
+    _afterRenderPurchaseFilters() {
+        const fyEl = document.getElementById('filterPurchaseFY');
+        const mEl = document.getElementById('filterPurchaseMonth');
+        if (!fyEl || !mEl) return;
+        const fyList = [...fyEl.options].map((o) => o.value).filter(Boolean);
+        const pref = (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.defaultFyMonthSelectionForUi)
+            ? GTESFinancialYearUi.defaultFyMonthSelectionForUi(fyList)
+            : { fyKey: '', monthYm: '' };
+        if (pref.fyKey && fyList.includes(pref.fyKey)) fyEl.value = pref.fyKey;
+        this.syncPurchaseMonthSelect();
+        if ((fyEl.value || '').trim() && pref.monthYm && [...mEl.options].some((o) => o.value === pref.monthYm)) {
+            mEl.value = pref.monthYm;
+        }
     },
 
     _purchaseLedgerRangeFromFilters(yearFilter) {
@@ -551,6 +793,8 @@ const InvoicesUI = {
 
     renderInvoicesList(mode = 'gst') {
         this.currentMode = mode;
+        this.salesSortKey = 'invoiceNo';
+        this.salesSortDir = 'asc';
         const view = document.getElementById('invoicesView');
         if (!view) return;
 
@@ -563,9 +807,14 @@ const InvoicesUI = {
         const allInvoices = DataManager.getData('invoices') || [];
         const invoices = allInvoices.filter(i => isGST ? (i.type === 'gst-invoice' || i.type === 'with-bill' || !i.type) : (i.type === 'non-gst-invoice' || i.type === 'without-bill'));
 
-        // Financial Years (April - March)
-        const fYears = [...new Set(invoices.map(i => DataManager.getFinancialYear(i.date)))].filter(Boolean).sort().reverse();
-        const yearOptions = fYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        const fyOptionsList = this._indianFyOptionListFromDates(invoices.map((i) => i.date));
+        const fyOptionsHtml = fyOptionsList
+            .map((y) => {
+                const v = String(y).replace(/"/g, '&quot;');
+                const lab = this._fyOptionLabel(y).replace(/</g, '&lt;');
+                return `<option value="${v}">${lab}</option>`;
+            })
+            .join('');
 
         // Customers
         const customers = [...new Set(invoices.map(i => i.customerName).filter(Boolean))].sort();
@@ -622,19 +871,28 @@ const InvoicesUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                         <div class="row g-2 mb-3">
-                            <div class="col-md-3">
-                                <label class="form-label small text-white-50">Calendar month</label>
-                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterCalendarMonth"
-                                    title="Optional — e.g. April 2024" onchange="InvoicesUI.updateTable()" />
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small text-white-50">Financial year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterSalesFY" title="Indian FY Apr–Mar" onchange="InvoicesUI.onSalesFyChange()">
+                                    <option value="">All FY (may be slow)</option>
+                                    ${fyOptionsHtml}
+                                </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small text-white-50">Month (within FY)</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterSalesMonth"
+                                    title="Optional — narrows within FY" onchange="InvoicesUI.updateTable()">
+                                    <option value="">All months</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 col-lg-3">
                                 <label class="form-label small text-white-50">Customer</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterCustomer" onchange="InvoicesUI.updateTable()">
                                     <option value="">All Customers</option>
                                     ${customerOptions}
                                 </select>
                             </div>
-                            <div class="col-md-3 text-end">
+                            <div class="col-md-3 col-lg-5 text-end">
                                 <label class="form-label small text-white-50 d-block">Filter by Status</label>
                                 <div class="btn-group w-100" role="group">
                                     <input type="radio" class="btn-check" name="statusFilter" id="statusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
@@ -691,6 +949,7 @@ const InvoicesUI = {
             </div>
         `;
 
+        this._afterRenderSalesFilters();
         this.updateTable();
     },
 
@@ -709,30 +968,64 @@ const InvoicesUI = {
     },
 
     updateTable() {
+        if (typeof cancelAnimationFrame === 'function' && this._salesTableRaf != null) {
+            cancelAnimationFrame(this._salesTableRaf);
+        }
+        if (typeof requestAnimationFrame === 'function') {
+            this._salesTableRaf = requestAnimationFrame(() => {
+                this._salesTableRaf = null;
+                this._updateTableImpl();
+            });
+        } else {
+            this._salesTableRaf = null;
+            this._updateTableImpl();
+        }
+    },
+
+    _updateTableImpl() {
+        if (!this._salesSkipLimitReset) {
+            this._salesListVisibleLimit = 150;
+        }
+        this._salesSkipLimitReset = false;
+
         const type = this.currentMode; // Use currentMode to determine GST/Non-GST
-        const isGST = type === 'gst'; 
-        
+        const isGST = type === 'gst';
+
         // High accuracy: data with balance calculation from InvoiceManager
         let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
-        const typeFilter = isGST ? 'with-bill' : 'without-bill';
-        invoices = invoices.filter(inv => inv.type === typeFilter);
+        if (isGST) {
+            invoices = invoices.filter(
+                (inv) => inv.type === 'gst-invoice' || inv.type === 'with-bill' || !inv.type
+            );
+        } else {
+            invoices = invoices.filter(
+                (inv) => inv.type === 'non-gst-invoice' || inv.type === 'without-bill'
+            );
+        }
 
-        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
+        const fyFilter = document.getElementById('filterSalesFY')?.value?.trim() || '';
+        const calMonth = document.getElementById('filterSalesMonth')?.value
+            || document.getElementById('filterCalendarMonth')?.value
+            || '';
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
         const linkFilter = this.currentVoucherLinkFilter || 'all';
-        const range = this._salesLedgerRangeFromFilters('', calMonth);
+        const range = this._salesLedgerRangeFromFilters(fyFilter, calMonth);
         const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
             ? VoucherManager.getVoucherAllocationsMap(null, 'receipt')
             : new Map();
 
         const invYm = (d) => {
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate) {
+                return GTESFinancialYearUi.ymFromIsoDate(d) || '';
+            }
             if (!d) return '';
             const s = String(d);
             return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
         };
         const filteredAll = invoices.filter(inv => {
+            const fyMatch = !fyFilter || DataManager.getFinancialYear(inv.date) === fyFilter;
             const monthMatch = !calMonth || invYm(inv.date) === calMonth;
             const customerMatch = !customerFilter || inv.customerName === customerFilter;
             const statusMatch = statusFilter === 'all' || 
@@ -745,7 +1038,7 @@ const InvoicesUI = {
                                (inv.items || []).some(item => (item.name || '').toLowerCase().includes(query));
             const linkMatch = this._invoiceMatchesVoucherLinkFilter(inv, linkFilter, allocMap);
 
-            return monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
+            return fyMatch && monthMatch && customerMatch && statusMatch && searchMatch && linkMatch;
         });
 
         const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
@@ -757,7 +1050,7 @@ const InvoicesUI = {
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
         const BA = this._ba();
         const canComputeLedgerSummary = BA && BA.getAccountLedger
-            && filteredAll.length <= 300;
+            && filteredAll.length <= 220;
         if (canComputeLedgerSummary) {
             const partyMap = new Map();
             filteredAll.forEach(inv => {
@@ -795,7 +1088,16 @@ const InvoicesUI = {
         if (!container) return;
 
         if (forTable.length === 0) {
-            if (filteredAll.length > 0) {
+            const allRaw = DataManager.getData('invoices') || [];
+            const plainTagged = allRaw.filter(
+                (i) => i.type === 'non-gst-invoice' || i.type === 'without-bill'
+            ).length;
+            if (!isGST && plainTagged === 0 && allRaw.length > 0) {
+                container.innerHTML = `<div class="text-center py-5 px-3 text-muted">
+                    <p class="mb-2">There are <strong>no</strong> invoices stored as plain (<code>without-bill</code> / <code>non-gst-invoice</code>), but <strong>${allRaw.length}</strong> sales invoice(s) exist — most likely all are tagged <strong>GST / with-bill</strong> (common after Book Keeper import).</p>
+                    <p class="mb-0">Open <strong>GST Invoices</strong> from the sidebar to see them. If you truly had separate plain bills, restore an older <code>Data/invoices.json</code> (or <code>Data/invoices-MJ-*.json</code> if you keep copies), or re-import from Book Keeper.</p>
+                </div>`;
+            } else if (isGST && filteredAll.length > 0) {
                 container.innerHTML = `<div class="text-center py-5 text-muted">No standard GST invoices match this view. Delivery challan bills are listed under <strong>Accounting → Challans → View DC</strong>.</div>`;
             } else {
                 container.innerHTML = `<div class="text-center py-5 text-muted">No invoices found matching current filters.</div>`;
@@ -803,12 +1105,9 @@ const InvoicesUI = {
             return;
         }
 
-        // Sort by date desc
-        forTable.sort((a, b) => new Date(b.date) - new Date(a.date));
-
         // Per-row ledger due: cached by party (one getAccountLedger per customer, not per row).
         const canComputeRowLedgerDue = BA && BA.getAccountLedger
-            && forTable.length <= 5000;
+            && forTable.length <= 220;
         const ledgerCache = new Map();
         const getLedgerDueForInv = (inv) => {
             if (!canComputeRowLedgerDue) return null;
@@ -820,6 +1119,11 @@ const InvoicesUI = {
             ledgerCache.set(k, bal);
             return bal;
         };
+
+        this._applySalesSort(forTable, getLedgerDueForInv, canComputeRowLedgerDue);
+
+        const pageLimit = Math.min(forTable.length, Math.max(50, this._salesListVisibleLimit || 150));
+        const forTablePage = forTable.slice(0, pageLimit);
 
         const salesReturnDocs = invoices.filter(x => {
             const t = String(x?.type || '').toLowerCase();
@@ -845,18 +1149,18 @@ const InvoicesUI = {
             <table class="table table-dark table-hover align-middle border-secondary">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Invoice #</th>
-                        <th>Customer</th>
-                        <th class="text-end">Total Amount</th>
-                        <th class="text-end">Balance</th>
-                        <th class="text-end" title="Customer ledger closing (same period as filters)">Ledger due</th>
-                        <th class="text-center">Status</th>
+                        ${this._salesTh('date', 'Date', '')}
+                        ${this._salesTh('invoiceNo', 'Invoice #', '')}
+                        ${this._salesTh('customer', 'Customer', '')}
+                        ${this._salesTh('total', 'Total Amount', 'text-end')}
+                        ${this._salesTh('balance', 'Balance', 'text-end')}
+                        ${this._salesTh('ledger', 'Ledger due', 'text-end')}
+                        ${this._salesTh('status', 'Status', 'text-center')}
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${forTable.map(inv => {
+                    ${forTablePage.map(inv => {
             const statusBadge = inv.isPaid ? 
                 '<span class="badge bg-success-subtle text-success border border-success">Paid</span>' : 
                 (inv.isPartial ? 
@@ -877,7 +1181,7 @@ const InvoicesUI = {
                             <td>${DataManager.formatDateDisplay(inv.date)}</td>
                             <td>
                                 <div class="fw-bold text-info">${inv.invoiceNo || inv.id}${creditAdjBadge}</div>
-                                <div style="font-size: 10px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                                <div class="inv-line-preview text-truncate" style="max-width: 200px;">
                                     ${itemsList}
                                 </div>
                             </td>
@@ -904,6 +1208,10 @@ const InvoicesUI = {
         }).join('')}
                 </tbody>
             </table>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2 px-1 small text-body-secondary">
+                <span>Showing ${forTablePage.length} of ${forTable.length} rows</span>
+                ${forTable.length > forTablePage.length ? '<button type="button" class="btn btn-sm btn-outline-info" onclick="InvoicesUI.loadMoreSalesInvoices()">Load more</button>' : ''}
+            </div>
         `;
         container.innerHTML = html;
     },
@@ -2944,14 +3252,21 @@ const InvoicesUI = {
     renderPurchasesList() {
         const view = document.getElementById('purchasesView');
         if (!view) return;
+        this.purchaseSortKey = 'billNo';
+        this.purchaseSortDir = 'asc';
 
         // Fetch purchases for filters
         const purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
             .filter(p => (p.category || '').toLowerCase().includes('purchase'));
 
-        // Financial Years (April - March)
-        const fYears = [...new Set(purchases.map(p => DataManager.getFinancialYear(p.date)))].filter(Boolean).sort().reverse();
-        const yearOptions = fYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        const purchaseFyList = this._indianFyOptionListFromDates(purchases.map((p) => p.date));
+        const purchaseFyOptionsHtml = purchaseFyList
+            .map((y) => {
+                const v = String(y).replace(/"/g, '&quot;');
+                const lab = this._fyOptionLabel(y).replace(/</g, '&lt;');
+                return `<option value="${v}">${lab}</option>`;
+            })
+            .join('');
 
         // Vendors
         const vendors = [...new Set(purchases.map(p => p.vendor).filter(Boolean))].sort();
@@ -3004,18 +3319,27 @@ const InvoicesUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                          <div class="row g-2 mb-3">
-                            <div class="col-md-3">
-                                <label class="form-label small text-white-50">Calendar Month</label>
-                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterPurchaseMonth" onchange="InvoicesUI.updatePurchasesTable()">
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small text-white-50">Financial year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseFY" title="Indian FY Apr–Mar" onchange="InvoicesUI.onPurchaseFyChange()">
+                                    <option value="">All FY (may be slow)</option>
+                                    ${purchaseFyOptionsHtml}
+                                </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small text-white-50">Month (within FY)</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseMonth" onchange="InvoicesUI.updatePurchasesTable()">
+                                    <option value="">All months</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 col-lg-3">
                                 <label class="form-label small text-white-50">Vendor</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="filterPurchaseVendor" onchange="InvoicesUI.updatePurchasesTable()">
                                     <option value="">All Vendors</option>
                                     ${vendorOptions}
                                 </select>
                             </div>
-                            <div class="col-md-3 text-end">
+                            <div class="col-md-3 col-lg-5 text-end">
                                 <label class="form-label small text-white-50 d-block">Status</label>
                                 <div class="btn-group w-100" role="group">
                                     <input type="radio" class="btn-check" name="purchaseStatusFilter" id="purStatusAll" value="all" ${this.currentStatusFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setStatusFilter('all')">
@@ -3048,10 +3372,31 @@ const InvoicesUI = {
             </div>
         `;
 
+        this._afterRenderPurchaseFilters();
         this.updatePurchasesTable();
     },
 
     updatePurchasesTable() {
+        if (typeof cancelAnimationFrame === 'function' && this._purchaseTableRaf != null) {
+            cancelAnimationFrame(this._purchaseTableRaf);
+        }
+        if (typeof requestAnimationFrame === 'function') {
+            this._purchaseTableRaf = requestAnimationFrame(() => {
+                this._purchaseTableRaf = null;
+                this._updatePurchasesTableImpl();
+            });
+        } else {
+            this._purchaseTableRaf = null;
+            this._updatePurchasesTableImpl();
+        }
+    },
+
+    _updatePurchasesTableImpl() {
+        if (!this._purchaseSkipLimitReset) {
+            this._purchaseListVisibleLimit = 150;
+        }
+        this._purchaseSkipLimitReset = false;
+
         const purchasesRaw = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
             .filter(p => (p.category || '').toLowerCase().includes('purchase'));
         const voucherMap = (typeof VoucherManager !== 'undefined') ? VoucherManager.getVoucherAllocationsMap(null, 'payment') : new Map();
@@ -3085,14 +3430,20 @@ const InvoicesUI = {
         });
 
         // Filter UI states
+        const fyPurchase = document.getElementById('filterPurchaseFY')?.value?.trim() || '';
         const monthFilter = document.getElementById('filterPurchaseMonth')?.value || '';
         const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
         const query = document.getElementById('purchaseSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
 
         const filtered = purchases.filter(p => {
-            const dateObj = new Date(p.date);
-            const monthYm = Number.isNaN(dateObj.getTime()) ? '' : `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+            const fyMatch = !fyPurchase || DataManager.getFinancialYear(p.date) === fyPurchase;
+            const monthYm = (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate)
+                ? (GTESFinancialYearUi.ymFromIsoDate(p.date) || '')
+                : (() => {
+                    const dateObj = new Date(p.date);
+                    return Number.isNaN(dateObj.getTime()) ? '' : `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+                })();
             const monthMatch = !monthFilter || monthYm === monthFilter;
             const vendorMatch = !vendorFilter || p.vendor === vendorFilter;
             const statusMatch = statusFilter === 'all' || 
@@ -3104,7 +3455,7 @@ const InvoicesUI = {
                                (p.vendor || '').toLowerCase().includes(query) ||
                                (p.description || '').toLowerCase().includes(query);
 
-            return monthMatch && vendorMatch && statusMatch && searchMatch;
+            return fyMatch && monthMatch && vendorMatch && statusMatch && searchMatch;
         });
 
         // Update Summary Cards
@@ -3113,7 +3464,7 @@ const InvoicesUI = {
         let outstandingParties = new Set(filtered.filter(p => p.balance > 0.05).map(p => p.vendor)).size;
         const pba = this._ba();
         if (pba && pba.getAccountLedger) {
-            const range = this._purchaseLedgerRangeFromFilters('');
+            const range = this._purchaseLedgerRangeFromFilters(fyPurchase);
             const partyMap = new Map();
             filtered.forEach(p => {
                 const key = (p.partyId || p.vendorId || p.vendor || p.customerId || '').toString().trim();
@@ -3147,24 +3498,26 @@ const InvoicesUI = {
             return;
         }
 
-        // Sort by date desc
-        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+        this._applyPurchasesSort(filtered);
+
+        const pLimit = Math.min(filtered.length, Math.max(50, this._purchaseListVisibleLimit || 150));
+        const filteredPage = filtered.slice(0, pLimit);
 
         const html = `
             <table class="table table-dark table-hover align-middle border-secondary">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Bill #</th>
-                        <th>Vendor</th>
-                        <th class="text-end">Total Amount</th>
-                        <th class="text-end">Balance</th>
-                        <th class="text-center">Status</th>
+                        ${this._purchaseTh('date', 'Date', '')}
+                        ${this._purchaseTh('billNo', 'Bill #', '')}
+                        ${this._purchaseTh('vendor', 'Vendor', '')}
+                        ${this._purchaseTh('total', 'Total Amount', 'text-end')}
+                        ${this._purchaseTh('balance', 'Balance', 'text-end')}
+                        ${this._purchaseTh('status', 'Status', 'text-center')}
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${filtered.map(p => {
+                    ${filteredPage.map(p => {
             const itemsList = (p.items || []).map(item => item.name).join(', ');
             const searchTerms = `${p.billNo} ${p.vendor} ${itemsList}`.toLowerCase();
             const statusBadge = p.isDebitNote
@@ -3198,13 +3551,17 @@ const InvoicesUI = {
         }).join('')}
                 </tbody>
             </table>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2 px-1 small text-body-secondary">
+                <span>Showing ${filteredPage.length} of ${filtered.length} rows</span>
+                ${filtered.length > filteredPage.length ? '<button type="button" class="btn btn-sm btn-outline-warning" onclick="InvoicesUI.loadMorePurchases()">Load more</button>' : ''}
+            </div>
         `;
         container.innerHTML = html;
     },
 
     filterPurchases() {
         const query = document.getElementById('purchaseSearch')?.value.toLowerCase() || '';
-        const yearFilter = document.getElementById('filterPurchaseYear')?.value || '';
+        const yearFilter = document.getElementById('filterPurchaseFY')?.value?.trim() || document.getElementById('filterPurchaseYear')?.value?.trim() || '';
         const vendorFilter = document.getElementById('filterPurchaseVendor')?.value || '';
         const statusFilter = document.getElementById('filterPurchaseStatus')?.value || '';
 
@@ -3522,8 +3879,8 @@ const InvoicesUI = {
         const typeFilter = isGST ? 'with-bill' : 'without-bill';
         let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
         invoices = invoices.filter(inv => inv.type === typeFilter);
-        const yearFilter = document.getElementById('filterYear')?.value;
-        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
+        const yearFilter = document.getElementById('filterSalesFY')?.value?.trim() || document.getElementById('filterYear')?.value?.trim() || '';
+        const calMonth = document.getElementById('filterSalesMonth')?.value || document.getElementById('filterCalendarMonth')?.value || '';
         const customerFilter = document.getElementById('filterCustomer')?.value;
         const query = document.getElementById('invoiceSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
@@ -3532,6 +3889,9 @@ const InvoicesUI = {
             ? VoucherManager.getVoucherAllocationsMap(null, 'receipt')
             : new Map();
         const invYm = (d) => {
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate) {
+                return GTESFinancialYearUi.ymFromIsoDate(d) || '';
+            }
             if (!d) return '';
             const s = String(d);
             return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
@@ -3890,8 +4250,8 @@ const InvoicesUI = {
             (inv.balance || 0) > 0.05 && !this._isCreditNoteSalesDoc(inv)
         );
         const isGST = this.currentMode === 'gst';
-        const yearFilter = document.getElementById('filterYear')?.value;
-        const calMonth = document.getElementById('filterCalendarMonth')?.value || '';
+        const yearFilter = document.getElementById('filterSalesFY')?.value?.trim() || document.getElementById('filterYear')?.value?.trim() || '';
+        const calMonth = document.getElementById('filterSalesMonth')?.value || document.getElementById('filterCalendarMonth')?.value || '';
         const range = this._salesLedgerRangeFromFilters(yearFilter, calMonth);
         const title = mode === 'parties'
             ? (isGST ? 'Outstanding by customer (GST)' : 'Outstanding by customer (Plain)')
@@ -4004,13 +4364,21 @@ const InvoicesUI = {
             }
             return { ...p, isDebitNote, balance, isPaid: isDebitNote ? true : balance <= 0.05, isPartial: balance > 0.05 && balance < (docTotal - 0.05) };
         });
-        const yearFilter = document.getElementById('filterPurchaseYear')?.value;
+        const yearFilter = document.getElementById('filterPurchaseFY')?.value?.trim() || document.getElementById('filterPurchaseYear')?.value?.trim() || '';
+        const monthFilter = document.getElementById('filterPurchaseMonth')?.value || '';
         const vendorFilter = document.getElementById('filterPurchaseVendor')?.value;
         const query = document.getElementById('purchaseSearch')?.value?.toLowerCase();
         const statusFilter = this.currentStatusFilter;
+        const pYm = (d) => {
+            if (!d) return '';
+            const dateObj = new Date(d);
+            if (Number.isNaN(dateObj.getTime())) return '';
+            return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+        };
         return purchases.filter(p => {
             const yearStr = DataManager.getFinancialYear(p.date);
             const yearMatch = !yearFilter || yearStr === yearFilter;
+            const monthMatch = !monthFilter || pYm(p.date) === monthFilter;
             const vendorMatch = !vendorFilter || p.vendor === vendorFilter;
             const statusMatch = statusFilter === 'all' ||
                              (statusFilter === 'paid' && p.isPaid) ||
@@ -4021,7 +4389,7 @@ const InvoicesUI = {
                                (p.vendor || '').toLowerCase().includes(query) ||
                                (p.description || '').toLowerCase().includes(query) ||
                                (p.items || []).some(it => (it.name || '').toLowerCase().includes(query));
-            return yearMatch && vendorMatch && statusMatch && searchMatch;
+            return yearMatch && monthMatch && vendorMatch && statusMatch && searchMatch;
         });
     },
 

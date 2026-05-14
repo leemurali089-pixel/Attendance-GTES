@@ -47,6 +47,24 @@ const AdminModule = {
         await this.renderAdminDashboard();
     },
 
+    /** Bootstrap tab: users | settings | audit */
+    activateTab(tab) {
+        const map = { users: 'users-tab', settings: 'settings-tab', audit: 'audit-tab' };
+        const id = map[tab];
+        const btn = id ? document.getElementById(id) : null;
+        if (!btn || typeof bootstrap === 'undefined') return;
+        try {
+            bootstrap.Tab.getOrCreateInstance(btn).show();
+        } catch (e) {
+            console.warn('[AdminModule] activateTab:', e && e.message);
+        }
+    },
+
+    focusDataManagement() {
+        const el = document.getElementById('adminDataManagementSection');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+
     async renderAdminDashboard() {
         const view = document.getElementById('adminView');
         const settings = await DataManager.getSettings() || {};
@@ -166,6 +184,19 @@ const AdminModule = {
 
                         <!-- Settings Tab -->
                         <div class="tab-pane fade" id="settings" role="tabpanel">
+                            <div class="alert alert-light border mb-3 d-none" id="desktopDataRootBanner" role="status">
+                                <div class="fw-semibold mb-1"><i class="bi bi-folder2-open me-1"></i> Desktop app data folder</div>
+                                <code class="small d-block text-break user-select-all" id="desktopDataRootPath"></code>
+                                <p class="small text-muted mb-0 mt-2">
+                                    Installed builds read and write JSON here. The web app uses Firebase / browser storage instead, so plain invoices and vouchers can appear in the browser while this folder still has older files. Copy updated <code>invoices.json</code> and <code>vouchers.json</code> here (or use Export/Import / Sync) so the desktop matches the web.
+                                </p>
+                                <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="desktopDataFolderPickBtn">
+                                        <i class="bi bi-folder-symlink"></i> Use a different Data folder…
+                                    </button>
+                                    <span class="small text-muted">Restarts the app; saves your choice for next launches.</span>
+                                </div>
+                            </div>
                             <form id="companySettingsForm" onsubmit="AdminModule.saveSettings(event)">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
@@ -373,6 +404,7 @@ const AdminModule = {
                                 </div>
                             </div>
 
+                            <div id="adminDataManagementSection" class="mb-3">
                             <h5>Data Management</h5>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-primary" onclick="AdminModule.exportManualBackup()">
@@ -381,6 +413,7 @@ const AdminModule = {
                                 <button class="btn btn-outline-info" onclick="AdminModule.analyzeBookKeeperFile()">
                                     <i class="bi bi-search"></i> Analyze BookKeeper Features
                                 </button>
+                            </div>
                             </div>
                             
                             <hr>
@@ -429,6 +462,42 @@ const AdminModule = {
         this._wireGmailAdminCard();
         this._wireTaxGroupsCard();
         this._wireAppUpdateCard();
+        await this._showDesktopDataFolderBanner();
+    },
+
+    async _showDesktopDataFolderBanner() {
+        const banner = document.getElementById('desktopDataRootBanner');
+        const pathEl = document.getElementById('desktopDataRootPath');
+        const pickBtn = document.getElementById('desktopDataFolderPickBtn');
+        if (!banner || !pathEl) return;
+        if (!window.electronAPI || typeof window.electronAPI.getDataFolder !== 'function') return;
+        try {
+            const p = await window.electronAPI.getDataFolder();
+            if (p && String(p).trim()) {
+                pathEl.textContent = String(p).trim();
+                banner.classList.remove('d-none');
+            }
+        } catch (e) {
+            console.warn('[Admin] getDataFolder failed:', e && e.message);
+        }
+        if (pickBtn && window.electronAPI && typeof window.electronAPI.setGtesDataFolderRestart === 'function') {
+            pickBtn.onclick = async () => {
+                if (!confirm('The app will restart and load JSON from the folder you select (must contain invoices.json). Continue?')) return;
+                try {
+                    const res = await window.electronAPI.setGtesDataFolderRestart();
+                    if (res && res.canceled) return;
+                    if (res && !res.success && res.error) {
+                        if (typeof App !== 'undefined') App.showNotification(res.error, 'error');
+                        else alert(res.error);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    if (typeof App !== 'undefined') App.showNotification(String(err && err.message || err), 'error');
+                }
+            };
+        } else if (pickBtn) {
+            pickBtn.classList.add('d-none');
+        }
     },
 
     async _wireTaxGroupsCard() {

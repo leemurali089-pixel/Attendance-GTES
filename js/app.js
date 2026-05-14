@@ -17,7 +17,9 @@ const App = {
     _deferredDataRefreshTimer: null,
     /** First cold start: show staged % + elapsed on #globalLoader; suppress nested showView loaders. */
     _bootSequenceActive: false,
-    _bootElapsedTimer: null,
+    /** When true, next showLoader() shows detailed progress (view transitions). */
+    _loaderPageDetail: false,
+    _loaderPageStage: '',
     _globalLoaderDismissWired: false,
 
     _wireGlobalLoaderDismissOnce() {
@@ -33,34 +35,66 @@ const App = {
         });
     },
 
-    _startBootElapsedTimer() {
-        if (!this._bootSequenceActive) return;
-        if (this._bootElapsedTimer) clearInterval(this._bootElapsedTimer);
-        const start = performance.now();
-        const tick = () => {
-            const el = document.getElementById('globalLoaderElapsed');
-            if (el) el.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s`;
-        };
-        tick();
-        this._bootElapsedTimer = setInterval(tick, 200);
-    },
-
-    _stopBootElapsedTimer() {
-        if (this._bootElapsedTimer) {
-            clearInterval(this._bootElapsedTimer);
-            this._bootElapsedTimer = null;
-        }
-    },
-
     _setInitialBootProgress(pct, stageText) {
         if (!this._bootSequenceActive) return;
+        if (typeof GTESLoadProgress !== 'undefined') {
+            GTESLoadProgress.setProgress(pct, stageText || 'Loading…');
+            return;
+        }
         const n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
         const pEl = document.getElementById('globalLoaderPct');
         const bar = document.getElementById('globalLoaderProgressBar');
         const st = document.getElementById('globalLoaderStage');
         if (pEl) pEl.textContent = `${n}%`;
-        if (bar) bar.style.width = `${n}%`;
+        if (bar) {
+            bar.style.width = `${n}%`;
+            bar.setAttribute('aria-valuenow', String(n));
+        }
         if (st) st.textContent = stageText || 'Loading…';
+    },
+
+    /** Stage label for the global loader during showView (not shown if suppressLoader). */
+    _formatLoaderStage(viewName) {
+        const key = viewName ? String(viewName) : '';
+        const labels = {
+            dashboard: 'Dashboard',
+            employees: 'Employees',
+            attendance: 'Attendance',
+            filterAttendance: 'Attendance filter',
+            salary: 'Salary',
+            bonus: 'Bonus',
+            reports: 'Reports',
+            holidays: 'Holidays',
+            advances: 'Advances',
+            admin: 'Administration',
+            filter: 'Filter',
+            mail: 'Mail',
+            poQueue: 'PO queue',
+            bankMail: 'Bank mail',
+            invoices: 'Invoices',
+            accounting: 'Accounting',
+            vouchers: 'Vouchers',
+            challans: 'Challans',
+            jobcard: 'Job card',
+            customers: 'Customers',
+            inventory: 'Inventory',
+            services: 'Services',
+            purchases: 'Purchases',
+            employeeView: 'Employee',
+            analytics: 'Analytics',
+            payments: 'Payments',
+            tasks: 'Tasks',
+        };
+        if (labels[key]) return labels[key];
+        if (!key) return 'Page';
+        const spaced = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ');
+        return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+    },
+
+    /** Pair with showLoader() for custom heavy work, or use window.showPageLoadProgress() which calls both. */
+    preparePageLoader(stageText) {
+        this._loaderPageDetail = true;
+        this._loaderPageStage = stageText || 'Opening…';
     },
 
     _applyDefaultDashboardFyEarly() {
@@ -149,30 +183,51 @@ const App = {
 
     showLoader() {
         const loader = document.getElementById('globalLoader');
+        const LP = typeof GTESLoadProgress !== 'undefined' ? GTESLoadProgress : null;
         if (loader) {
             loader.classList.remove('d-none');
-            if (this._bootSequenceActive) {
-                loader.classList.add('gtes-boot-loader-active');
+            if (LP) {
+                if (this._bootSequenceActive) {
+                    LP.enter(LP.MODE_BOOT);
+                    this._wireGlobalLoaderDismissOnce();
+                } else if (this._loaderPageDetail) {
+                    const stage = this._loaderPageStage || 'Opening…';
+                    this._loaderPageDetail = false;
+                    LP.enter(LP.MODE_PAGE, { stage });
+                    this._wireGlobalLoaderDismissOnce();
+                } else {
+                    LP.enter(LP.MODE_SIMPLE);
+                }
+            } else if (this._bootSequenceActive) {
+                loader.classList.add('gtes-loader-detailed');
                 this._wireGlobalLoaderDismissOnce();
-                this._startBootElapsedTimer();
             }
         }
     },
 
     hideLoader(delay = 180) {
         const loader = document.getElementById('globalLoader');
+        const LP = typeof GTESLoadProgress !== 'undefined' ? GTESLoadProgress : null;
+        if (LP && LP.getMode() === LP.MODE_PAGE) {
+            LP.completePage();
+        }
+        if (LP) {
+            LP.stopElapsed();
+            LP.stopSyntheticPageProgress();
+        }
         if (loader) {
             setTimeout(() => {
                 loader.classList.add('d-none');
-                loader.classList.remove('gtes-boot-loader-active');
                 loader.classList.remove('gtes-boot-error');
                 const err = document.getElementById('globalLoaderError');
                 const btn = document.getElementById('globalLoaderDismissBtn');
                 if (err) err.classList.add('d-none');
                 if (btn) btn.classList.add('d-none');
+                if (LP) LP.leave();
             }, delay);
+        } else if (LP) {
+            LP.leave();
         }
-        this._stopBootElapsedTimer();
     },
 
     async init() {
@@ -263,7 +318,10 @@ const App = {
                 this.hideLoader(300);
             }
             this._bootSequenceActive = false;
-            this._stopBootElapsedTimer();
+            if (typeof GTESLoadProgress !== 'undefined') {
+                GTESLoadProgress.stopElapsed();
+                GTESLoadProgress.stopSyntheticPageProgress();
+            }
         }
     },
 
@@ -1292,7 +1350,10 @@ const App = {
         const landingView = document.getElementById('landingView');
         if (landingView) landingView.classList.add('d-none');
 
-        if (!suppressLoader) this.showLoader();
+        if (!suppressLoader) {
+            this.preparePageLoader(`Opening ${this._formatLoaderStage(viewName)}…`);
+            this.showLoader();
+        }
         try {
             // Permission Check - Must be at the top to prevent unauthorized access
             let hasPermission = false;
@@ -2214,6 +2275,16 @@ const App = {
 
 /** Classic script: top-level `const App` is not `window.App` — shell/Electron helpers rely on this. */
 window.App = App;
+
+if (typeof GTESLoadProgress !== 'undefined') {
+    window.showBootProgress = (pct, stageText) => {
+        if (App._bootSequenceActive) GTESLoadProgress.setProgress(pct, stageText);
+    };
+    window.showPageLoadProgress = (stageText) => {
+        App.preparePageLoader(stageText || 'Loading…');
+        App.showLoader();
+    };
+}
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

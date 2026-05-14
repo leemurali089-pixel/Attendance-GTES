@@ -57,6 +57,15 @@ const DataManager = {
     /** On load, union-merge local/cloud for append-heavy transactional collections only. */
     MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_challans', 'customers', 'purchases', 'gtes_employees']),
 
+    /**
+     * Coalesce `gtes:data-changed` emissions to avoid UI refresh storms during sync/import.
+     * Many saves in a row (BookKeeper import, cloud listener bursts) can otherwise trigger a
+     * cascade of expensive view reloads.
+     */
+    _pendingDataChangedEvents: new Map(), // key -> source
+    _dataChangedDispatchHandle: null,
+    _saveOpsSinceYield: 0,
+
     /** Legacy code used 'challans'; Firebase/Electron + RTDB use KEYS.CHALLANS (gtes_challans). */
     resolveStorageKey(key) {
         return key === 'challans' ? this.KEYS.CHALLANS : key;
@@ -428,10 +437,64 @@ const DataManager = {
 
     _emitDataChangedEvent(key, source = 'save') {
         try {
-            window.dispatchEvent(new CustomEvent('gtes:data-changed', {
-                detail: { key, source, ts: Date.now() }
-            }));
-        } catch (_) { }
+            this._pendingDataChangedEvents.set(key, source);
+            if (this._dataChangedDispatchHandle != null) return;
+
+            const flush = () => {
+                this._dataChangedDispatchHandle = null;
+                const entries = Array.from(this._pendingDataChangedEvents.entries());
+                this._pendingDataChangedEvents.clear();
+                for (const [k, src] of entries) {
+                    try {
+                        window.dispatchEvent(new CustomEvent('gtes:data-changed', {
+                            detail: { key: k, source: src, ts: Date.now() }
+                        }));
+                    } catch (_) { /* ignore */ }
+                }
+            };
+
+            if (typeof requestAnimationFrame === 'function') {
+                this._dataChangedDispatchHandle = requestAnimationFrame(flush);
+            } else {
+                this._dataChangedDispatchHandle = setTimeout(flush, 0);
+            }
+        } catch (_) {
+            // Worst-case fallback: behave as before.
+            try {
+                window.dispatchEvent(new CustomEvent('gtes:data-changed', {
+                    detail: { key, source, ts: Date.now() }
+                }));
+            } catch (_) { /* ignore */ }
+        }
+    },
+
+    _shouldYieldDuringSaveBurst() {
+        try {
+            const SM = window.SyncManager;
+            return !!(SM && (SM.status === 'syncing' || SM.suppressConflictPrompts));
+        } catch (_) {
+            return false;
+        }
+    },
+
+    async _yieldAfterSaveBurstIfNeeded() {
+        if (!this._shouldYieldDuringSaveBurst()) return;
+        this._saveOpsSinceYield = (this._saveOpsSinceYield || 0) + 1;
+        // Yield every save during Book Keeper / long imports so the renderer can paint + process input.
+        if (this._saveOpsSinceYield < 1) return;
+        this._saveOpsSinceYield = 0;
+        await new Promise((r) => setTimeout(r, 0));
+    },
+
+    /** InvoiceManager balances are cached by array length only — invalidate when invoice/voucher payloads change. */
+    _invalidateInvoiceBalanceCacheForStorageKey(storageKey) {
+        const sk = typeof storageKey === 'string' ? storageKey : this.resolveStorageKey(storageKey);
+        if (sk !== 'invoices' && sk !== 'vouchers') return;
+        try {
+            if (typeof InvoiceManager !== 'undefined' && InvoiceManager) {
+                InvoiceManager._balanceCache = null;
+            }
+        } catch (_) { /* ignore */ }
     },
 
     invalidateDataCache(key) {
@@ -439,6 +502,8 @@ const DataManager = {
             this._cache = {};
             this._trustedCacheKeys.clear();
             this._clearAttendanceDerivedCaches();
+            this._invalidateInvoiceBalanceCacheForStorageKey('invoices');
+            this._invalidateInvoiceBalanceCacheForStorageKey('vouchers');
             return;
         }
         const sk = this.resolveStorageKey(key);
@@ -455,6 +520,7 @@ const DataManager = {
         if (key === this.KEYS.ATTENDANCE) {
             this._clearAttendanceDerivedCaches();
         }
+        this._invalidateInvoiceBalanceCacheForStorageKey(sk);
     },
 
     /** After invalidateDataCache(): pull fresh data from storage/cloud (used by Sync Now). */
@@ -468,11 +534,12 @@ const DataManager = {
             }
         };
         await Promise.all(core.map(load));
-        const batchSize = 4;
+        await new Promise((r) => setTimeout(r, 0));
+        const batchSize = 2;
         for (let i = 0; i < background.length; i += batchSize) {
             const chunk = background.slice(i, i + batchSize);
             await Promise.all(chunk.map(load));
-            await new Promise((r) => setTimeout(r, 0));
+            await new Promise((r) => setTimeout(r, 4));
         }
     },
 
@@ -667,6 +734,7 @@ const DataManager = {
         const storageKey = this.resolveStorageKey(key);
         // Update memory cache for synchronous access
         this._cache[storageKey] = data;
+        this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
         if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = data;
         this._trustedCacheKeys.add(storageKey);
         if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
@@ -683,12 +751,15 @@ const DataManager = {
             if (!canProceed) return false;
         }
         let payload = data;
-        if (!options.skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
+        const skipPreSaveMerge = options.skipPreSaveMerge === true
+            || (window.SyncManager && window.SyncManager.suppressConflictPrompts === true);
+        if (!skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
             try {
                 const cloudExisting = await FileStorage.loadData(storageKey);
                 if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
                     payload = this._mergeRecordArraysById(cloudExisting, data, storageKey);
                     this._cache[storageKey] = payload;
+                    this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
                     if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = payload;
                     await this._mirrorToLocalOrIDB(storageKey, payload);
                 }
@@ -699,6 +770,7 @@ const DataManager = {
         const ok = await FileStorage.saveData(storageKey, payload);
         const emitKey = storageKey === this.KEYS.CHALLANS ? 'challans' : storageKey;
         this._emitDataChangedEvent(emitKey, 'saveData');
+        await this._yieldAfterSaveBurstIfNeeded();
         return ok;
     },
 
@@ -793,6 +865,7 @@ const DataManager = {
 
         if (data !== null && data !== undefined) {
             this._cache[storageKey] = data;
+            this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
             if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = data;
             this._trustedCacheKeys.add(storageKey);
             if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
@@ -820,6 +893,7 @@ const DataManager = {
         try {
             const parsed = JSON.parse(raw);
             this._cache[storageKey] = parsed;
+            this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
             if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = parsed;
             return parsed;
         } catch (e) {
@@ -831,6 +905,7 @@ const DataManager = {
     saveDataSync(key, value) {
         const storageKey = this.resolveStorageKey(key);
         this._cache[storageKey] = value;
+        this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
         if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = value;
         this._trustedCacheKeys.add(storageKey);
         if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');

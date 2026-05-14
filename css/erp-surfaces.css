@@ -1,0 +1,274 @@
+/**
+ * Accounting / ERP modules: Invoices, Vouchers, Notes use Bootstrap
+ * `table-dark`, `bg-dark`, `text-white-50` in templates. In light mode
+ * those must remap to readable SaaS surfaces (Stripe-style).
+ */
+
+html[data-theme="light"] {
+  --table-bg: #ffffff;
+  --table-header-bg: #f1f5f9;
+  --table-stripe-bg: #f8fafc;
+  --table-hover-bg: #e0f2fe;
+  --table-border: #e2e8f0;
+  --input-bg: #ffffff;
+  --hover-bg: rgba(37, 99, 235, 0.06);
+  --active-bg: rgba(37, 99, 235, 0.12);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Typography utilities that are “dark-theme only” in markup                 */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] .text-white-50 {
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .text-light {
+  color: #334155 !important;
+}
+
+/* Card headers / KPI labels on “bg-dark” cards */
+html[data-theme="light"] .card.bg-dark .text-white,
+html[data-theme="light"] .card.bg-dark .card-title,
+html[data-theme="light"] .card.bg-dark h1,
+html[data-theme="light"] .card.bg-dark h2,
+html[data-theme="light"] .card.bg-dark h3,
+html[data-theme="light"] .card.bg-dark h4,
+html[data-theme="light"] .card.bg-dark h5 {
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .card.bg-dark .text-muted {
+  color: #475569 !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tables: `table-dark` in light mode = crisp data grid                     */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] .table.table-dark {
+  --bs-table-bg: var(--table-bg);
+  --bs-table-color: #0f172a;
+  --bs-table-border-color: var(--table-border);
+  --bs-table-striped-bg: var(--table-stripe-bg);
+  --bs-table-hover-bg: var(--table-hover-bg);
+  --bs-table-active-bg: #bae6fd;
+}
+
+html[data-theme="light"] .table.table-dark > :not(caption) > * > * {
+  color: #0f172a;
+  border-bottom-color: var(--table-border);
+}
+
+html[data-theme="light"] .table.table-dark thead th,
+html[data-theme="light"] .table.table-dark thead td {
+  background-color: var(--table-header-bg) !important;
+  color: #334155 !important;
+  font-weight: 600;
+  border-color: var(--table-border) !important;
+}
+
+html[data-theme="light"] .table.table-dark tbody tr {
+  background-color: var(--table-bg);
+}
+
+html[data-theme="light"] .table.table-dark.table-hover tbody tr:hover {
+  background-color: var(--table-hover-bg) !important;
+}
+
+html[data-theme="light"] .table.table-dark a,
+html[data-theme="light"] .table.table-dark .text-info {
+  color: #0369a1 !important;
+  font-weight: 600;
+}
+
+html[data-theme="light"] .table.table-dark .text-muted {
+  color: #64748b !important;
+}
+
+/* Bootstrap text utilities use !important — without these, light grids can inherit
+   near-white `--bs-secondary-rgb` / wrong emphasis and look “invisible” on white rows. */
+html[data-theme="light"] .table.table-dark tbody td.text-secondary,
+html[data-theme="light"] .table.table-dark tbody th.text-secondary {
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .table.table-dark tbody .text-secondary {
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .table.table-dark tbody .text-white,
+html[data-theme="light"] .table.table-dark tbody .text-light {
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .table.table-dark tbody .text-black-50 {
+  color: #64748b !important;
+}
+
+html[data-theme="light"] .table.table-dark tbody .gtes-td-mode {
+  color: #334155 !important;
+  font-weight: 500;
+}
+
+html[data-theme="dark"] .table.table-dark tbody .gtes-td-mode {
+  color: rgba(226, 232, 240, 0.92) !important;
+}
+
+html[data-theme="light"] .table.table-dark .btn-outline-light {
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+html[data-theme="light"] .table.table-dark .btn-outline-light:hover {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .table.table-dark .btn-outline-info {
+  border-color: #0284c7;
+  color: #0369a1;
+  background: #f0f9ff;
+}
+
+html[data-theme="light"] .table.table-dark .btn-outline-danger {
+  border-color: #f87171;
+  color: #b91c1c;
+  background: #fff;
+}
+
+/* Sticky thead inside modals */
+html[data-theme="light"] .table.table-dark thead.sticky-top,
+html[data-theme="light"] .table.table-dark .sticky-top.bg-dark {
+  background-color: var(--table-header-bg) !important;
+  color: #334155 !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Forms inside dark-styled cards (Invoices / Vouchers filters)              */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] .form-control.bg-dark,
+html[data-theme="light"] .form-select.bg-dark,
+html[data-theme="light"] .form-control.bg-secondary,
+html[data-theme="light"] .form-select.bg-secondary {
+  background-color: var(--input-bg) !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+html[data-theme="light"] .form-control.text-white,
+html[data-theme="light"] .form-select.text-white,
+html[data-theme="light"] .form-control.text-light {
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .form-label.text-white-50 {
+  color: #475569 !important;
+  font-weight: 600;
+}
+
+html[data-theme="light"] .input-group-text.bg-dark,
+html[data-theme="light"] .input-group-text.bg-secondary {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Kill yellow autofill fog in light mode */
+html[data-theme="light"] input:-webkit-autofill,
+html[data-theme="light"] input:-webkit-autofill:hover,
+html[data-theme="light"] input:-webkit-autofill:focus,
+html[data-theme="light"] textarea:-webkit-autofill,
+html[data-theme="light"] select:-webkit-autofill {
+  -webkit-text-fill-color: #0f172a !important;
+  caret-color: #0f172a;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  transition: background-color 99999s ease-out;
+}
+
+/* Search / filter rows */
+html[data-theme="light"] .card.bg-dark .form-control::placeholder,
+html[data-theme="light"] .card.bg-dark .form-select option {
+  color: #64748b;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modals that hard-code bg-dark                                             */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] .modal-content.bg-dark,
+html[data-theme="light"] .modal-body.bg-dark {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .modal-content.bg-dark .text-white,
+html[data-theme="light"] .modal-body.bg-dark .text-white {
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .modal-content.bg-dark .text-white-50,
+html[data-theme="light"] .modal-body.bg-dark .text-white-50 {
+  color: #64748b !important;
+}
+
+html[data-theme="light"] .modal-content.bg-dark .border-secondary,
+html[data-theme="light"] .modal-body.bg-dark .border-secondary {
+  border-color: #e2e8f0 !important;
+}
+
+/* bk-form-control blocks in invoice modals */
+html[data-theme="light"] .bk-form-control {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+html[data-theme="light"] .bk-form-control::placeholder {
+  color: #64748b !important;
+}
+
+html[data-theme="light"] .modal-content.bg-dark .table.table-dark {
+  --bs-table-bg: #ffffff;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Company footer strip (shell) — light cards must not wash out              */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] body.shell-layout-enabled #gtesShellCompanyFooter .gtes-footer-card,
+html[data-theme="light"] body.shell-layout-enabled #gtesShellCompanyFooter .gtes-footer-card-3d {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+html[data-theme="light"] body.shell-layout-enabled #gtesShellCompanyFooter .gtes-footer-card p,
+html[data-theme="light"] body.shell-layout-enabled #gtesShellCompanyFooter .gtes-footer-bottom {
+  color: #334155 !important;
+  font-size: 0.72rem;
+}
+
+html[data-theme="light"] body.shell-layout-enabled #gtesShellCompanyFooter .gtes-footer-card h6 {
+  color: #0f172a !important;
+}
+
+/* Invoice line preview under invoice # (replaces inline #888) */
+.inv-line-preview {
+  font-size: 10px;
+  white-space: nowrap;
+}
+html[data-theme="dark"] .inv-line-preview {
+  color: #94a3b8 !important;
+}
+html[data-theme="light"] .inv-line-preview {
+  color: #64748b !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dark mode: slightly lift table header contrast                            */
+/* -------------------------------------------------------------------------- */
+html[data-theme="dark"] .table.table-dark thead th {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="dark"] .text-white-50 {
+  color: rgba(226, 232, 240, 0.82) !important;
+}

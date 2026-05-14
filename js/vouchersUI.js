@@ -7,6 +7,12 @@ const VouchersUI = {
     currentMode: 'gst', // 'gst', 'non-gst', 'purchase', 'credit-note', or 'debit-note'
     _voucherFilterDebounceTimer: null,
     BANK_RENDER_CHUNK_SIZE: 250,
+    voucherListSortKey: 'voucherNo',
+    voucherListSortDir: 'asc',
+    noteListSortKey: 'docNo',
+    noteListSortDir: 'asc',
+    _vouchersListVisibleLimit: 150,
+    _voucherSkipLimitReset: false,
     async _yieldToUI() {
         return new Promise((resolve) => {
             if (typeof requestAnimationFrame === 'function') {
@@ -14,6 +20,258 @@ const VouchersUI = {
             } else {
                 setTimeout(resolve, 0);
             }
+        });
+    },
+
+    /** Indian FY labels (Apr–Mar) from actual row dates only. */
+    _indianFySelectOptionsFromDates(dateValues) {
+        const seen = new Set();
+        (dateValues || []).forEach((d) => {
+            if (d == null || d === '') return;
+            const fy = DataManager.getFinancialYear(d);
+            if (fy) seen.add(fy);
+        });
+        return [...seen].sort((a, b) => {
+            const ya = parseInt(String(a).slice(0, 4), 10);
+            const yb = parseInt(String(b).slice(0, 4), 10);
+            return yb - ya;
+        });
+    },
+
+    /** Dates for rows that appear in the current vouchers list mode (vouchers / credit notes / debit notes). */
+    _fyDateSourcesForCurrentList() {
+        if (this.currentMode === 'credit-note') {
+            return (DataManager.getData('invoices') || [])
+                .filter((inv) => this._isCreditNoteInvoice(inv))
+                .map((inv) => inv.date);
+        }
+        if (this.currentMode === 'debit-note') {
+            return (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+                .filter((exp) => this._isDebitNotePurchase(exp))
+                .map((exp) => exp.date);
+        }
+        let vouchers = DataManager.getData('vouchers') || [];
+        if (this.currentMode === 'purchase') {
+            vouchers = vouchers.filter((v) => v.type === 'payment');
+        } else if (this.currentMode === 'gst') {
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && v.hasGst === true);
+        } else if (this.currentMode === 'non-gst') {
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && v.hasGst === false);
+        }
+        return (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v)).map((v) => v.date);
+    },
+
+    _fyLabelVoucher(fyKey) {
+        return (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.fyLabelDisplay)
+            ? GTESFinancialYearUi.fyLabelDisplay(fyKey)
+            : String(fyKey || '');
+    },
+
+    syncVoucherMonthOptions() {
+        const fyEl = document.getElementById('filterVoucherFY');
+        const mEl = document.getElementById('filterVoucherMonth');
+        if (!mEl) return;
+        const fy = (fyEl?.value || '').trim();
+        const cur = mEl.value;
+        if (typeof GTESFinancialYearUi !== 'undefined' && fy) {
+            mEl.innerHTML = GTESFinancialYearUi.indianFyMonthOptionsHtml(fy, cur);
+            if (cur && ![...mEl.options].some((o) => o.value === cur)) mEl.value = '';
+        } else {
+            mEl.innerHTML = '<option value="">All months</option>';
+        }
+    },
+
+    onVoucherFyChange() {
+        this.syncVoucherMonthOptions();
+        this.filterVouchers();
+    },
+
+    _afterRenderVoucherFilters() {
+        const fyEl = document.getElementById('filterVoucherFY');
+        const mEl = document.getElementById('filterVoucherMonth');
+        if (!fyEl || !mEl) return;
+        const fyList = [...fyEl.options].map((o) => o.value).filter(Boolean);
+        const pref = (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.defaultFyMonthSelectionForUi)
+            ? GTESFinancialYearUi.defaultFyMonthSelectionForUi(fyList)
+            : { fyKey: '', monthYm: '' };
+        if (pref.fyKey && fyList.includes(pref.fyKey)) fyEl.value = pref.fyKey;
+        this.syncVoucherMonthOptions();
+        if ((fyEl.value || '').trim() && pref.monthYm && [...mEl.options].some((o) => o.value === pref.monthYm)) {
+            mEl.value = pref.monthYm;
+        }
+    },
+
+    loadMoreVouchers() {
+        this._vouchersListVisibleLimit = (this._vouchersListVisibleLimit || 150) + 150;
+        this._voucherSkipLimitReset = true;
+        if (this.currentMode === 'credit-note') this.updateCreditNotesTable();
+        else if (this.currentMode === 'debit-note') this.updateDebitNotesTable();
+        else this.updateTable();
+    },
+
+    _tailNumberFromDocNo(s) {
+        const raw = String(s || '').trim();
+        const m = raw.match(/(\d{1,12})\s*$/);
+        if (m) return parseInt(m[1], 10) || 0;
+        const d = raw.replace(/\D/g, '');
+        return d ? parseInt(d.slice(-12), 10) || 0 : 0;
+    },
+
+    _voucherDisplayNo(v) {
+        return String(v.displayVoucherNo || v.voucherNo || '').trim() || String(v.id || '');
+    },
+
+    _voucherSettlementAmt(v) {
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay) {
+            return Number(VoucherManager.resolveSettlementDisplay(v).totalSettlement) || 0;
+        }
+        return (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount || 0) || 0) + (parseFloat(v.discountAmount || 0) || 0);
+    },
+
+    setVoucherListSort(key) {
+        if (this.voucherListSortKey === key) {
+            this.voucherListSortDir = this.voucherListSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.voucherListSortKey = key;
+            this.voucherListSortDir = 'asc';
+        }
+        this.updateTable();
+    },
+
+    setNoteListSort(key) {
+        if (this.noteListSortKey === key) {
+            this.noteListSortDir = this.noteListSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.noteListSortKey = key;
+            this.noteListSortDir = 'asc';
+        }
+        if (this.currentMode === 'credit-note') this.updateCreditNotesTable();
+        else if (this.currentMode === 'debit-note') this.updateDebitNotesTable();
+    },
+
+    _voucherTh(key, label, extraClass = '') {
+        const active = this.voucherListSortKey === key;
+        const mark = active ? (this.voucherListSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+        const ec = extraClass ? ` ${extraClass.trim()}` : '';
+        return `<th role="button" tabindex="0" class="gtes-sortable-th user-select-none${ec}" style="cursor:pointer" title="Sort" onclick="VouchersUI.setVoucherListSort('${key}')">${label}${mark}</th>`;
+    },
+
+    _noteTh(key, label, extraClass = '') {
+        const active = this.noteListSortKey === key;
+        const mark = active ? (this.noteListSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+        const ec = extraClass ? ` ${extraClass.trim()}` : '';
+        return `<th role="button" tabindex="0" class="gtes-sortable-th user-select-none${ec}" style="cursor:pointer" title="Sort" onclick="VouchersUI.setNoteListSort('${key}')">${label}${mark}</th>`;
+    },
+
+    _voucherPassesListModeFilter(v) {
+        if (this.currentMode === 'purchase') return true;
+        if (v.isPurchase || v.type === 'purchase') return false;
+        if (this.currentMode === 'gst') return v.hasGst === true;
+        return v.hasGst === false;
+    },
+
+    _applyVoucherListSort(rows) {
+        const key = this.voucherListSortKey || 'voucherNo';
+        const dir = this.voucherListSortDir === 'desc' ? -1 : 1;
+        rows.sort((a, b) => {
+            let cmp = 0;
+            switch (key) {
+                case 'date':
+                    cmp = (new Date(a.date).getTime() || 0) - (new Date(b.date).getTime() || 0);
+                    break;
+                case 'voucherNo':
+                    cmp = this._tailNumberFromDocNo(this._voucherDisplayNo(a)) - this._tailNumberFromDocNo(this._voucherDisplayNo(b));
+                    if (cmp === 0) cmp = String(this._voucherDisplayNo(a)).localeCompare(String(this._voucherDisplayNo(b)), undefined, { numeric: true, sensitivity: 'base' });
+                    break;
+                case 'type':
+                    cmp = String(a.type || '').localeCompare(String(b.type || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'party':
+                    cmp = String(a.customerName || a.customerId || '').localeCompare(String(b.customerName || b.customerId || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'amount':
+                    cmp = this._voucherSettlementAmt(a) - this._voucherSettlementAmt(b);
+                    break;
+                case 'mode':
+                    cmp = String(a.paymentMode || '').localeCompare(String(b.paymentMode || ''), undefined, { sensitivity: 'base' });
+                    break;
+                default:
+                    cmp = this._tailNumberFromDocNo(this._voucherDisplayNo(a)) - this._tailNumberFromDocNo(this._voucherDisplayNo(b));
+            }
+            return cmp * dir;
+        });
+    },
+
+    _creditNoteRef(inv) {
+        return (typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef)
+            ? (VoucherManager.resolveCreditNoteSalesRef(inv) || '-')
+            : (inv.referenceNo || inv.refNo || inv.refInvoiceNo || inv.baseInvoiceNo || inv.originalInvoiceNo || '-');
+    },
+
+    _debitNoteRef(p) {
+        return (typeof VoucherManager !== 'undefined' && VoucherManager.resolveDebitNotePurchaseRef)
+            ? (VoucherManager.resolveDebitNotePurchaseRef(p) || '-')
+            : (p.referenceNo || p.refNo || p.purchaseInvoiceRef || p.purchaseInvoiceNo || p.refInvoiceNo || p.baseInvoiceNo || p.originalInvoiceNo || p.supplierInvoiceNo || p.supplierBillNo || '-');
+    },
+
+    _applyCreditNoteSort(rows) {
+        const key = this.noteListSortKey || 'docNo';
+        const dir = this.noteListSortDir === 'desc' ? -1 : 1;
+        const num = (x) => parseFloat(x) || 0;
+        rows.sort((a, b) => {
+            let cmp = 0;
+            switch (key) {
+                case 'date':
+                    cmp = (new Date(a.date || 0).getTime() || 0) - (new Date(b.date || 0).getTime() || 0);
+                    break;
+                case 'docNo':
+                    cmp = this._tailNumberFromDocNo(a.invoiceNo || a.id) - this._tailNumberFromDocNo(b.invoiceNo || b.id);
+                    if (cmp === 0) cmp = String(a.invoiceNo || a.id || '').localeCompare(String(b.invoiceNo || b.id || ''), undefined, { numeric: true, sensitivity: 'base' });
+                    break;
+                case 'party':
+                    cmp = String(a.customerName || '').localeCompare(String(b.customerName || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'ref':
+                    cmp = String(this._creditNoteRef(a)).localeCompare(String(this._creditNoteRef(b)), undefined, { sensitivity: 'base' });
+                    break;
+                case 'amount':
+                    cmp = num(a.total ?? a.amount) - num(b.total ?? b.amount);
+                    break;
+                default:
+                    cmp = this._tailNumberFromDocNo(a.invoiceNo || a.id) - this._tailNumberFromDocNo(b.invoiceNo || b.id);
+            }
+            return cmp * dir;
+        });
+    },
+
+    _applyDebitNoteSort(rows) {
+        const key = this.noteListSortKey || 'docNo';
+        const dir = this.noteListSortDir === 'desc' ? -1 : 1;
+        const num = (x) => parseFloat(x) || 0;
+        const docNo = (x) => x.billNo || x.vch_no || x.id || '';
+        rows.sort((a, b) => {
+            let cmp = 0;
+            switch (key) {
+                case 'date':
+                    cmp = (new Date(a.date || 0).getTime() || 0) - (new Date(b.date || 0).getTime() || 0);
+                    break;
+                case 'docNo':
+                    cmp = this._tailNumberFromDocNo(docNo(a)) - this._tailNumberFromDocNo(docNo(b));
+                    if (cmp === 0) cmp = String(docNo(a)).localeCompare(String(docNo(b)), undefined, { numeric: true, sensitivity: 'base' });
+                    break;
+                case 'party':
+                    cmp = String(a.vendor || a.vendorName || '').localeCompare(String(b.vendor || b.vendorName || ''), undefined, { sensitivity: 'base' });
+                    break;
+                case 'ref':
+                    cmp = String(this._debitNoteRef(a)).localeCompare(String(this._debitNoteRef(b)), undefined, { sensitivity: 'base' });
+                    break;
+                case 'amount':
+                    cmp = num(a.total ?? a.amount ?? a.vch_amt) - num(b.total ?? b.amount ?? b.vch_amt);
+                    break;
+                default:
+                    cmp = this._tailNumberFromDocNo(docNo(a)) - this._tailNumberFromDocNo(docNo(b));
+            }
+            return cmp * dir;
         });
     },
     
@@ -204,6 +462,10 @@ const VouchersUI = {
             this.renderSubSelection();
         } else {
             this.currentMode = mode;
+            this.voucherListSortKey = 'voucherNo';
+            this.voucherListSortDir = 'asc';
+            this.noteListSortKey = 'docNo';
+            this.noteListSortDir = 'asc';
             this.renderVouchersList();
         }
 
@@ -343,14 +605,16 @@ const VouchersUI = {
         const view = document.getElementById('vouchersView');
         if (!view) return;
 
-        // Fetch vouchers to populate filters
-        const vouchers = DataManager.getData('vouchers') || [];
-        const fYears = [...new Set(vouchers.map(v => DataManager.getFinancialYear(v.date)))].filter(Boolean).sort().reverse();
-        const yearOptions = fYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        const fyDateSources = this._fyDateSourcesForCurrentList();
+        const fyOptList = this._indianFySelectOptionsFromDates(fyDateSources);
+        const fyOptionsHtml = fyOptList.map((y) => {
+            const v = String(y).replace(/"/g, '&quot;');
+            const lab = String(this._fyLabelVoucher(y)).replace(/</g, '&lt;');
+            return `<option value="${v}">${lab}</option>`;
+        }).join('');
         const isNoteMode = this.currentMode === 'credit-note' || this.currentMode === 'debit-note';
-        const fyColClass = isNoteMode ? 'col-md-6' : 'col-md-4';
-        const typeColClass = isNoteMode ? 'col-md-6 d-none' : 'col-md-4';
-        const linkColClass = isNoteMode ? 'col-md-6' : 'col-md-4';
+        const typeColClass = isNoteMode ? 'col-md-3 d-none' : 'col-md-3';
+        const linkColClass = isNoteMode ? 'col-md-7' : 'col-md-5';
 
         view.innerHTML = `
             <div class="container-fluid">
@@ -375,9 +639,18 @@ const VouchersUI = {
                 <div class="card bg-dark text-white border-secondary mb-4">
                     <div class="card-body">
                          <div class="row g-2 mb-3">
-                            <div class="col-md-3">
-                                <label class="form-label small text-muted">Month</label>
-                                <input type="month" class="form-control bg-dark text-white border-secondary" id="filterVoucherMonth" onchange="VouchersUI.filterVouchers()">
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Financial year</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterVoucherFY" onchange="VouchersUI.onVoucherFyChange()">
+                                    <option value="">All FY</option>
+                                    ${fyOptionsHtml}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Month (within FY)</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="filterVoucherMonth" onchange="VouchersUI.filterVouchers()">
+                                    <option value="">All months</option>
+                                </select>
                             </div>
                             <div class="${typeColClass}">
                                 <label class="form-label small text-muted">Voucher Type</label>
@@ -413,6 +686,7 @@ const VouchersUI = {
             </div>
         `;
 
+        this._afterRenderVoucherFilters();
         this.updateTable();
     },
 
@@ -426,6 +700,11 @@ const VouchersUI = {
             return;
         }
 
+        if (!this._voucherSkipLimitReset) {
+            this._vouchersListVisibleLimit = 150;
+        }
+        this._voucherSkipLimitReset = false;
+
         // Fetch vouchers
         let vouchers = DataManager.getData('vouchers') || [];
         
@@ -436,22 +715,43 @@ const VouchersUI = {
         if (this.currentMode === 'purchase') {
             vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'payment');
         } else if (this.currentMode === 'gst') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst !== false);
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst === true);
         } else if (this.currentMode === 'non-gst') {
             vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst === false);
         }
 
-        // Sort by voucher number desc
-        vouchers.sort((a, b) => {
-            const numA = parseInt((a.id || '').replace(/\D/g, '')) || 0;
-            const numB = parseInt((b.id || '').replace(/\D/g, '')) || 0;
-            return numB - numA;
+        const list = (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v));
+        this._applyVoucherListSort(list);
+
+        const fyFilter = (document.getElementById('filterVoucherFY')?.value || '').trim();
+        const monthFilter = document.getElementById('filterVoucherMonth')?.value || '';
+        const typeFilter = document.getElementById('filterVoucherType')?.value || '';
+        const linkFilter = document.getElementById('filterVoucherLink')?.value || '';
+        const query = (document.getElementById('voucherSearch')?.value || '').toLowerCase();
+
+        const rowYm = (d) => {
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate) {
+                return GTESFinancialYearUi.ymFromIsoDate(d) || '';
+            }
+            const dt = new Date(d || '');
+            return Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        const filtered = list.filter((v) => {
+            if (fyFilter && DataManager.getFinancialYear(v.date) !== fyFilter) return false;
+            if (monthFilter && rowYm(v.date) !== monthFilter) return false;
+            if (typeFilter && String(v.type || '').toLowerCase() !== typeFilter) return false;
+            const linkStr = this._voucherHasLinkedDocs(v) ? 'linked' : 'unlinked';
+            if (linkFilter && linkStr !== linkFilter) return false;
+            const searchStr = `${v.id} ${v.displayVoucherNo || ''} ${v.voucherNo || ''} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
+            if (query && !searchStr.includes(query)) return false;
+            return true;
         });
 
         const container = document.getElementById('vouchersTableContainer');
         if (!container) return;
 
-        if (vouchers.length === 0) {
+        if (list.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-5 text-muted">
                     <i class="bi bi-wallet2 fs-1 d-block mb-3"></i>
@@ -461,38 +761,34 @@ const VouchersUI = {
             return;
         }
 
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-funnel fs-1 d-block mb-3"></i>
+                    No vouchers match the current filters.
+                </div>
+            `;
+            return;
+        }
+
+        const limit = Math.min(filtered.length, Math.max(50, this._vouchersListVisibleLimit || 150));
+        const page = filtered.slice(0, limit);
+
         const html = `
             <table class="table table-dark table-hover align-middle">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Voucher #</th>
-                        <th>Type</th>
-                        <th>Party / Account</th>
-                        <th class="text-end">Amount</th>
-                        <th class="text-center">Mode</th>
+                        ${this._voucherTh('date', 'Date', '')}
+                        ${this._voucherTh('voucherNo', 'Voucher #', '')}
+                        ${this._voucherTh('type', 'Type', '')}
+                        ${this._voucherTh('party', 'Party / Account', '')}
+                        ${this._voucherTh('amount', 'Amount', 'text-end')}
+                        ${this._voucherTh('mode', 'Mode', 'text-center')}
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${vouchers.filter(v => {
-                        // If we are in purchase mode, we already filtered the list to items that are purchases
-                        if (this.currentMode === 'purchase') {
-                            return true;
-                        }
-
-                        // Exclude purchases from both GST and Plain voucher views
-                        if (v.isPurchase || v.type === 'purchase') return false;
-
-                        // GST Voucher: has GST flag OR legacy imports (hasGst is undefined)
-                        // Explicitly exclude plain vouchers (hasGst === false)
-                        if (this.currentMode === 'gst') {
-                            return v.hasGst !== false;
-                        }
-                        
-                        // Plain Voucher: Explicitly marked as hasGst === false
-                        return v.hasGst === false;
-                    }).map(v => {
+                    ${page.map((v) => {
             const vchLabel = String(v.displayVoucherNo || v.voucherNo || '').trim() || v.id;
             const searchStr = `${v.id} ${v.displayVoucherNo || ''} ${v.voucherNo || ''} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
@@ -522,7 +818,7 @@ const VouchersUI = {
                             <td class="text-end">₹${(typeof VoucherManager !== 'undefined' && VoucherManager.resolveSettlementDisplay
                                 ? VoucherManager.resolveSettlementDisplay(v).totalSettlement
                                 : (parseFloat(v.amount) + parseFloat(v.tdsAmount || 0) + parseFloat(v.discountAmount || 0))).toFixed(2)}</td>
-                            <td class="text-center text-secondary">${v.paymentMode || 'Cash'}</td>
+                            <td class="text-center gtes-td-mode">${v.paymentMode || 'Cash'}</td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-warning" onclick="VouchersUI.showEditVoucherModal('${v.id}')" title="Edit Voucher">
                                     <i class="bi bi-pencil"></i>
@@ -542,9 +838,12 @@ const VouchersUI = {
         }).join('')}
                 </tbody>
             </table>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2 px-1 small text-body-secondary">
+                <span>Showing ${page.length} of ${filtered.length} vouchers</span>
+                ${filtered.length > page.length ? '<button type="button" class="btn btn-sm btn-outline-info" onclick="VouchersUI.loadMoreVouchers()">Load more</button>' : ''}
+            </div>
         `;
         container.innerHTML = html;
-        this.filterVouchers();
     },
 
     _isCreditNoteInvoice(inv) {
@@ -572,35 +871,69 @@ const VouchersUI = {
     },
 
     updateCreditNotesTable() {
+        if (!this._voucherSkipLimitReset) {
+            this._vouchersListVisibleLimit = 150;
+        }
+        this._voucherSkipLimitReset = false;
+
         const container = document.getElementById('vouchersTableContainer');
         if (!container) return;
-        const invoices = (DataManager.getData('invoices') || [])
-            .filter(inv => this._isCreditNoteInvoice(inv))
-            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+        let invoices = (DataManager.getData('invoices') || [])
+            .filter(inv => this._isCreditNoteInvoice(inv));
+        this._applyCreditNoteSort(invoices);
 
         if (invoices.length === 0) {
             container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-receipt-cutoff fs-1 d-block mb-3"></i>No credit notes found.</div>`;
             return;
         }
 
+        const fyFilter = (document.getElementById('filterVoucherFY')?.value || '').trim();
+        const monthFilter = document.getElementById('filterVoucherMonth')?.value || '';
+        const linkFilter = document.getElementById('filterVoucherLink')?.value || '';
+        const query = (document.getElementById('voucherSearch')?.value || '').toLowerCase();
+
+        const rowYm = (d) => {
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate) {
+                return GTESFinancialYearUi.ymFromIsoDate(d) || '';
+            }
+            const dt = new Date(d || '');
+            return Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        invoices = invoices.filter((inv) => {
+            if (fyFilter && DataManager.getFinancialYear(inv.date) !== fyFilter) return false;
+            if (monthFilter && rowYm(inv.date) !== monthFilter) return false;
+            if (linkFilter && this._creditNoteRowLinkStatus(inv) !== linkFilter) return false;
+            const refNo = this._creditNoteRef(inv);
+            const search = `${inv.invoiceNo || inv.id} ${inv.customerName || ''} ${refNo}`.toLowerCase();
+            if (query && !search.includes(query)) return false;
+            return true;
+        });
+
+        if (invoices.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-funnel fs-1 d-block mb-3"></i>No credit notes match the current filters.</div>`;
+            return;
+        }
+
+        const limit = Math.min(invoices.length, Math.max(50, this._vouchersListVisibleLimit || 150));
+        const page = invoices.slice(0, limit);
+
         container.innerHTML = `
             <table class="table table-dark table-hover align-middle">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Credit Note #</th>
-                        <th>Customer</th>
-                        <th>Sales Invoice Ref</th>
-                        <th class="text-end">Amount</th>
+                        ${this._noteTh('date', 'Date', '')}
+                        ${this._noteTh('docNo', 'Credit Note #', '')}
+                        ${this._noteTh('party', 'Customer', '')}
+                        ${this._noteTh('ref', 'Sales Invoice Ref', '')}
+                        ${this._noteTh('amount', 'Amount', 'text-end')}
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${invoices.map(inv => {
+                    ${page.map(inv => {
             const amount = Math.abs(parseFloat(inv.total ?? inv.amount ?? 0) || 0);
-            const refNo = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef)
-                ? (VoucherManager.resolveCreditNoteSalesRef(inv) || '-')
-                : (inv.referenceNo || inv.refNo || inv.refInvoiceNo || inv.baseInvoiceNo || inv.originalInvoiceNo || '-');
+            const refNo = this._creditNoteRef(inv);
             const search = `${inv.invoiceNo || inv.id} ${inv.customerName || ''} ${refNo}`.toLowerCase();
             const linkStr = this._creditNoteRowLinkStatus(inv);
             const dt = new Date(inv.date || '');
@@ -621,41 +954,79 @@ const VouchersUI = {
         }).join('')}
                 </tbody>
             </table>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2 px-1 small text-body-secondary">
+                <span>Showing ${page.length} of ${invoices.length} credit notes</span>
+                ${invoices.length > page.length ? '<button type="button" class="btn btn-sm btn-outline-info" onclick="VouchersUI.loadMoreVouchers()">Load more</button>' : ''}
+            </div>
         `;
-        this.filterVouchers();
     },
 
     updateDebitNotesTable() {
+        if (!this._voucherSkipLimitReset) {
+            this._vouchersListVisibleLimit = 150;
+        }
+        this._voucherSkipLimitReset = false;
+
         const container = document.getElementById('vouchersTableContainer');
         if (!container) return;
-        const purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
-            .filter(exp => this._isDebitNotePurchase(exp))
-            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+        let purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            .filter(exp => this._isDebitNotePurchase(exp));
+        this._applyDebitNoteSort(purchases);
 
         if (purchases.length === 0) {
             container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-receipt-cutoff fs-1 d-block mb-3"></i>No debit notes found.</div>`;
             return;
         }
 
+        const fyFilter = (document.getElementById('filterVoucherFY')?.value || '').trim();
+        const monthFilter = document.getElementById('filterVoucherMonth')?.value || '';
+        const linkFilter = document.getElementById('filterVoucherLink')?.value || '';
+        const query = (document.getElementById('voucherSearch')?.value || '').toLowerCase();
+
+        const rowYm = (d) => {
+            if (typeof GTESFinancialYearUi !== 'undefined' && GTESFinancialYearUi.ymFromIsoDate) {
+                return GTESFinancialYearUi.ymFromIsoDate(d) || '';
+            }
+            const dt = new Date(d || '');
+            return Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        purchases = purchases.filter((p) => {
+            if (fyFilter && DataManager.getFinancialYear(p.date) !== fyFilter) return false;
+            if (monthFilter && rowYm(p.date) !== monthFilter) return false;
+            if (linkFilter && this._debitNoteRowLinkStatus(p) !== linkFilter) return false;
+            const docNo = p.billNo || p.vch_no || p.id || '';
+            const refNo = this._debitNoteRef(p);
+            const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
+            if (query && !search.includes(query)) return false;
+            return true;
+        });
+
+        if (purchases.length === 0) {
+            container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-funnel fs-1 d-block mb-3"></i>No debit notes match the current filters.</div>`;
+            return;
+        }
+
+        const limit = Math.min(purchases.length, Math.max(50, this._vouchersListVisibleLimit || 150));
+        const page = purchases.slice(0, limit);
+
         container.innerHTML = `
             <table class="table table-dark table-hover align-middle">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Debit Note #</th>
-                        <th>Vendor</th>
-                        <th>Purchase Invoice Ref</th>
-                        <th class="text-end">Amount</th>
+                        ${this._noteTh('date', 'Date', '')}
+                        ${this._noteTh('docNo', 'Debit Note #', '')}
+                        ${this._noteTh('party', 'Vendor', '')}
+                        ${this._noteTh('ref', 'Purchase Invoice Ref', '')}
+                        ${this._noteTh('amount', 'Amount', 'text-end')}
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${purchases.map(p => {
+                    ${page.map(p => {
             const amount = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
             const docNo = p.billNo || p.vch_no || p.id || '';
-            const refNo = (typeof VoucherManager !== 'undefined' && VoucherManager.resolveDebitNotePurchaseRef)
-                ? (VoucherManager.resolveDebitNotePurchaseRef(p) || '-')
-                : (p.referenceNo || p.refNo || p.purchaseInvoiceRef || p.purchaseInvoiceNo || p.refInvoiceNo || p.baseInvoiceNo || p.originalInvoiceNo || p.supplierInvoiceNo || p.supplierBillNo || '-');
+            const refNo = this._debitNoteRef(p);
             const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
             const linkStr = this._debitNoteRowLinkStatus(p);
             const dt = new Date(p.date || '');
@@ -676,32 +1047,23 @@ const VouchersUI = {
         }).join('')}
                 </tbody>
             </table>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2 px-1 small text-body-secondary">
+                <span>Showing ${page.length} of ${purchases.length} debit notes</span>
+                ${purchases.length > page.length ? '<button type="button" class="btn btn-sm btn-outline-info" onclick="VouchersUI.loadMoreVouchers()">Load more</button>' : ''}
+            </div>
         `;
-        this.filterVouchers();
     },
 
     filterVouchers() {
-        const query = document.getElementById('voucherSearch') ? document.getElementById('voucherSearch').value.toLowerCase() : '';
-        const monthFilter = document.getElementById('filterVoucherMonth') ? document.getElementById('filterVoucherMonth').value : '';
-        const typeFilter = document.getElementById('filterVoucherType') ? document.getElementById('filterVoucherType').value : '';
-        const linkFilter = document.getElementById('filterVoucherLink') ? document.getElementById('filterVoucherLink').value : '';
-
-        const rows = document.querySelectorAll('#vouchersTableContainer tbody tr');
-
-        requestAnimationFrame(() => {
-            rows.forEach(row => {
-                const searchMatch = !query || (row.dataset.search || '').includes(query);
-                const monthMatch = !monthFilter || (row.dataset.month === monthFilter);
-                const typeMatch = !typeFilter || (row.dataset.type === typeFilter);
-                const linkMatch = !linkFilter || (row.dataset.link === linkFilter);
-
-                if (searchMatch && monthMatch && typeMatch && linkMatch) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-        });
+        if (this.currentMode === 'credit-note') {
+            this.updateCreditNotesTable();
+            return;
+        }
+        if (this.currentMode === 'debit-note') {
+            this.updateDebitNotesTable();
+            return;
+        }
+        this.updateTable();
     },
 
     filterVouchersDebounced() {

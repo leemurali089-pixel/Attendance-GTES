@@ -11,7 +11,12 @@ const InvoiceManager = {
         if (t.includes('sales') && t.includes('return')) return true;
         if (inv.isCreditNote === true) return true;
         const bk = String(inv.bookkeeperVchType || inv.v_type || '').toLowerCase();
-        return bk.includes('credit note') || bk.includes('sales return');
+        if (bk.includes('credit note') || bk.includes('sales return')) return true;
+        const no = String(inv.invoiceNo || inv.id || '').toUpperCase();
+        // Book Keeper / Tally style numbers: GTES/26-27/CR01, INV/CN12, etc.
+        if (/\/(CR|CN)\d+(\b|\/|$)/.test(no)) return true;
+        if (/^(CR|CN)[-/]?\d+/.test(no)) return true;
+        return false;
     },
     async init() {
         await DataManager.init();
@@ -274,6 +279,7 @@ const InvoiceManager = {
         // skipPreSaveMerge: union-merge with cloud would re-add rows still present remotely (delete must win).
         await DataManager.saveData('invoices', filtered, { skipPreSaveMerge: true });
         this._balanceCache = null;
+        this._lastInvoicesRef = null;
     },
 
     /**
@@ -303,6 +309,8 @@ const InvoiceManager = {
     _balanceCache: null,
     _lastInvoiceCount: 0,
     _lastVoucherCount: 0,
+    /** Same length as before but new merged array from DataManager — must recompute balances. */
+    _lastInvoicesRef: null,
 
     /**
      * Delivery-challan billing documents (DC01, GTES/26-27/DC01, …): show under View DC, not GST invoice table,
@@ -323,10 +331,11 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 12; // Alloc map: CN/DN offsets against referenced base bills (balance / pending)
+        const logicVersion = 14; // hasGst on BK receipts; plain vs GST voucher split
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
+            this._lastInvoicesRef === invoices &&
             this._lastLogicVersion === logicVersion) {
             return this._balanceCache;
         }
@@ -371,6 +380,7 @@ const InvoiceManager = {
         this._balanceCache = result;
         this._lastInvoiceCount = invoices.length;
         this._lastVoucherCount = voucherCount;
+        this._lastInvoicesRef = invoices;
         return result;
     }
 };

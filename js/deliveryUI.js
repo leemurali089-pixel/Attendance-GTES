@@ -18,6 +18,7 @@ const DeliveryUI = {
     currentCustomerType: 'Customer',
     historyFilters: {
         dataType: 'all', // all, challan-dc, challan-sc, invoice-gst, invoice-non-gst
+        financialYear: '',
         month: '',
         technician: 'all',
         status: 'all', // all, pending, paid (for invoices), pending-invoice (for challans)
@@ -26,6 +27,33 @@ const DeliveryUI = {
     },
     HISTORY_INITIAL_LIMIT: 200,
     HISTORY_LOAD_MORE_STEP: 200,
+    /** Once true, we do not auto-seed FY/month from "current" on empty filters (user may have chosen All FY). */
+    historyFilterDefaultsApplied: false,
+
+    _patchHistoryFyMonthSelectors(allDataRows) {
+        const fySel = document.getElementById('historyFySelect');
+        const mSel = document.getElementById('historyMonthSelect');
+        if (!fySel || !mSel || typeof GTESFinancialYearUi === 'undefined') return;
+        const fyKeys = GTESFinancialYearUi.fyKeysFromDates((allDataRows || []).map((x) => x.date || x.createdAt));
+        const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        const curFy = (this.historyFilters.financialYear || '').trim();
+        fySel.innerHTML = `<option value="">${esc('All FY')}</option>` + fyKeys.map((k) =>
+            `<option value="${esc(k)}"${curFy === k ? ' selected' : ''}>${esc(GTESFinancialYearUi.fyLabelDisplay(k))}</option>`
+        ).join('');
+        if (curFy && !fyKeys.includes(curFy)) {
+            this.historyFilters.financialYear = '';
+            fySel.value = '';
+        } else {
+            fySel.value = curFy || '';
+        }
+        const fy = (this.historyFilters.financialYear || '').trim();
+        if (!fy) {
+            mSel.innerHTML = `<option value="">${esc('All months')}</option>`;
+            this.historyFilters.month = '';
+        } else {
+            mSel.innerHTML = GTESFinancialYearUi.indianFyMonthOptionsHtml(fy, this.historyFilters.month || '');
+        }
+    },
 
     /** `null` = summary of account groups; string = show parties under that group (or "Unclassified"). */
     _otherGroupFilter: null,
@@ -2171,15 +2199,20 @@ const DeliveryUI = {
                 const m = String(dt.getMonth() + 1).padStart(2, '0');
                 item._month = `${y}-${m}`;
                 item._ts = dt.getTime();
+                item._fy = DataManager.getFinancialYear(rawDate) || '';
             } else {
                 item._month = '';
                 item._ts = 0;
+                item._fy = '';
             }
         });
         
+        this._patchHistoryFyMonthSelectors(data);
+
         // 3. Apply Filters
         const filtered = data.filter(item => {
             const matchesMonth = !this.historyFilters.month || item._month === this.historyFilters.month;
+            const matchesFy = !this.historyFilters.financialYear || item._fy === this.historyFilters.financialYear;
 
             // Technician Filter (only for challans/JC)
             let matchesTech = true;
@@ -2231,7 +2264,7 @@ const DeliveryUI = {
                 (item.customerName && item.customerName.toLowerCase().includes(searchLower)) ||
                 (item.customNumber && item.customNumber.toLowerCase().includes(searchLower));
 
-            return matchesMonth && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
+            return matchesMonth && matchesFy && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
         });
 
         // 4. Sorting: Newest first
@@ -2279,10 +2312,18 @@ const DeliveryUI = {
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label small text-muted">Month</label>
-                                <input type="month" class="form-control form-control-sm bg-dark text-white border-secondary"
-                                    value="${this.historyFilters.month || ''}"
+                                <label class="form-label small text-muted">Financial year</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" id="historyFySelect"
+                                    onchange="DeliveryUI.setHistoryFilter('financialYear', this.value)">
+                                    <option value="">All FY</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">Month (within FY)</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" id="historyMonthSelect"
                                     onchange="DeliveryUI.setHistoryFilter('month', this.value)">
+                                    <option value="">All months</option>
+                                </select>
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label small text-muted">Customer</label>
@@ -2663,6 +2704,9 @@ const DeliveryUI = {
 
     setHistoryFilter(key, value) {
         this.historyFilters[key] = value;
+        if (key === 'financialYear') {
+            this.historyFilters.month = '';
+        }
         if (key === 'search') {
             if (this._historySearchDebounceTimer) clearTimeout(this._historySearchDebounceTimer);
             this._historySearchDebounceTimer = setTimeout(() => this.loadHistory(), 180);

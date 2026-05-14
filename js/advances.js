@@ -17,13 +17,14 @@ const AdvancesModule = {
         const view = document.getElementById('advancesView');
         if (!view) return;
 
-        if (this.modal) {
+        // Remove modals previously hoisted to <body> so IDs are not duplicated after innerHTML rebuild.
+        document.querySelectorAll('body > #advanceFormModal, body > #advanceEmployeeSummaryModal').forEach((el) => {
             try {
-                this.modal.hide();
-                this.modal.dispose();
-            } catch (e) { /* stale instance after DOM rebuild */ }
-            this.modal = null;
-        }
+                bootstrap.Modal.getInstance(el)?.dispose();
+            } catch (_) { /* ignore */ }
+            el.remove();
+        });
+        this.modal = null;
 
         const advances = await DataManager.getAdvances();
         const employeesRaw = await DataManager.getEmployees();
@@ -185,7 +186,7 @@ const AdvancesModule = {
                 </div>
             </div>
             <div id="advanceFormModal" class="modal fade" tabindex="-1">
-                <div class="modal-dialog">
+                <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="advanceFormTitle">Add Advance</h5>
@@ -222,15 +223,15 @@ const AdvancesModule = {
                 </div>
             </div>
 
-            <!-- Employee Details Modal -->
-            <div id="employeeDetailsModal" class="modal fade" tabindex="-1">
-                <div class="modal-dialog modal-lg">
+            <!-- Advance summary (must NOT reuse id employeeDetailsModal — that is the global dashboard HR modal) -->
+            <div id="advanceEmployeeSummaryModal" class="modal fade" tabindex="-1">
+                <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title" id="employeeDetailsTitle">Advance Details</h5>
+                            <h5 class="modal-title" id="advanceEmployeeSummaryTitle">Advance Details</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body" id="employeeDetailsBody">
+                        <div class="modal-body" id="advanceEmployeeSummaryBody">
                             <!-- Content will be populated dynamically -->
                         </div>
                         <div class="modal-footer">
@@ -255,6 +256,11 @@ const AdvancesModule = {
                 document.body.style.removeProperty('overflow');
                 document.body.style.removeProperty('padding-right');
             });
+        }
+
+        const advSummaryEl = document.getElementById('advanceEmployeeSummaryModal');
+        if (advSummaryEl && advSummaryEl.parentElement !== document.body) {
+            document.body.appendChild(advSummaryEl);
         }
 
         const dateInput = document.getElementById('advanceDate');
@@ -482,8 +488,8 @@ const AdvancesModule = {
         waivers.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         // Populate Modal
-        const modalTitle = document.getElementById('employeeDetailsTitle');
-        const modalBody = document.getElementById('employeeDetailsBody');
+        const modalTitle = document.getElementById('advanceEmployeeSummaryTitle');
+        const modalBody = document.getElementById('advanceEmployeeSummaryBody');
 
         if (modalTitle) modalTitle.textContent = `Advance Details - ${employeeName}`;
 
@@ -615,10 +621,10 @@ const AdvancesModule = {
             modalBody.innerHTML = html;
         }
 
-        const modalElement = document.getElementById('employeeDetailsModal');
+        const modalElement = document.getElementById('advanceEmployeeSummaryModal');
         if (modalElement) {
-            const modal = new bootstrap.Modal(modalElement);
-            modal.show();
+            const inst = bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: true, keyboard: true, focus: true });
+            inst.show();
         }
     },
 

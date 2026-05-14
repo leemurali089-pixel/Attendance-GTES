@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadData: (key) => ipcRenderer.invoke('load-data', key),
     fileExists: (key) => ipcRenderer.invoke('file-exists', key),
     getDataFolder: () => ipcRenderer.invoke('get-data-folder'),
+    setGtesDataFolderRestart: () => ipcRenderer.invoke('set-gtes-data-folder-restart'),
     getFileStats: (key) => ipcRenderer.invoke('get-file-stats', key),
     getExternalFileStats: (path) => ipcRenderer.invoke('get-external-file-stats', path),
     createBackup: () => ipcRenderer.invoke('create-backup'),

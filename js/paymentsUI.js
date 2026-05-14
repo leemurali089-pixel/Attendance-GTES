@@ -543,9 +543,7 @@ const PaymentsUI = {
             const fy = DataManager.getFinancialYear(inv.date);
             if (fy) years.add(fy);
         });
-        
-        years.add(DataManager.getFinancialYear(new Date()));
-        
+
         return Array.from(years).filter(y => y).sort().reverse().map(y => 
             `<option value="${y}" ${this.currentFilters.financialYear === y ? 'selected' : ''}>FY ${y}</option>`
         ).join('');

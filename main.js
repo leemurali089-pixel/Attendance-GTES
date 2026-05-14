@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs').promises;
+const fssync = require('fs');
 const crypto = require('crypto');
 const gmailIpc = require('./gmail/gmailIpc');
 
@@ -100,20 +101,96 @@ let mainWindow;
 let DATA_FOLDER;
 let GLOBAL_BASE_PATH;
 
-if (process.env.OneDrive) {
-    // If OneDrive is active on this PC, sync everything through it
-    GLOBAL_BASE_PATH = path.join(process.env.OneDrive, 'Attendance GTES');
-} else {
-    // Fallback to Documents if OneDrive isn't configured
-    GLOBAL_BASE_PATH = path.join(app.getPath('documents'), 'Attendance GTES');
+/**
+ * Installed app default was OneDrive\Attendance GTES\Data; many clones use
+ * OneDrive\Attendance GTES TRAIL\Data (or Documents\…). Resolve so desktop matches the folder you edit.
+ * Priority: GTES_DATA_FOLDER env → userData/gtes-data-folder.json → auto (newer invoices.json) → legacy default.
+ */
+function resolvePackagedDataFolder() {
+    const od = process.env.OneDrive;
+    const docs = app.getPath('documents');
+    const legacyBase = od ? path.join(od, 'Attendance GTES') : path.join(docs, 'Attendance GTES');
+    const legacyData = path.join(legacyBase, 'Data');
+
+    const envDir = (process.env.GTES_DATA_FOLDER || '').trim();
+    if (envDir) {
+        const resolved = path.resolve(envDir);
+        console.log('[main] DATA_FOLDER from GTES_DATA_FOLDER:', resolved);
+        return resolved;
+    }
+
+    try {
+        const ud = app.getPath('userData');
+        const cfgPath = path.join(ud, 'gtes-data-folder.json');
+        if (fssync.existsSync(cfgPath)) {
+            const cfg = JSON.parse(fssync.readFileSync(cfgPath, 'utf8'));
+            const p = cfg && typeof cfg.dataFolder === 'string' ? path.resolve(cfg.dataFolder.trim()) : '';
+            if (p && fssync.existsSync(p)) {
+                console.log('[main] DATA_FOLDER from gtes-data-folder.json:', p);
+                return p;
+            }
+        }
+    } catch (e) {
+        console.warn('[main] gtes-data-folder.json:', e && e.message);
+    }
+
+    const mtimeMs = (p) => {
+        try {
+            return fssync.statSync(p).mtimeMs;
+        } catch (_) {
+            return 0;
+        }
+    };
+    const invFile = (dir) => path.join(dir, 'invoices.json');
+
+    const trailCandidates = [];
+    if (od) trailCandidates.push(path.join(od, 'Attendance GTES TRAIL', 'Data'));
+    trailCandidates.push(path.join(docs, 'Attendance GTES TRAIL', 'Data'));
+
+    let bestTrail = null;
+    let bestTrailInvM = 0;
+    for (const c of trailCandidates) {
+        if (!fssync.existsSync(c)) continue;
+        const inv = invFile(c);
+        const m = fssync.existsSync(inv) ? mtimeMs(inv) : mtimeMs(c);
+        if (m >= bestTrailInvM) {
+            bestTrailInvM = m;
+            bestTrail = c;
+        }
+    }
+
+    const legacyInv = invFile(legacyData);
+    const legacyInvM = fssync.existsSync(legacyInv) ? mtimeMs(legacyInv) : 0;
+
+    if (bestTrail && (legacyInvM === 0 || bestTrailInvM >= legacyInvM)) {
+        console.log('[main] DATA_FOLDER auto-selected (project Data folder):', bestTrail);
+        return bestTrail;
+    }
+
+    console.log('[main] DATA_FOLDER default:', legacyData);
+    return legacyData;
 }
 
 if (app.isPackaged) {
-    DATA_FOLDER = path.join(GLOBAL_BASE_PATH, 'Data');
+    DATA_FOLDER = resolvePackagedDataFolder();
+    GLOBAL_BASE_PATH = path.dirname(DATA_FOLDER);
 } else {
-    // For local development, keep it strictly to the current project clone
-    GLOBAL_BASE_PATH = __dirname;
-    DATA_FOLDER = path.join(__dirname, 'Data');
+    const envDev = (process.env.GTES_DATA_FOLDER || '').trim();
+    if (envDev) {
+        DATA_FOLDER = path.resolve(envDev);
+        GLOBAL_BASE_PATH = path.dirname(DATA_FOLDER);
+    } else {
+        // For local development, keep it strictly to the current project clone
+        GLOBAL_BASE_PATH = __dirname;
+        DATA_FOLDER = path.join(__dirname, 'Data');
+    }
+}
+
+try {
+    const marker = path.join(app.getPath('userData'), '.gtes-active-data-folder');
+    fssync.writeFileSync(marker, DATA_FOLDER, 'utf8');
+} catch (e) {
+    console.warn('[main] Could not write .gtes-active-data-folder:', e && e.message);
 }
 
 // Ensure Data folder exists
@@ -313,8 +390,8 @@ async function robustSave(key, data) {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // 1. Write to temporary file
-            await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf8');
+            // 1. Write to temporary file (compact JSON — pretty-print blocks UI on multi-MB ledgers)
+            await fs.writeFile(tempPath, JSON.stringify(data), 'utf8');
             
             // 2. Atomic rename (replaces old file if it exists)
             await fs.rename(tempPath, filePath);
@@ -424,6 +501,38 @@ ipcMain.handle('get-data-folder', async () => {
     return DATA_FOLDER;
 });
 
+/** User-selected Data directory (persisted); app relaunches so main picks it up. */
+ipcMain.handle('set-gtes-data-folder-restart', async () => {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    try {
+        const { filePaths, canceled } = await dialog.showOpenDialog(win || undefined, {
+            title: 'Select Data folder (contains invoices.json)',
+            properties: ['openDirectory', 'createDirectory'],
+            buttonLabel: 'Use this folder'
+        });
+        if (canceled || !filePaths || !filePaths[0]) {
+            return { success: false, canceled: true };
+        }
+        const chosen = filePaths[0];
+        const ok = ['invoices.json', 'vouchers.json', 'gtes_settings.json'].some((f) =>
+            fssync.existsSync(path.join(chosen, f))
+        );
+        if (!ok) {
+            return {
+                success: false,
+                error: 'That folder has no invoices.json / vouchers.json / gtes_settings.json. Open the inner Data folder, not the repo root.'
+            };
+        }
+        const cfgPath = path.join(app.getPath('userData'), 'gtes-data-folder.json');
+        await fs.writeFile(cfgPath, JSON.stringify({ dataFolder: chosen }, null, 2), 'utf8');
+        app.relaunch();
+        app.exit(0);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? String(e.message) : 'Unknown error' };
+    }
+});
+
 // Read file buffer (for Book Keeper .db file)
 ipcMain.handle('read-file-buffer', async (event, filePath) => {
     try {
@@ -511,8 +620,8 @@ ipcMain.handle('create-manual-backup', async () => {
             }
         }
 
-        // Save single file
-        await fs.writeFile(backupFilePath, JSON.stringify(fullBackup, null, 2), 'utf8');
+        // Save single file (compact JSON — manual backup can be very large)
+        await fs.writeFile(backupFilePath, JSON.stringify(fullBackup), 'utf8');
 
         console.log(`Manual backup created: ${fileCount} data sets to ${backupFilePath}`);
         return { success: true, path: backupFilePath, fileCount, type: 'single-file' };

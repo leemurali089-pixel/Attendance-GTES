@@ -58,7 +58,7 @@ const BookKeeperSync = {
                 console.warn(`[Sync] Found ${orphanedTxns.length} orphaned inventory txns. Auto-repairing...`);
                 // Auto repair by saving only valid transactions
                 const validTxns = txns.filter(t => inventoryIds.has(t.materialId));
-                DataManager.saveData('inventoryTransactions', validTxns);
+                await DataManager.saveData('inventoryTransactions', validTxns);
                 
                 // Optional: log to sync manager so user knows a repair happened
                 if (typeof SyncManager !== 'undefined') {
@@ -118,6 +118,29 @@ const BookKeeperSync = {
 
         // After DataManager has loaded (SyncManager runs post–DataManager.init), restore BK data if storage was cleared but we still have a backup path + prior sync.
         void this.maybeRehydrateFromBackup();
+    },
+
+    /**
+     * Call after login or when the window becomes visible again.
+     * Refreshes BookKeeper summary in the sync modal and (on Electron) runs one file mtime check / watcher start.
+     */
+    onAppForeground() {
+        try {
+            if (typeof SyncManager !== "undefined" && typeof SyncManager.updateAuditModalUI === "function") {
+                SyncManager.updateAuditModalUI();
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        if (!this._isElectronFileContext() || !this.config.backupPath) {
+            return;
+        }
+        if (this.config.autoSync) {
+            if (!this.intervalId) {
+                this.startWatcher();
+            }
+        }
+        void this.checkFile();
     },
 
     /**
@@ -480,6 +503,16 @@ const BookKeeperSync = {
                 path: sourceLabel
             };
             this.saveConfig();
+
+            // Safety net: Book Keeper import can delete rows (e.g. invoices removed in backup).
+            // Cloud uploads are debounced; flush now so a restart / forceRefresh won't union-merge stale cloud rows back.
+            try {
+                if (window.FileStorage && typeof FileStorage.flushPendingCloudWrites === 'function') {
+                    await FileStorage.flushPendingCloudWrites(2500);
+                }
+            } catch (e) {
+                console.warn('[Sync] flushPendingCloudWrites skipped:', e && e.message);
+            }
 
             const totalTouched = this.countImportTouches(stats);
 

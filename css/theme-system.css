@@ -1,0 +1,314 @@
+/**
+ * MJS PrimeLogic — semantic theme system (dark default + light).
+ * Loaded first via style.css @import. Legacy aliases (--bg-main, etc.) preserved.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Dark (default)                                                             */
+/* -------------------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-primary: #0a0f1a;
+  --bg-secondary: #0f172a;
+  --surface-primary: #121c2f;
+  --surface-secondary: #172554;
+  --surface-elevated: #1b2d4d;
+  --surface-glass: rgba(24, 36, 58, 0.92);
+  --card-bg: rgba(22, 34, 56, 0.96);
+  --card-bg-solid: #162238;
+  --overlay-scrim: rgba(6, 10, 20, 0.65);
+
+  /* Legacy aliases (existing modules) */
+  --bg-main: var(--bg-secondary);
+  --bg-card: var(--card-bg);
+  --bg-sidebar: #0f172a;
+  --bg-glass: var(--surface-glass);
+
+  /* Typography */
+  --heading-primary: #f8fafc;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-faint: #7c8ea3;
+
+  /* Accent & status */
+  --accent-primary: #38bdf8;
+  --accent-hover: #22d3ee;
+  --primary-color: #3b82f6;
+  --primary-hover: #2563eb;
+  --secondary-color: #64748b;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --danger-color: #f87171;
+  --info-color: #38bdf8;
+
+  /* Borders & elevation */
+  --border-color: rgba(148, 163, 184, 0.22);
+  --border-strong: rgba(186, 198, 214, 0.38);
+  --glass-border: 1px solid rgba(148, 163, 184, 0.2);
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.35);
+  --shadow-strong: 0 14px 48px rgba(0, 0, 0, 0.5);
+  --glass-shadow: var(--shadow-strong);
+  --backdrop-blur: blur(14px);
+
+  /* Bootstrap 5.3 bridge */
+  --bs-body-bg: var(--bg-secondary);
+  --bs-body-color: var(--text-primary);
+  --bs-secondary-color: var(--text-muted);
+  --bs-tertiary-color: var(--text-faint);
+  --bs-emphasis-color: var(--heading-primary);
+  --bs-border-color: var(--border-color);
+  --bs-heading-color: var(--heading-primary);
+
+  accent-color: var(--accent-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Light                                                                       */
+/* -------------------------------------------------------------------------- */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-primary: #f4f6fb;
+  --bg-secondary: #eef1f8;
+  --surface-primary: #ffffff;
+  --surface-secondary: #f8fafc;
+  --surface-elevated: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.98);
+  --card-bg: #ffffff;
+  --card-bg-solid: #ffffff;
+  --overlay-scrim: rgba(15, 23, 42, 0.35);
+
+  --bg-main: var(--bg-secondary);
+  --bg-card: #ffffff;
+  --bg-sidebar: #f1f5f9;
+  --bg-glass: rgba(255, 255, 255, 0.98);
+
+  --heading-primary: #0a0a0a;
+  --text-primary: #0a0a0a;
+  --text-secondary: #1e293b;
+  --text-muted: #334155;
+  --text-faint: #475569;
+
+  --accent-primary: #0284c7;
+  --accent-hover: #0369a1;
+  --primary-color: #2563eb;
+  --primary-hover: #1d4ed8;
+  --secondary-color: #64748b;
+  --success-color: #059669;
+  --warning-color: #d97706;
+  --danger-color: #dc2626;
+  --info-color: #0284c7;
+
+  --border-color: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --glass-border: 1px solid rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 8px 28px rgba(15, 23, 42, 0.12);
+  --glass-shadow: var(--shadow-strong);
+  --backdrop-blur: blur(10px);
+
+  --bs-body-bg: var(--bg-secondary);
+  --bs-body-color: var(--text-primary);
+  --bs-secondary-color: var(--text-muted);
+  --bs-tertiary-color: var(--text-faint);
+  --bs-emphasis-color: var(--heading-primary);
+  --bs-border-color: var(--border-color);
+  --bs-heading-color: var(--heading-primary);
+
+  /* Used by `.text-secondary` utility — keep mid-tone slate in light mode */
+  --bs-secondary-rgb: 71, 85, 105;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Global base                                                                 */
+/* -------------------------------------------------------------------------- */
+body {
+  background-color: var(--bg-secondary);
+  background-image: none;
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] body {
+  background-color: var(--bg-secondary);
+  background-image: none;
+}
+
+.main-content-container {
+  color: var(--text-primary);
+}
+
+/* Cards — less fog, clearer separation */
+.card {
+  background-color: var(--card-bg);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-soft);
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] .card {
+  background-color: var(--card-bg-solid);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.card.bg-dark,
+.card.text-bg-dark {
+  background-color: var(--surface-elevated) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-strong) !important;
+}
+
+html[data-theme="light"] .card.bg-dark,
+html[data-theme="light"] .card.text-bg-dark {
+  background-color: var(--surface-secondary) !important;
+  color: var(--text-primary) !important;
+}
+
+.card-header {
+  background-color: var(--surface-primary);
+  border-bottom-color: var(--border-color);
+  color: var(--heading-primary);
+}
+
+html[data-theme="light"] .card-header {
+  background-color: var(--surface-secondary);
+  color: var(--heading-primary);
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: var(--surface-primary);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] .form-control,
+html[data-theme="light"] .form-select {
+  background-color: #ffffff;
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.form-control::placeholder,
+.form-select option {
+  color: var(--text-muted);
+}
+
+html[data-theme="light"] .form-select option {
+  color: #0a0a0a !important;
+  background-color: #ffffff;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 0.2rem rgba(56, 189, 248, 0.22);
+}
+
+html[data-theme="light"] .form-control:focus,
+html[data-theme="light"] .form-select:focus {
+  box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.2);
+}
+
+/* Tables */
+.table {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.table thead th {
+  color: var(--heading-primary);
+  border-bottom-color: var(--border-strong);
+}
+
+html[data-theme="light"] .table {
+  --bs-table-bg: #ffffff;
+  --bs-table-color: var(--text-primary);
+}
+
+.table.table-dark {
+  --bs-table-bg: var(--surface-primary);
+  --bs-table-color: var(--text-primary);
+  --bs-table-border-color: var(--border-color);
+}
+
+/* Muted utility — scale to theme */
+.text-muted {
+  color: var(--text-muted) !important;
+}
+
+small,
+.small {
+  color: var(--text-secondary);
+}
+
+html[data-theme="light"] small,
+html[data-theme="light"] .small {
+  color: #334155 !important;
+}
+
+/* Dropdowns */
+.dropdown-menu {
+  background-color: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-strong);
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] .dropdown-menu {
+  background-color: #ffffff;
+}
+
+.dropdown-item {
+  color: var(--text-primary);
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background-color: rgba(56, 189, 248, 0.12);
+  color: var(--heading-primary);
+}
+
+html[data-theme="light"] .dropdown-item:hover,
+html[data-theme="light"] .dropdown-item:focus {
+  background-color: #e0f2fe;
+  color: var(--text-primary);
+}
+
+/* Modals */
+.modal-content {
+  background-color: var(--surface-glass);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-strong);
+}
+
+html[data-theme="light"] .modal-content {
+  background-color: #ffffff;
+}
+
+/* List groups */
+.list-group-item {
+  background-color: var(--surface-primary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] .list-group-item {
+  background-color: #ffffff;
+}
+
+/* Dark surfaces: never use Bootstrap’s anemic muted on bg-dark */
+.card.bg-dark .text-muted,
+.card.bg-dark small,
+.table.table-dark .text-muted,
+.table.table-dark tbody td .small,
+.modal-content.bg-dark .text-muted {
+  color: var(--text-secondary) !important;
+}

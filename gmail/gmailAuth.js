@@ -27,8 +27,17 @@ function credsPath() {
     return path.join(app.getPath('userData'), 'gmail_credentials.json');
 }
 
-/** Same logic as main.js DATA_FOLDER — so OAuth client can be synced across PCs via OneDrive. */
+const fssync = require('fs');
+
+/** Written by main.js so Gmail (and other helpers) mirror into the same Data folder Electron uses. */
 function getDataFolderPath() {
+    try {
+        const marker = path.join(app.getPath('userData'), '.gtes-active-data-folder');
+        if (fssync.existsSync(marker)) {
+            const dir = fssync.readFileSync(marker, 'utf8').trim();
+            if (dir && fssync.existsSync(dir)) return dir;
+        }
+    } catch (_) { /* ignore */ }
     let globalBase;
     if (process.env.OneDrive) {
         globalBase = path.join(process.env.OneDrive, 'Attendance GTES');

@@ -436,8 +436,8 @@
       if (!window.App || window.__gtesShellPatched) return;
       window.__gtesShellPatched = true;
       const originalShowView = App.showView.bind(App);
-      App.showView = async function (viewName, params) {
-        const res = await originalShowView(viewName, params);
+      App.showView = async function (viewName, params, navOpts) {
+        const res = await originalShowView(viewName, params, navOpts);
         syncShellNavFromApp();
         if (viewName === "dashboard") {
           setScope("all");

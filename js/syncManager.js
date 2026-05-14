@@ -10,6 +10,9 @@ const SyncManager = {
     /** When true, conflict prompts are suppressed (e.g. during BookKeeper import). */
     suppressConflictPrompts: false,
     _conflictPromptCooldownUntil: 0,
+    /** Coalesce indicator DOM updates to one paint per frame. */
+    _statusPaintRaf: null,
+    _pendingStatusMessage: null,
     syncProgressPercent: 0,
     syncProgressMessage: '',
 
@@ -41,6 +44,15 @@ const SyncManager = {
         if (typeof BookKeeperSync !== 'undefined') {
             BookKeeperSync.init();
         }
+
+        // BookKeeper panel + modal chrome: hydrate from persisted bk_sync_config without opening the modal.
+        setTimeout(() => {
+            try {
+                this.updateAuditModalUI();
+            } catch (e) {
+                console.warn('[SyncManager] updateAuditModalUI on init:', e && e.message);
+            }
+        }, 0);
 
         console.log('SyncManager initialized');
     },
@@ -109,10 +121,47 @@ const SyncManager = {
                              </div>
                         </div>
                         
-                        <div class="d-grid gap-2 mb-4">
-                            <button class="btn btn-primary" onclick="SyncManager.syncNow()">
-                                <i class="bi bi-arrow-repeat"></i> Sync Now
-                            </button>
+                        <div class="mb-4">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-primary" onclick="SyncManager.syncNow()">
+                                    <i class="bi bi-arrow-repeat"></i> Sync Now
+                                </button>
+                            </div>
+                            <div class="row g-2 mt-2">
+                                <div class="col-md-6">
+                                    <div class="card h-100" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+                                        <div class="card-body py-2">
+                                            <div class="small fw-bold mb-2"><i class="bi bi-cloud-sync me-1"></i> Cloud Sync</div>
+                                            <div class="d-grid gap-1">
+                                                <button class="btn btn-sm btn-outline-info" onclick="SyncManager.importFromCloud()">
+                                                    <i class="bi bi-cloud-arrow-down me-1"></i> Import from Cloud
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-info" onclick="SyncManager.exportToCloud()">
+                                                    <i class="bi bi-cloud-arrow-up me-1"></i> Export to Cloud
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card h-100" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+                                        <div class="card-body py-2">
+                                            <div class="small fw-bold mb-2"><i class="bi bi-hdd-network me-1"></i> Backup</div>
+                                            <div class="d-grid gap-1">
+                                                <button class="btn btn-sm btn-outline-secondary" onclick="SyncManager.exportBackup()">
+                                                    <i class="bi bi-download me-1"></i> Export
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-secondary" onclick="SyncManager.importBackup()">
+                                                    <i class="bi bi-upload me-1"></i> Import
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger" onclick="SyncManager.resetData()">
+                                                    <i class="bi bi-arrow-clockwise me-1"></i> Reset Data
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div id="syncProgressContainer" class="mb-3 d-none">
                             <div class="d-flex justify-content-between align-items-center mb-1">
@@ -190,38 +239,55 @@ const SyncManager = {
     },
 
     updateStatus(status, message = null) {
+        const prevStatus = this.status;
         this.status = status;
         if (status !== 'syncing' && status !== 'offline') {
-            // Assume synced if safe
             this.lastSyncTime = new Date();
         }
+        this._pendingStatusMessage = message;
 
+        // If a sync/import finished, flush any deferred view refreshes once.
+        if (prevStatus === 'syncing' && status !== 'syncing') {
+            try {
+                if (window.App && typeof App.flushDeferredDataRefresh === 'function') {
+                    void App.flushDeferredDataRefresh();
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        if (typeof cancelAnimationFrame === 'function' && this._statusPaintRaf != null) {
+            cancelAnimationFrame(this._statusPaintRaf);
+        }
+        if (typeof requestAnimationFrame === 'function') {
+            this._statusPaintRaf = requestAnimationFrame(() => {
+                this._statusPaintRaf = null;
+                this._paintSyncStatusIndicators();
+            });
+        } else {
+            this._statusPaintRaf = null;
+            this._paintSyncStatusIndicators();
+        }
+    },
+
+    _paintSyncStatusIndicators() {
+        const status = this.status;
+        const message = this._pendingStatusMessage;
         const timeStr = this.lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        // Update ALL indicators
-        this.statusIndicators.forEach(indicator => {
+        this.statusIndicators.forEach((indicator) => {
             if (!indicator) return;
 
             const icon = indicator.querySelector('i');
             const text = indicator.querySelector('span');
             if (!icon || !text) return;
 
-            // Reset classes
             indicator.className = 'd-flex align-items-center';
-            // Restore landing specific classes if needed
             if (indicator.id === 'landingSyncStatus') {
-                indicator.classList.add('me-2'); // Restore landing specific margin
-            } else if (indicator.id === 'syncStatus') {
-                // keep main nav classes if any, though d-flex is mostly it
-                // main one usually handled by parent li spacing
+                indicator.classList.add('me-2');
             }
 
-            // Common colors are text-success etc which we add below
-            // But we need to make sure we don't clear necessary layout classes?
-            // actually className = '...' overwrites.
-            // Let's be safer: remove ONLY the status classes
             indicator.classList.remove('text-success', 'text-primary', 'text-danger', 'text-warning');
-            icon.className = 'bi me-1'; // Reset icon classes
+            icon.className = 'bi me-1';
 
             switch (status) {
                 case 'synced':
@@ -254,13 +320,50 @@ const SyncManager = {
             if (message) {
                 indicator.title = message;
             } else {
-                indicator.title = "Click to view Sync Status";
+                indicator.title = 'Click to view Sync Status';
             }
         });
 
-        // Refresh modal if open
-        if (document.getElementById('syncStatusModal') && document.getElementById('syncStatusModal').classList.contains('show')) {
-            this.updateAuditModalUI();
+        const modalEl = document.getElementById('syncStatusModal');
+        if (modalEl && modalEl.classList.contains('show')) {
+            // Full modal rebuild (audit log + BK panel) is expensive — during active sync only patch progress chrome.
+            if (status === 'syncing') {
+                this._patchSyncModalProgressOnly();
+            } else {
+                this.updateAuditModalUI();
+            }
+        }
+        try {
+            if (typeof window.__gtesRefreshDashShellSyncBtn === 'function') {
+                window.__gtesRefreshDashShellSyncBtn();
+            }
+        } catch (_) { /* ignore */ }
+    },
+
+    /** Updates modal header + progress bar only (no audit log / BK panel DOM rebuild). */
+    _patchSyncModalProgressOnly() {
+        const iconDiv = document.getElementById('modalSyncStatusIcon');
+        const titleDiv = document.getElementById('modalSyncStatusTitle');
+        const progressWrap = document.getElementById('syncProgressContainer');
+        const progressBar = document.getElementById('syncProgressBar');
+        const progressLabel = document.getElementById('syncProgressLabel');
+        const progressPct = document.getElementById('syncProgressPercent');
+        if (iconDiv) {
+            iconDiv.className = 'me-3 fs-1 text-primary';
+            iconDiv.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+        }
+        if (titleDiv) {
+            titleDiv.textContent = this.syncProgressPercent > 0
+                ? `Syncing... ${this.syncProgressPercent}%`
+                : 'Syncing...';
+            titleDiv.className = 'mb-1 text-primary';
+        }
+        if (progressWrap && progressBar && progressLabel && progressPct) {
+            progressWrap.classList.remove('d-none');
+            const pct = Math.max(0, Math.min(100, parseInt(this.syncProgressPercent || 0, 10)));
+            progressBar.style.width = `${pct}%`;
+            progressPct.textContent = `${pct}%`;
+            progressLabel.textContent = this.syncProgressMessage || 'Sync in progress...';
         }
     },
 
@@ -313,6 +416,9 @@ const SyncManager = {
         const timeDiv = document.getElementById('modalLastSyncTime');
         const logList = document.getElementById('syncAuditLogList');
         const bkInfoDiv = document.getElementById('bookKeeperSyncInfo');
+        if (!iconDiv || !titleDiv || !timeDiv || !logList) {
+            return;
+        }
 
         // Update Book Keeper Info — always show this section
         if (bkInfoDiv) {
@@ -358,6 +464,11 @@ const SyncManager = {
                             <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${vCount} Vouchers</span>
                             <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${cCount} Parties</span>
                             <span class="badge" style="background: rgba(255,255,255,0.15); color: #fff; font-size: 0.65rem;">${iCount} Items</span>
+                        </div>
+                        <div class="mt-2 d-flex justify-content-end">
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size: 0.7rem;" onclick="SyncManager.resetData()">
+                                <i class="bi bi-arrow-clockwise"></i> Reset Data
+                            </button>
                         </div>
                     </div>
                 `;
@@ -509,10 +620,29 @@ const SyncManager = {
             DataManager.invalidateDataCache();
             await DataManager.reloadAllDataAfterCacheClear();
 
-            // Refresh current view
             const currentView = App.currentView;
-            if (currentView) {
-                App.showView(currentView);
+            if (currentView && typeof App.showView === 'function') {
+                const runShow = () => {
+                    try {
+                        if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
+                            if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
+                        }
+                    } catch (_) {
+                        return;
+                    }
+                    try {
+                        void App.showView(currentView);
+                    } catch (e) {
+                        console.warn('[SyncManager] showView after sync:', e && e.message);
+                    }
+                };
+                if (typeof requestAnimationFrame === 'function') {
+                    requestAnimationFrame(() => {
+                        setTimeout(runShow, 0);
+                    });
+                } else {
+                    setTimeout(runShow, 0);
+                }
             }
 
             this.lastSyncTime = new Date();
@@ -523,6 +653,88 @@ const SyncManager = {
             console.error('Sync failed:', error);
             this.updateStatus('conflict', 'Sync failed');
             this.logSyncEvent('error', `Sync failed: ${error.message}`);
+        }
+    },
+
+    async importFromCloud() {
+        try {
+            if (!window.DeepCloudMigrator || typeof DeepCloudMigrator.importAll !== 'function') {
+                App.showNotification('Cloud import is not available.', 'warning');
+                return;
+            }
+            await DeepCloudMigrator.importAll();
+            this.logSyncEvent('success', 'Imported data from cloud');
+        } catch (error) {
+            console.error('Cloud import failed:', error);
+            this.logSyncEvent('error', `Cloud import failed: ${error.message}`);
+            App.showNotification('Cloud import failed', 'error');
+        }
+    },
+
+    async exportToCloud() {
+        try {
+            if (!window.DeepCloudMigrator || typeof DeepCloudMigrator.exportAll !== 'function') {
+                App.showNotification('Cloud export is not available.', 'warning');
+                return;
+            }
+            await DeepCloudMigrator.exportAll();
+            this.logSyncEvent('success', 'Exported data to cloud');
+        } catch (error) {
+            console.error('Cloud export failed:', error);
+            this.logSyncEvent('error', `Cloud export failed: ${error.message}`);
+            App.showNotification('Cloud export failed', 'error');
+        }
+    },
+
+    exportBackup() {
+        try {
+            if (!window.AdminModule || typeof AdminModule.exportManualBackup !== 'function') {
+                App.showNotification('Backup export is not available.', 'warning');
+                return;
+            }
+            AdminModule.exportManualBackup();
+            this.logSyncEvent('info', 'Backup export started');
+        } catch (error) {
+            console.error('Backup export failed:', error);
+            this.logSyncEvent('error', `Backup export failed: ${error.message}`);
+        }
+    },
+
+    importBackup() {
+        const input = document.getElementById('navImportFile');
+        if (!input) {
+            App.showNotification('Backup import input not found.', 'warning');
+            return;
+        }
+        input.click();
+    },
+
+    async resetData() {
+        const ok = confirm(
+            'This will remove BookKeeper–imported accounting data and clear the Book Keeper backup connection, then load the official demo seed dataset (sample inventory, invoices, purchases, vouchers).\n\n' +
+                'Local parties tagged as created in this app are kept where possible.\n\nContinue?'
+        );
+        if (!ok) return;
+        try {
+            if (!window.SeedData || typeof SeedData.seedSystem !== 'function') {
+                App.showNotification('Reset Data is not available.', 'warning');
+                return;
+            }
+            if (window.BookKeeperImport && typeof BookKeeperImport.clearAllData === 'function') {
+                const swept = await BookKeeperImport.clearAllData({ reloadAfter: false, notifySuccess: false });
+                if (swept === false) {
+                    App.showNotification('Reset stopped: could not clear existing data safely.', 'error');
+                    return;
+                }
+            }
+            await SeedData.seedSystem();
+            this.logSyncEvent('warning', 'System reset: BookKeeper sweep + seed data applied');
+            App.showNotification('System reset completed.', 'success');
+            setTimeout(() => window.location.reload(), 1200);
+        } catch (error) {
+            console.error('Reset data failed:', error);
+            this.logSyncEvent('error', `Reset data failed: ${error.message}`);
+            App.showNotification('Reset data failed.', 'error');
         }
     },
 
@@ -543,35 +755,31 @@ const SyncManager = {
     async checkConflict(key) {
         if (!window.electronAPI) return true; // No conflict check if not electron
 
+        // Conflict UX only applies in `changes` (external file newer). Avoid per-save IPC during
+        // Book Keeper import / manual sync — hundreds of getFileStats round-trips froze the UI.
+        if (this.suppressConflictPrompts || this.status === 'syncing') return true;
+        if (this.status !== 'changes') return true;
+
         try {
             const result = await window.electronAPI.getFileStats(key);
             if (!result.success) return true;
 
-            if (this.status === 'changes') {
-                // During trusted imports (BookKeeper) or while syncing, never prompt.
-                if (this.suppressConflictPrompts || this.status === 'syncing') {
-                    this.logSyncEvent('info', `Auto-save proceeded despite remote change (${key})`);
-                    return true;
-                }
-
-                // Avoid prompting in a loop when multiple saves happen back-to-back.
-                const now = Date.now();
-                if (now < this._conflictPromptCooldownUntil) {
-                    this.logSyncEvent('warning', `Conflict prompt suppressed (cooldown) for ${key}`);
-                    return false;
-                }
-
-                const proceed = confirm('Remote changes detected! Saving now will overwrite them. Continue?');
-                if (proceed) {
-                    this.logSyncEvent('warning', 'User overwrote remote changes');
-                    // If user approves once, don't ask again for a short window.
-                    this._conflictPromptCooldownUntil = Date.now() + 15000;
-                } else {
-                    this.logSyncEvent('info', 'User cancelled save due to conflict');
-                    this._conflictPromptCooldownUntil = Date.now() + 15000;
-                }
-                return proceed;
+            // Avoid prompting in a loop when multiple saves happen back-to-back.
+            const now = Date.now();
+            if (now < this._conflictPromptCooldownUntil) {
+                this.logSyncEvent('warning', `Conflict prompt suppressed (cooldown) for ${key}`);
+                return false;
             }
+
+            const proceed = confirm('Remote changes detected! Saving now will overwrite them. Continue?');
+            if (proceed) {
+                this.logSyncEvent('warning', 'User overwrote remote changes');
+                this._conflictPromptCooldownUntil = Date.now() + 15000;
+            } else {
+                this.logSyncEvent('info', 'User cancelled save due to conflict');
+                this._conflictPromptCooldownUntil = Date.now() + 15000;
+            }
+            return proceed;
         } catch (e) {
             // ignore
         }

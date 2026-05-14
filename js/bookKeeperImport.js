@@ -6,7 +6,66 @@
 
 const BookKeeperImport = {
     /** Bump with index.html ?v= when changing import/display logic (helps verify Electron loaded this file). */
-    BUILD_VERSION: '3.1',
+    BUILD_VERSION: '3.3',
+
+    /**
+     * Receipt vouchers from Book Keeper do not carry hasGst. Derive it from linked / allocated
+     * sales invoices so GST receipts never appear under Plain vouchers.
+     */
+    resolveReceiptHasGstFromInvoices(voucher, invoices) {
+        if (!voucher || voucher.type !== 'receipt') return false;
+        const pool = Array.isArray(invoices) ? invoices : [];
+        const im = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+        const isGstInvoice = (inv) => {
+            if (!inv) return false;
+            if (im && typeof im.isGSTType === 'function') return !!im.isGSTType(inv.type);
+            const t = String(inv.type || '').toLowerCase();
+            if (t.includes('non-gst') || t === 'without-bill' || t === 'non-gst-invoice') return false;
+            return t === 'with-bill' || t === 'gst-invoice' || t === 'sales-gst' || !t;
+        };
+        const refs = new Set();
+        (voucher.linkedInvoices || []).forEach((x) => {
+            if (x && typeof x === 'object') {
+                if (x.id != null && String(x.id).trim()) refs.add(String(x.id).trim());
+                if (x.invoiceNo != null && String(x.invoiceNo).trim()) refs.add(String(x.invoiceNo).trim());
+            } else if (x != null && String(x).trim()) refs.add(String(x).trim());
+        });
+        (voucher.allocations || []).forEach((a) => {
+            if (!a || typeof a !== 'object') return;
+            [a.id, a.invoiceNo, a.billNo, a.no].forEach((r) => {
+                if (r != null && String(r).trim()) refs.add(String(r).trim());
+            });
+        });
+        if (voucher.linkedInvoiceId != null && String(voucher.linkedInvoiceId).trim()) {
+            refs.add(String(voucher.linkedInvoiceId).trim());
+        }
+        const norm = (s) => String(s || '').trim().toLowerCase();
+        let matchedGst = false;
+        let matchedPlain = false;
+        const invoicesMatchingRef = (r0) => {
+            if (!r0) return [];
+            return pool.filter((i) => {
+                const ids = [i.id, i.invoiceNo, i.bookkeeperId].map(norm).filter(Boolean);
+                return ids.some((id) => id === r0 || r0.endsWith(id) || id.endsWith(r0));
+            });
+        };
+        for (const ref of refs) {
+            const r0 = norm(ref);
+            if (!r0) continue;
+            // Must consider every match: bare BK display nos (e.g. "0001") suffix-match both
+            // INV-NB-0001 (plain) and a GST invoice; pool.find() picked the first row only and
+            // misclassified the receipt as plain.
+            const hits = invoicesMatchingRef(r0);
+            for (const inv of hits) {
+                if (isGstInvoice(inv)) matchedGst = true;
+                else matchedPlain = true;
+            }
+        }
+        if (matchedGst) return true;
+        if (matchedPlain) return false;
+        if (voucher.source === 'bookkeeper') return true;
+        return false;
+    },
     db: null,
     importStats: {},
 
@@ -1762,6 +1821,16 @@ const BookKeeperImport = {
             }
         }
 
+        const liveInv = DataManager.getData('invoices') || [];
+        for (let i = 0; i < existingVouchers.length; i++) {
+            const ev = existingVouchers[i];
+            if (!ev || ev.type !== 'receipt') continue;
+            const fromBk = ev.source === 'bookkeeper' || (ev.bookkeeperId && String(ev.bookkeeperId).startsWith('BK-'));
+            if (!fromBk) continue;
+            const nh = this.resolveReceiptHasGstFromInvoices(ev, liveInv);
+            if (ev.hasGst !== nh) existingVouchers[i] = { ...ev, hasGst: nh };
+        }
+
         // Fix existing records if they were imported with "Bank" or "Cash"
         for (let ev of existingVouchers) {
             if (ev.source === 'bookkeeper' && (ev.customerName === 'Bank' || ev.customerName === 'Cash')) {
@@ -1981,7 +2050,61 @@ const BookKeeperImport = {
             `);
         }
 
-        const existingInvoices = DataManager.getData('invoices') || [];
+        // Deletion propagation:
+        // Book Keeper is authoritative for imported invoices (BK-INV-*). If a BK invoice is gone from the backup,
+        // it must be removed locally + in cloud (avoid merge-on-save resurrecting it).
+        let salesVoucherCount = null;
+        try {
+            const countRes = this.query(`
+                SELECT COUNT(*) as c
+                FROM ${voucherTable} v
+                WHERE v.v_type NOT LIKE '%Challan%'
+                  AND v.v_type NOT LIKE '%Job Card%'
+                  AND (
+                    v.v_type LIKE '%Sales%' OR v.v_type LIKE '%Tax Invoice%' OR v.v_type LIKE '%Invoice%' OR v.v_type LIKE '%Sale%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit%note%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%credit note%'
+                    OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales%return%' OR LOWER(CAST(v.v_type AS TEXT)) LIKE '%sales return%'
+                  )
+                  AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase%bill%'
+                  AND LOWER(CAST(v.v_type AS TEXT)) NOT LIKE '%purchase invoice%'
+            `);
+            if (Array.isArray(countRes) && countRes.length > 0) {
+                const raw = countRes[0]?.c ?? countRes[0]?.count ?? countRes[0]?.['COUNT(*)'] ?? countRes[0]?.['count(*)'];
+                const n = Number(raw);
+                if (Number.isFinite(n)) salesVoucherCount = n;
+            }
+        } catch (e) {
+            // Ignore; keep delete pruning disabled when we can't validate zero-sales condition.
+        }
+        const allowAuthoritativePrune = Array.isArray(salesVouchers) && (salesVouchers.length > 0 || salesVoucherCount === 0);
+        const bkInvoiceIdsInBackup = new Set(
+            allowAuthoritativePrune
+                ? salesVouchers.map((s) => `BK-INV-${s?.v_id}`)
+                : []
+        );
+
+        let existingInvoices = DataManager.getData('invoices') || [];
+        if (allowAuthoritativePrune && Array.isArray(existingInvoices) && existingInvoices.length > 0) {
+            const before = existingInvoices.length;
+            existingInvoices = existingInvoices.filter((inv) => {
+                if (!inv || typeof inv !== 'object') return false;
+                const bkId = String(inv.bookkeeperId || '').trim();
+                const idStr = String(inv.id || '').trim();
+                if (bkId && bkId.startsWith('BK-INV-')) {
+                    return bkInvoiceIdsInBackup.has(bkId);
+                }
+                if (!bkId && idStr.startsWith('BK-INV-')) {
+                    return bkInvoiceIdsInBackup.has(idStr);
+                }
+                return true;
+            });
+            const removed = before - existingInvoices.length;
+            if (removed > 0) {
+                console.log(`[Import] Sales: removed ${removed} invoice(s) deleted in Book Keeper.`);
+            }
+        } else if (Array.isArray(salesVouchers) && salesVouchers.length === 0 && salesVoucherCount !== 0) {
+            console.warn('[Import] Sales: skipping BK deletion pruning (voucher extraction returned 0 but backup has sales vouchers).');
+        }
         const existingTxns = DataManager.getData('inventoryTransactions') || [];
         const inventory = DataManager.getData('inventory') || [];
         const customers = CustomerManager.getAllCustomers();
@@ -2507,7 +2630,8 @@ const BookKeeperImport = {
             }
         }
 
-        await DataManager.saveData('invoices', existingInvoices);
+        // skipPreSaveMerge: union-merge with cloud would re-add rows missing in backup (delete must win).
+        await DataManager.saveData('invoices', existingInvoices, { skipPreSaveMerge: true });
         return { imported, updated, total: salesVouchers.length };
     },
 
@@ -3504,7 +3628,13 @@ const BookKeeperImport = {
         }
     },
 
-    async clearAllData() {
+    /**
+     * @param {{ reloadAfter?: boolean, notifySuccess?: boolean }} [options]
+     * @returns {Promise<boolean>} true if sweep completed without error
+     */
+    async clearAllData(options = {}) {
+        const reloadAfter = options.reloadAfter !== false;
+        const notifySuccess = options.notifySuccess !== false;
         App.showNotification('Sweeping all BookKeeper Service & Inventory Data...', 'info');
         const noMerge = { skipPreSaveMerge: true };
         // Electron: many saves in a row; SyncManager can return false (cooldown / conflict) and skip
@@ -3732,10 +3862,15 @@ const BookKeeperImport = {
         }
 
         if (_bkResetSweepError) {
-            return;
+            return false;
         }
-        App.showNotification('All BookKeeper data cleared successfully.', 'success');
-        setTimeout(() => location.reload(), 1500);
+        if (notifySuccess) {
+            App.showNotification('All BookKeeper data cleared successfully.', 'success');
+        }
+        if (reloadAfter) {
+            setTimeout(() => location.reload(), 1500);
+        }
+        return true;
     },
 
     async runFullImport(fileOrBuffer, options = {}) {
@@ -4295,6 +4430,27 @@ const BookKeeperImport = {
                 changed = true;
             }
 
+            // 2b. Reclassify GST-tagged bills with no tax lines as plain (without-bill); skip credit notes
+            const isCn =
+                typeof InvoiceManager !== 'undefined' &&
+                InvoiceManager._isCreditNoteDoc &&
+                InvoiceManager._isCreditNoteDoc(inv);
+            if (!isCn && inv.type === 'with-bill') {
+                const hdr = (parseFloat(inv.cgst) || 0) + (parseFloat(inv.sgst) || 0) + (parseFloat(inv.igst) || 0);
+                const g = inv.gst && typeof inv.gst === 'object' ? inv.gst : {};
+                const hdr2 = hdr + (parseFloat(g.cgst) || 0) + (parseFloat(g.sgst) || 0) + (parseFloat(g.igst) || 0);
+                let lineGst = 0;
+                if (Array.isArray(inv.items)) {
+                    inv.items.forEach((it) => {
+                        lineGst += (parseFloat(it.cgst) || 0) + (parseFloat(it.sgst) || 0) + (parseFloat(it.igst) || 0);
+                    });
+                }
+                if (hdr2 < 0.01 && lineGst < 0.01) {
+                    inv.type = 'without-bill';
+                    changed = true;
+                }
+            }
+
             // 3. Ensure gst object exists for History view
             if (!inv.gst) {
                 inv.gst = {
@@ -4422,6 +4578,17 @@ const BookKeeperImport = {
             if (vChanged) modified++;
         });
 
+        vouchers.forEach((v) => {
+            if (v.type !== 'receipt') return;
+            const fromBk = v.source === 'bookkeeper' || (v.bookkeeperId && String(v.bookkeeperId).startsWith('BK-'));
+            if (!fromBk) return;
+            const nh = this.resolveReceiptHasGstFromInvoices(v, invoices);
+            if (v.hasGst !== nh) {
+                v.hasGst = nh;
+                modified++;
+            }
+        });
+
         // 5. Reconcile Payments status AFTER linking
         for (let exp of expenses) {
             let changed = false;
@@ -4447,10 +4614,14 @@ const BookKeeperImport = {
         }
 
         if (modified > 0) {
-            DataManager.saveDataSync('invoices', invoices);
-            DataManager.saveDataSync('vouchers', vouchers);
-            DataManager.saveDataSync(DataManager.KEYS.EXPENSES, expenses);
+            await DataManager.saveData('invoices', invoices, { skipPreSaveMerge: true });
+            await DataManager.saveData('vouchers', vouchers, { skipPreSaveMerge: true });
+            await DataManager.saveData(DataManager.KEYS.EXPENSES, expenses, { skipPreSaveMerge: true });
             console.log(`Cleaned up ${modified} records (Invoices, Vouchers & Expenses).`);
+            if (typeof InvoiceManager !== 'undefined') {
+                InvoiceManager._balanceCache = null;
+                InvoiceManager._lastInvoicesRef = null;
+            }
         }
         return modified;
     },
