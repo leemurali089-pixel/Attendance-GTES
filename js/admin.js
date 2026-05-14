@@ -200,9 +200,15 @@ const AdminModule = {
                             <div class="alert alert-secondary border mb-3" id="invoiceVoucherCacheHelpCard">
                                 <div class="fw-semibold mb-1"><i class="bi bi-arrow-clockwise me-1"></i> Invoice &amp; voucher cache</div>
                                 <p class="small text-muted mb-2">Plain rows can exist in <strong>Firebase</strong> (web) while this device still holds an older copy in <strong>IndexedDB</strong> or memory. Use after changing the Data folder, or when the web app shows plain bills but this window does not.</p>
-                                <button type="button" class="btn btn-sm btn-outline-warning" id="clearInvoicesVouchersCacheBtn">
-                                    Clear invoice/voucher cache &amp; reload
-                                </button>
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <button type="button" class="btn btn-sm btn-outline-warning" id="clearInvoicesVouchersCacheBtn">
+                                        Clear invoice/voucher cache &amp; reload
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-info" id="mergeInvoicesVouchersFromCloudBtn" title="Keeps browser mirrors; re-fetches and merges disk + cloud">
+                                        <i class="bi bi-cloud-arrow-down"></i> Merge cloud + disk (invoices &amp; vouchers)
+                                    </button>
+                                </div>
+                                <p class="small text-muted mb-0 mt-2">Use <strong>Merge cloud + disk</strong> first if plain data exists online but not locally. Use <strong>Clear cache</strong> only when mirrors are clearly stale.</p>
                             </div>
                             <form id="companySettingsForm" onsubmit="AdminModule.saveSettings(event)">
                                 <div class="card mb-4">
@@ -475,30 +481,91 @@ const AdminModule = {
 
     async clearInvoiceVoucherCacheAndReload() {
         if (!confirm('Clear local cache for invoices and vouchers (IndexedDB / storage mirrors), then reload from disk and cloud. Continue?')) return;
+        const toast =
+            typeof App !== 'undefined' && typeof App.showTaskProgressToast === 'function'
+                ? App.showTaskProgressToast('Invoice & voucher cache', {
+                    id: 'gtesTaskInvCacheToast',
+                    subtitle: 'Clear mirrors, then reload from disk and cloud',
+                })
+                : null;
         try {
+            toast?.setProgress(4, 'Preparing…');
             if (typeof DataManager !== 'undefined' && typeof DataManager.wipeKeyMirrorsForReset === 'function') {
+                toast?.setProgress(12, 'Wiping invoice storage mirrors…');
                 await DataManager.wipeKeyMirrorsForReset('invoices');
+                toast?.setProgress(28, 'Wiping voucher storage mirrors…');
                 await DataManager.wipeKeyMirrorsForReset('vouchers');
             }
             if (typeof DataManager !== 'undefined') {
+                toast?.setProgress(40, 'Clearing in-memory cache…');
                 DataManager.invalidateDataCache('invoices');
                 DataManager.invalidateDataCache('vouchers');
+                toast?.setProgress(55, 'Loading invoices from disk / cloud…');
                 await DataManager.loadData('invoices', { forceRefresh: true });
+                toast?.setProgress(78, 'Loading vouchers from disk / cloud…');
                 await DataManager.loadData('vouchers', { forceRefresh: true });
             }
-            if (typeof App !== 'undefined') App.showNotification('Invoices & vouchers reloaded.', 'success');
+            toast?.complete('Invoices and vouchers reloaded. You can close this panel.');
             if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
             if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+            try {
+                if (typeof App !== 'undefined' && App.currentView === 'dashboard') {
+                    App._refreshPremiumDashboardShell();
+                    void App.loadDashboard();
+                }
+            } catch (_) { /* ignore */ }
         } catch (e) {
             console.error(e);
-            if (typeof App !== 'undefined') App.showNotification(String(e && e.message || e), 'error');
+            toast?.fail(String((e && e.message) || e));
+            if (typeof App !== 'undefined') App.showNotification(String((e && e.message) || e), 'error');
+        }
+    },
+
+    async mergeInvoicesVouchersFromCloudAndDisk() {
+        if (
+            !confirm(
+                'Reload and merge invoices + vouchers from Firebase and this device, without wiping IndexedDB mirrors.\n\n' +
+                    'Try this when plain bills appear on the web app but not here. Continue?'
+            )
+        ) {
+            return;
+        }
+        const toast =
+            typeof App !== 'undefined' && typeof App.showTaskProgressToast === 'function'
+                ? App.showTaskProgressToast('Merge invoices & vouchers', {
+                    id: 'gtesTaskInvMergeToast',
+                    subtitle: 'Cloud + disk + existing mirrors (no wipe)',
+                })
+                : null;
+        try {
+            toast?.setProgress(8, 'Invalidating memory cache…');
+            if (typeof DataManager === 'undefined' || typeof DataManager.reloadInvoicesVouchersMergedFromAllSources !== 'function') {
+                throw new Error('DataManager.merge reload is not available.');
+            }
+            toast?.setProgress(25, 'Reloading invoices & vouchers (cloud + disk merge)…');
+            await DataManager.reloadInvoicesVouchersMergedFromAllSources();
+            toast?.setProgress(94, 'Refreshing tables…');
+            toast?.complete('Merge reload finished. You can close this panel.');
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+            if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+            try {
+                if (typeof App !== 'undefined' && App.currentView === 'dashboard') {
+                    App._refreshPremiumDashboardShell();
+                    void App.loadDashboard();
+                }
+            } catch (_) { /* ignore */ }
+        } catch (e) {
+            console.error(e);
+            toast?.fail(String((e && e.message) || e));
+            if (typeof App !== 'undefined') App.showNotification(String((e && e.message) || e), 'error');
         }
     },
 
     _wireInvoiceVoucherCacheReloadBtn() {
         const btn = document.getElementById('clearInvoicesVouchersCacheBtn');
-        if (!btn) return;
-        btn.onclick = () => AdminModule.clearInvoiceVoucherCacheAndReload();
+        if (btn) btn.onclick = () => AdminModule.clearInvoiceVoucherCacheAndReload();
+        const mergeBtn = document.getElementById('mergeInvoicesVouchersFromCloudBtn');
+        if (mergeBtn) mergeBtn.onclick = () => AdminModule.mergeInvoicesVouchersFromCloudAndDisk();
     },
 
     async _showDesktopDataFolderBanner() {

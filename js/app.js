@@ -248,7 +248,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.36';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.37';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -2119,6 +2119,119 @@ const App = {
         this.showNotification('Sync mechanism not supported on this device.', 'error');
     },
 
+    /**
+     * Top-right persistent card with a real progress bar. Stays until `complete`, `fail`, or user closes.
+     * @returns {{ setProgress: (n:number, msg?:string)=>void, complete:(msg?:string)=>void, fail:(msg:string)=>void, dismiss:()=>void }}
+     */
+    showTaskProgressToast(title, options = {}) {
+        const id = options.id || 'gtesTaskProgressToast';
+        const existing = document.getElementById(id);
+        if (existing) existing.remove();
+
+        const wrap = document.createElement('div');
+        wrap.id = id;
+        wrap.setAttribute('role', 'status');
+        wrap.className = 'gtes-task-progress-toast';
+        wrap.style.cssText =
+            'position:fixed;top:16px;right:16px;z-index:10060;min-width:300px;max-width:420px;' +
+            'border-radius:12px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.35);' +
+            'border:1px solid var(--border-color, rgba(255,255,255,0.12));' +
+            'background:var(--bg-card, rgba(22,28,42,0.96));color:var(--text-primary, #e9f2ff);' +
+            'backdrop-filter:blur(10px);';
+
+        const head = document.createElement('div');
+        head.className = 'd-flex justify-content-between align-items-start gap-2 p-3 pb-2';
+        const t = document.createElement('div');
+        t.className = 'fw-bold';
+        t.textContent = title || 'Working…';
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'btn-close';
+        closeBtn.setAttribute('aria-label', 'Close');
+        head.appendChild(t);
+        head.appendChild(closeBtn);
+
+        const sub = document.createElement('div');
+        sub.className = 'small text-muted px-3 pb-2';
+        sub.style.opacity = '0.85';
+        sub.textContent = options.subtitle || '';
+
+        const msgEl = document.createElement('div');
+        msgEl.className = 'small px-3 pb-1';
+        msgEl.setAttribute('data-gtes-task-msg', '1');
+        msgEl.textContent = options.initialMessage || 'Starting…';
+
+        const pctRow = document.createElement('div');
+        pctRow.className = 'd-flex justify-content-end align-items-center small px-3 pb-1';
+        const pctEl = document.createElement('span');
+        pctEl.setAttribute('data-gtes-task-pct', '1');
+        pctEl.className = 'fw-bold';
+        pctEl.textContent = '0%';
+        pctRow.appendChild(pctEl);
+
+        const barWrap = document.createElement('div');
+        barWrap.className = 'progress mx-3 mb-3';
+        barWrap.style.height = '10px';
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+        bar.setAttribute('data-gtes-task-bar', '1');
+        bar.style.width = '0%';
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-valuenow', '0');
+        barWrap.appendChild(bar);
+
+        wrap.appendChild(head);
+        if (options.subtitle) wrap.appendChild(sub);
+        wrap.appendChild(msgEl);
+        wrap.appendChild(pctRow);
+        wrap.appendChild(barWrap);
+        document.body.appendChild(wrap);
+
+        let closed = false;
+        const dismiss = () => {
+            if (closed) return;
+            closed = true;
+            try {
+                wrap.classList.remove('show');
+                wrap.remove();
+            } catch (_) { /* ignore */ }
+        };
+
+        closeBtn.addEventListener('click', dismiss);
+
+        const setProgress = (pct, message) => {
+            if (closed) return;
+            const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+            bar.style.width = `${p}%`;
+            bar.setAttribute('aria-valuenow', String(p));
+            pctEl.textContent = `${p}%`;
+            if (message) msgEl.textContent = message;
+            if (p >= 100) {
+                bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                bar.classList.remove('bg-info');
+                bar.classList.add('bg-success');
+            }
+        };
+
+        const complete = (msg) => {
+            if (closed) return;
+            setProgress(100, msg || 'Complete');
+        };
+
+        const fail = (msg) => {
+            if (closed) return;
+            bar.classList.remove('progress-bar-striped', 'progress-bar-animated', 'bg-info');
+            bar.classList.add('bg-danger');
+            bar.style.width = '100%';
+            pctEl.textContent = '—';
+            msgEl.textContent = msg || 'Failed';
+        };
+
+        return { setProgress, complete, fail, dismiss };
+    },
+
     showNotification(message, type = 'info') {
         // Create notification element
         const notification = document.createElement('div');
@@ -2249,7 +2362,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.36';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.37';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');

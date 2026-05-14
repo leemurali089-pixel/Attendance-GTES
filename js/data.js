@@ -548,13 +548,29 @@ const DataManager = {
     },
 
     /** After invalidateDataCache(): pull fresh data from storage/cloud (used by Sync Now). */
-    async reloadAllDataAfterCacheClear() {
+    async reloadAllDataAfterCacheClear(options = {}) {
+        const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
         const { core, background } = this.getDataLoadKeyGroups();
+        const total = (core.length + background.length) || 1;
+        let completed = 0;
+        const emit = (keyHint) => {
+            if (!onProgress) return;
+            const pct = Math.min(100, Math.round((100 * completed) / total));
+            const msg = keyHint
+                ? `Reloading… ${completed}/${total} (${keyHint})`
+                : `Reloading… ${completed}/${total}`;
+            try {
+                onProgress(pct, msg);
+            } catch (_) { /* ignore */ }
+        };
         const load = async (k) => {
             try {
                 await this.loadData(k, { forceRefresh: true });
             } catch (err) {
                 console.error(`[DataManager] Reload failed for '${k}':`, err);
+            } finally {
+                completed += 1;
+                emit(k);
             }
         };
         await Promise.all(core.map(load));
@@ -565,6 +581,14 @@ const DataManager = {
             await Promise.all(chunk.map(load));
             await new Promise((r) => setTimeout(r, 4));
         }
+    },
+
+    /** Invalidate + force reload invoices/vouchers (disk + Firebase merge) without wiping IDB mirrors. */
+    async reloadInvoicesVouchersMergedFromAllSources() {
+        this.invalidateDataCache('invoices');
+        this.invalidateDataCache('vouchers');
+        await this.loadData('invoices', { forceRefresh: true });
+        await this.loadData('vouchers', { forceRefresh: true });
     },
 
     async init() {

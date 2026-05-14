@@ -615,10 +615,18 @@ const SyncManager = {
 
         this.updateStatus('syncing');
         this.logSyncEvent('info', 'Manual sync started');
+        this.setSyncProgress(1, 'Clearing in-memory cache…');
 
         try {
             DataManager.invalidateDataCache();
-            await DataManager.reloadAllDataAfterCacheClear();
+            this.setSyncProgress(3, 'Reloading datasets from disk / cloud…');
+            await DataManager.reloadAllDataAfterCacheClear({
+                onProgress: (pct, msg) => {
+                    const p = Math.max(3, Math.min(99, Number(pct) || 0));
+                    this.setSyncProgress(p, msg || 'Reloading…');
+                },
+            });
+            this.setSyncProgress(100, 'Finishing…');
 
             const currentView = App.currentView;
             if (currentView && typeof App.showView === 'function') {
@@ -647,10 +655,12 @@ const SyncManager = {
 
             this.lastSyncTime = new Date();
             this.updateStatus('synced');
+            this.clearSyncProgress();
             this.logSyncEvent('success', 'Manual sync completed'); // Add distinct log
             App.showNotification('Data synced successfully', 'success');
         } catch (error) {
             console.error('Sync failed:', error);
+            this.clearSyncProgress();
             this.updateStatus('conflict', 'Sync failed');
             this.logSyncEvent('error', `Sync failed: ${error.message}`);
         }
