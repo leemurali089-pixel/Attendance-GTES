@@ -2526,6 +2526,7 @@ footer p {
     letter-spacing: 0.02em;
 }
 
+.global-loader .gtes-loader-eta,
 .global-loader .gtes-loader-elapsed {
     color: var(--gtes-loader-muted);
     font-variant-numeric: tabular-nums;

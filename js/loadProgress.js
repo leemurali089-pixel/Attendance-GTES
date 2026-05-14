@@ -1,11 +1,48 @@
 /**
- * Centralized global loader: percentage, elapsed time, stage text, a11y updates.
+ * Centralized global loader: percentage, estimated time remaining, stage text, a11y updates.
  * Used for cold boot (App.init) and view transitions (App.showView).
  */
 (function (global) {
     const MODE_SIMPLE = 'simple';
     const MODE_BOOT = 'boot';
     const MODE_PAGE = 'page';
+
+    /** Linear extrapolation from current %; capped so tiny % does not show absurd ETAs. */
+    const ETA_CAP_SEC = 600;
+
+    function _formatEtaRemaining(elapsedSec, pct) {
+        if (pct >= 100) return 'Done';
+        if (pct >= 98) return '~a few seconds';
+        if (pct < 2) {
+            return 'Estimating…';
+        }
+        const p = pct / 100;
+        let rem = elapsedSec / p - elapsedSec;
+        if (!Number.isFinite(rem) || rem < 0) return '—';
+        const capped = rem > ETA_CAP_SEC;
+        rem = Math.min(rem, ETA_CAP_SEC);
+        if (rem < 8) return `~${Math.max(0, Math.round(rem))}s left`;
+        if (rem < 90) return `~${Math.round(rem)}s left`;
+        const m = Math.floor(rem / 60);
+        const s = Math.round(rem % 60);
+        const base = `~${m}m ${String(s).padStart(2, '0')}s left`;
+        return capped ? `${base} (or more)` : base;
+    }
+
+    function _liveEtaPhrase(etaShort, pct) {
+        if (pct >= 100) return 'complete';
+        if (pct >= 98) return 'about a few seconds remaining';
+        if (pct < 2) return 'estimating time remaining';
+        if (etaShort === '—') return 'time remaining unknown';
+        if (etaShort === 'Estimating…' || etaShort === 'Done') return etaShort === 'Done' ? 'complete' : 'estimating time remaining';
+        const t = etaShort
+            .replace(/^~\s*/, '')
+            .replace(/\s*\(or more\)$/, '')
+            .trim()
+            .replace(/\s+left$/i, '')
+            .trim();
+        return `about ${t} remaining`;
+    }
 
     const GTESLoadProgress = {
         MODE_SIMPLE,
@@ -17,6 +54,7 @@
         _synthTimer: null,
         _elapsedStart: 0,
         _synthPct: 4,
+        _currentPct: 0,
 
         getMode() {
             return this._mode;
@@ -31,15 +69,16 @@
                 pEl: document.getElementById('globalLoaderPct'),
                 bar: document.getElementById('globalLoaderProgressBar'),
                 st: document.getElementById('globalLoaderStage'),
-                elp: document.getElementById('globalLoaderElapsed'),
+                eta: document.getElementById('globalLoaderEta') || document.getElementById('globalLoaderElapsed'),
                 live: document.getElementById('globalLoaderLive'),
             };
         },
 
         setProgress(pct, stageText) {
             const n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+            this._currentPct = n;
             const stage = stageText != null ? String(stageText) : 'Loading…';
-            const { pEl, bar, st, live, elp } = this._els();
+            const { pEl, bar, st, live, eta } = this._els();
             if (pEl) {
                 pEl.textContent = `${n}%`;
                 pEl.setAttribute('aria-label', `${n} percent`);
@@ -50,28 +89,34 @@
                 bar.setAttribute('aria-valuetext', `${stage}, ${n} percent`);
             }
             if (st) st.textContent = stage;
-            const elapsedTxt = elp ? elp.textContent.trim() : '';
+            const elapsedSec =
+                this._elapsedTimer == null ? 0 : Math.max(0, (performance.now() - this._elapsedStart) / 1000);
+            const etaShort = _formatEtaRemaining(elapsedSec, n);
+            if (eta) eta.textContent = etaShort;
             if (live && (this._mode === MODE_BOOT || this._mode === MODE_PAGE)) {
-                live.textContent = `${stage}. ${n}% complete. Elapsed ${elapsedTxt || '0.0s'}.`;
+                live.textContent = `${stage}. ${n}% complete. ${_liveEtaPhrase(etaShort, n)}.`;
             }
         },
 
         _tickElapsed() {
-            const el = document.getElementById('globalLoaderElapsed');
-            if (el) el.textContent = `${((performance.now() - this._elapsedStart) / 1000).toFixed(1)}s`;
+            const elapsedSec =
+                this._elapsedTimer == null ? 0 : Math.max(0, (performance.now() - this._elapsedStart) / 1000);
+            const n = this._currentPct;
+            const etaShort = _formatEtaRemaining(elapsedSec, n);
+            const el = document.getElementById('globalLoaderEta') || document.getElementById('globalLoaderElapsed');
+            if (el) el.textContent = etaShort;
             if (this._mode === MODE_BOOT || this._mode === MODE_PAGE) {
-                const { pEl, st, live, elp } = this._els();
-                const n = pEl ? parseInt(String(pEl.textContent).replace(/[^\d]/g, ''), 10) : 0;
+                const { st, live } = this._els();
                 const safeN = Number.isFinite(n) ? n : 0;
                 const stage = st ? st.textContent : 'Loading…';
-                const elapsedTxt = elp ? elp.textContent.trim() : '';
-                if (live) live.textContent = `${stage}. ${safeN}% complete. Elapsed ${elapsedTxt || '0.0s'}.`;
+                if (live) live.textContent = `${stage}. ${safeN}% complete. ${_liveEtaPhrase(etaShort, safeN)}.`;
             }
         },
 
         startElapsed() {
             this.stopElapsed();
             this._elapsedStart = performance.now();
+            this._currentPct = 0;
             this._tickElapsed();
             this._elapsedTimer = setInterval(() => this._tickElapsed(), 200);
         },
@@ -125,8 +170,8 @@
                 loader.classList.add('gtes-loader-page');
                 this._synthPct = 4;
                 const stage = (opts && opts.stage) || 'Opening…';
-                this.setProgress(4, stage);
                 this.startElapsed();
+                this.setProgress(4, stage);
                 this.startSyntheticPageProgress();
             } else if (mode === MODE_BOOT) {
                 loader.classList.remove('gtes-loader-page');

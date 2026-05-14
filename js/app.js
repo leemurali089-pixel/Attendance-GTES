@@ -15,7 +15,7 @@ const App = {
     /** During sync/import, coalesce view refreshes until sync completes. */
     _deferredDataRefreshKeys: null,
     _deferredDataRefreshTimer: null,
-    /** First cold start: show staged % + elapsed on #globalLoader; suppress nested showView loaders. */
+    /** First cold start: show staged % + estimated time remaining on #globalLoader; suppress nested showView loaders. */
     _bootSequenceActive: false,
     /** When true, next showLoader() shows detailed progress (view transitions). */
     _loaderPageDetail: false,
