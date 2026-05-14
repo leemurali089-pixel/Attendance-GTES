@@ -197,6 +197,13 @@ const AdminModule = {
                                     <span class="small text-muted">Restarts the app; saves your choice for next launches.</span>
                                 </div>
                             </div>
+                            <div class="alert alert-secondary border mb-3" id="invoiceVoucherCacheHelpCard">
+                                <div class="fw-semibold mb-1"><i class="bi bi-arrow-clockwise me-1"></i> Invoice &amp; voucher cache</div>
+                                <p class="small text-muted mb-2">Plain rows can exist in <strong>Firebase</strong> (web) while this device still holds an older copy in <strong>IndexedDB</strong> or memory. Use after changing the Data folder, or when the web app shows plain bills but this window does not.</p>
+                                <button type="button" class="btn btn-sm btn-outline-warning" id="clearInvoicesVouchersCacheBtn">
+                                    Clear invoice/voucher cache &amp; reload
+                                </button>
+                            </div>
                             <form id="companySettingsForm" onsubmit="AdminModule.saveSettings(event)">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
@@ -463,6 +470,35 @@ const AdminModule = {
         this._wireTaxGroupsCard();
         this._wireAppUpdateCard();
         await this._showDesktopDataFolderBanner();
+        this._wireInvoiceVoucherCacheReloadBtn();
+    },
+
+    async clearInvoiceVoucherCacheAndReload() {
+        if (!confirm('Clear local cache for invoices and vouchers (IndexedDB / storage mirrors), then reload from disk and cloud. Continue?')) return;
+        try {
+            if (typeof DataManager !== 'undefined' && typeof DataManager.wipeKeyMirrorsForReset === 'function') {
+                await DataManager.wipeKeyMirrorsForReset('invoices');
+                await DataManager.wipeKeyMirrorsForReset('vouchers');
+            }
+            if (typeof DataManager !== 'undefined') {
+                DataManager.invalidateDataCache('invoices');
+                DataManager.invalidateDataCache('vouchers');
+                await DataManager.loadData('invoices', { forceRefresh: true });
+                await DataManager.loadData('vouchers', { forceRefresh: true });
+            }
+            if (typeof App !== 'undefined') App.showNotification('Invoices & vouchers reloaded.', 'success');
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+            if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+        } catch (e) {
+            console.error(e);
+            if (typeof App !== 'undefined') App.showNotification(String(e && e.message || e), 'error');
+        }
+    },
+
+    _wireInvoiceVoucherCacheReloadBtn() {
+        const btn = document.getElementById('clearInvoicesVouchersCacheBtn');
+        if (!btn) return;
+        btn.onclick = () => AdminModule.clearInvoiceVoucherCacheAndReload();
     },
 
     async _showDesktopDataFolderBanner() {

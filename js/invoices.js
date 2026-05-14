@@ -247,6 +247,22 @@ const InvoiceManager = {
         return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
     },
 
+    /** GST sales list row (legacy untyped → GST). Excludes DC-only rows and credit notes. */
+    isGstSalesListRow(inv) {
+        if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
+        const t = inv.type;
+        if (t == null || String(t).trim() === '') return true;
+        return this.isGSTType(t);
+    },
+
+    /** Plain (non-GST) sales list row. Excludes DC-only and credit notes. */
+    isPlainSalesListRow(inv) {
+        if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
+        const t = inv.type;
+        if (t == null || String(t).trim() === '') return false;
+        return !this.isGSTType(t);
+    },
+
     /**
      * Delete invoice. Always removes linked delivery/service challans so History / View DC stay in sync.
      * (Second arg kept for older call sites; ignored — challans are always deleted with the invoice.)

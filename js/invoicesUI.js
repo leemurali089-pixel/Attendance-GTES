@@ -805,7 +805,12 @@ const InvoicesUI = {
 
         // Populate Filter Options
         const allInvoices = DataManager.getData('invoices') || [];
-        const invoices = allInvoices.filter(i => isGST ? (i.type === 'gst-invoice' || i.type === 'with-bill' || !i.type) : (i.type === 'non-gst-invoice' || i.type === 'without-bill'));
+        const im = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+        const invoices = allInvoices.filter((i) =>
+            isGST
+                ? (im && im.isGstSalesListRow ? im.isGstSalesListRow(i) : (i.type === 'gst-invoice' || i.type === 'with-bill' || !i.type))
+                : (im && im.isPlainSalesListRow ? im.isPlainSalesListRow(i) : (i.type === 'non-gst-invoice' || i.type === 'without-bill'))
+        );
 
         const fyOptionsList = this._indianFyOptionListFromDates(invoices.map((i) => i.date));
         const fyOptionsHtml = fyOptionsList
@@ -993,13 +998,14 @@ const InvoicesUI = {
 
         // High accuracy: data with balance calculation from InvoiceManager
         let invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getInvoicesWithBalance() : [];
+        const im = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
         if (isGST) {
-            invoices = invoices.filter(
-                (inv) => inv.type === 'gst-invoice' || inv.type === 'with-bill' || !inv.type
+            invoices = invoices.filter((inv) =>
+                im && im.isGstSalesListRow ? im.isGstSalesListRow(inv) : (inv.type === 'gst-invoice' || inv.type === 'with-bill' || !inv.type)
             );
         } else {
-            invoices = invoices.filter(
-                (inv) => inv.type === 'non-gst-invoice' || inv.type === 'without-bill'
+            invoices = invoices.filter((inv) =>
+                im && im.isPlainSalesListRow ? im.isPlainSalesListRow(inv) : (inv.type === 'non-gst-invoice' || inv.type === 'without-bill')
             );
         }
 
@@ -1089,13 +1095,15 @@ const InvoicesUI = {
 
         if (forTable.length === 0) {
             const allRaw = DataManager.getData('invoices') || [];
-            const plainTagged = allRaw.filter(
-                (i) => i.type === 'non-gst-invoice' || i.type === 'without-bill'
+            const im = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+            const plainTagged = allRaw.filter((i) =>
+                im && im.isPlainSalesListRow ? im.isPlainSalesListRow(i) : (i.type === 'non-gst-invoice' || i.type === 'without-bill')
             ).length;
             if (!isGST && plainTagged === 0 && allRaw.length > 0) {
                 container.innerHTML = `<div class="text-center py-5 px-3 text-muted">
-                    <p class="mb-2">There are <strong>no</strong> invoices stored as plain (<code>without-bill</code> / <code>non-gst-invoice</code>), but <strong>${allRaw.length}</strong> sales invoice(s) exist — most likely all are tagged <strong>GST / with-bill</strong> (common after Book Keeper import).</p>
-                    <p class="mb-0">Open <strong>GST Invoices</strong> from the sidebar to see them. If you truly had separate plain bills, restore an older <code>Data/invoices.json</code> (or <code>Data/invoices-MJ-*.json</code> if you keep copies), or re-import from Book Keeper.</p>
+                    <p class="mb-2">There are <strong>no</strong> plain (non-GST) sales rows in the data this app loaded (<code>without-bill</code>, <code>non-gst-invoice</code>, <code>sales-non-gst</code>, etc.), but <strong>${allRaw.length}</strong> sales invoice(s) exist — often all are tagged <strong>GST / with-bill</strong>.</p>
+                    <p class="mb-2">If plain bills show in the <strong>browser</strong> app, they may live only in <strong>Firebase</strong> while this PC’s <code>invoices.json</code> is older. Use <strong>Cloud Sync</strong>, or Admin → System Settings → <strong>Clear invoice/voucher cache &amp; reload</strong>, and ensure you are online.</p>
+                    <p class="mb-0">Otherwise open <strong>GST Invoices</strong>, or restore / re-import <code>Data/invoices.json</code>.</p>
                 </div>`;
             } else if (isGST && filteredAll.length > 0) {
                 container.innerHTML = `<div class="text-center py-5 text-muted">No standard GST invoices match this view. Delivery challan bills are listed under <strong>Accounting → Challans → View DC</strong>.</div>`;
@@ -2781,7 +2789,9 @@ const InvoicesUI = {
         element.style.color = '#000';
         element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
 
-        const isPlainPdf = invoice.type === 'non-gst-invoice' || invoice.type === 'without-bill';
+        const isPlainPdf = invoice && typeof InvoiceManager !== 'undefined' && InvoiceManager.isPlainSalesListRow
+            ? InvoiceManager.isPlainSalesListRow(invoice)
+            : (invoice.type === 'non-gst-invoice' || invoice.type === 'without-bill');
         const isGstPdf = !isPlainPdf && (invoice.billType === 'gst' || invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst');
         const isInterstateGst = isGstPdf && this._isInterstateSalesGst(invoice, customer, company.gstin);
 
