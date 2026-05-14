@@ -87,7 +87,15 @@
   }
 
   function _salesScopeFilter(inv, scope) {
-    const gst = typeof InvoiceManager !== "undefined" && InvoiceManager.isGSTType ? InvoiceManager.isGSTType(inv.type) : String(inv.type || "").includes("bill");
+    if (typeof InvoiceManager !== "undefined" && InvoiceManager.isGstSalesListRow && InvoiceManager.isPlainSalesListRow) {
+      if (scope === "gst") return InvoiceManager.isGstSalesListRow(inv);
+      if (scope === "plain") return InvoiceManager.isPlainSalesListRow(inv);
+      return true;
+    }
+    const gst =
+      typeof InvoiceManager !== "undefined" && InvoiceManager.isGSTType
+        ? InvoiceManager.isGSTType(inv.type)
+        : String(inv.type || "").includes("bill");
     if (scope === "gst") return gst;
     if (scope === "plain") return !gst;
     return true;

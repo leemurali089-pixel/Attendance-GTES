@@ -38,6 +38,18 @@ const VouchersUI = {
         });
     },
 
+    /** Receipt: GST vs plain when `hasGst` is missing (Book Keeper / Firebase). */
+    _receiptDerivedHasGst(v, invoices) {
+        if (!v || v.type !== 'receipt') return true;
+        if (v.hasGst === true) return true;
+        if (v.hasGst === false) return false;
+        const pool = Array.isArray(invoices) ? invoices : DataManager.getData('invoices') || [];
+        if (window.BookKeeperImport && typeof BookKeeperImport.resolveReceiptHasGstFromInvoices === 'function') {
+            return BookKeeperImport.resolveReceiptHasGstFromInvoices(v, pool);
+        }
+        return true;
+    },
+
     /** Dates for rows that appear in the current vouchers list mode (vouchers / credit notes / debit notes). */
     _fyDateSourcesForCurrentList() {
         if (this.currentMode === 'credit-note') {
@@ -51,12 +63,13 @@ const VouchersUI = {
                 .map((exp) => exp.date);
         }
         let vouchers = DataManager.getData('vouchers') || [];
+        const invs = DataManager.getData('invoices') || [];
         if (this.currentMode === 'purchase') {
             vouchers = vouchers.filter((v) => v.type === 'payment');
         } else if (this.currentMode === 'gst') {
-            vouchers = vouchers.filter((v) => v.type === 'receipt' && v.hasGst === true);
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
         } else if (this.currentMode === 'non-gst') {
-            vouchers = vouchers.filter((v) => v.type === 'receipt' && v.hasGst === false);
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && !this._receiptDerivedHasGst(v, invs));
         }
         return (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v)).map((v) => v.date);
     },
@@ -166,8 +179,12 @@ const VouchersUI = {
     _voucherPassesListModeFilter(v) {
         if (this.currentMode === 'purchase') return true;
         if (v.isPurchase || v.type === 'purchase') return false;
-        if (this.currentMode === 'gst') return v.hasGst === true;
-        return v.hasGst === false;
+        if (v.type !== 'receipt') return false;
+        const invs = DataManager.getData('invoices') || [];
+        const gst = this._receiptDerivedHasGst(v, invs);
+        if (this.currentMode === 'gst') return gst;
+        if (this.currentMode === 'non-gst') return !gst;
+        return true;
     },
 
     _applyVoucherListSort(rows) {
@@ -707,7 +724,8 @@ const VouchersUI = {
 
         // Fetch vouchers
         let vouchers = DataManager.getData('vouchers') || [];
-        
+        const invs = DataManager.getData('invoices') || [];
+
         // Refactored logic based on user feedback:
         // Purchase Vouchers Mode: Show Payments (Out)
         // GST Vouchers Mode: Show Receipts (In)
@@ -715,9 +733,9 @@ const VouchersUI = {
         if (this.currentMode === 'purchase') {
             vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'payment');
         } else if (this.currentMode === 'gst') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst === true);
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
         } else if (this.currentMode === 'non-gst') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && v.hasGst === false);
+            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && !this._receiptDerivedHasGst(v, invs));
         }
 
         const list = (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v));

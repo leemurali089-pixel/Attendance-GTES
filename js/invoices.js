@@ -254,20 +254,27 @@ const InvoiceManager = {
         return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
     },
 
-    /** GST sales list row (legacy untyped → GST). Excludes DC-only rows and credit notes. */
-    isGstSalesListRow(inv) {
-        if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
-        const t = inv.type;
-        if (t == null || String(t).trim() === '') return true;
-        return this.isGSTType(t);
-    },
-
     /** Plain (non-GST) sales list row. Excludes DC-only and credit notes. */
     isPlainSalesListRow(inv) {
         if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
+        if (inv.billType === 'plain') return true;
+        const no = String(inv.invoiceNo || inv.id || '');
+        if (/INV-NB-/i.test(no)) return true;
         const t = inv.type;
-        if (t == null || String(t).trim() === '') return false;
-        return !this.isGSTType(t);
+        if (t != null && String(t).trim() !== '') {
+            return !this.isGSTType(t);
+        }
+        if (inv.hasGst === false) return true;
+        return false;
+    },
+
+    /** GST sales list row (legacy untyped → GST). Excludes DC-only rows and credit notes. */
+    isGstSalesListRow(inv) {
+        if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
+        if (this.isPlainSalesListRow(inv)) return false;
+        const t = inv.type;
+        if (t == null || String(t).trim() === '') return true;
+        return this.isGSTType(t);
     },
 
     /**
@@ -354,7 +361,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 15; // Electron: skip LS merge for invoices; IDB merge order; getAllInvoices coerce
+        const logicVersion = 16; // Plain vs GST list: billType, INV-NB-, hasGst; voucher list derives hasGst
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
