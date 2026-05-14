@@ -6,12 +6,14 @@
 const DeliveryUI = {
     /** html2canvas/jsPDF: keep under ~A4 printable width to avoid horizontal clipping */
     GTES_PDF_DOCUMENT_WIDTH_PX: 760,
-    /** Lower = faster PDFs (scale 2 is ~4× pixels vs 1.25). Slight softness on dense tables. */
-    GTES_HTML2PDF_CANVAS_SCALE: 1.28,
-    /** Ledger multi-page: cap scale for shorter capture time */
-    GTES_LEDGER_HTML2PDF_SCALE: 1.12,
-    /** Invoice / purchase bills: denser DOM than vouchers — use a slightly lower scale */
-    GTES_INVOICE_PURCHASE_HTML2PDF_SCALE: 1.14,
+    /** html2canvas scale: higher = sharper text (PDF size grows ~× scale²). */
+    GTES_HTML2PDF_CANVAS_SCALE: 1.85,
+    /** Ledger multi-page: keep moderate for speed */
+    GTES_LEDGER_HTML2PDF_SCALE: 1.35,
+    /** Invoice / purchase / challan tables — balance sharpness vs file size */
+    GTES_INVOICE_PURCHASE_HTML2PDF_SCALE: 1.72,
+    /** Voucher PDFs — match invoice clarity */
+    GTES_VOUCHER_HTML2PDF_SCALE: 1.72,
 
     currentEditingChallan: null,
     currentEditingMaterialId: null,
@@ -4340,9 +4342,9 @@ const DeliveryUI = {
         }, 500);
     },
 
-    /** Shared html2pdf options: A4, margins, multi-page via css/legacy pagebreak */
+    /** Shared html2pdf options: A4, margins, multi-page via CSS only (legacy mode often adds blank pages). */
     buildGtesHtml2PdfOptions(extra = {}) {
-        const scale = this.GTES_HTML2PDF_CANVAS_SCALE || 1.28;
+        const scale = this.GTES_HTML2PDF_CANVAS_SCALE || 1.85;
         const baseHtml2 = {
             scale,
             useCORS: true,
@@ -4350,16 +4352,17 @@ const DeliveryUI = {
             logging: false,
             backgroundColor: '#ffffff',
             scrollX: 0,
-            scrollY: 0
+            scrollY: 0,
+            letterRendering: true
         };
         const mergedH2c = { ...baseHtml2, ...(extra.html2canvas || {}) };
         const { html2canvas: _drop, ...restExtra } = extra;
         return {
-            margin: [0.2, 0.2, 0.2, 0.2],
-            image: { type: 'jpeg', quality: 0.9 },
+            margin: [0.15, 0.15, 0.15, 0.15],
+            image: { type: 'jpeg', quality: 0.94 },
             html2canvas: mergedH2c,
             jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] },
+            pagebreak: { mode: ['css'] },
             ...restExtra
         };
     },
@@ -4385,6 +4388,15 @@ const DeliveryUI = {
         clone.style.transform = 'none';
         clone.style.left = 'auto';
         clone.style.top = 'auto';
+        clone.style.minHeight = '0';
+        clone.style.height = 'auto';
+        clone.style.maxHeight = 'none';
+        clone.querySelectorAll('.gtes-pdf-preview-sheet, [id$="PrintArea"]').forEach((el) => {
+            try {
+                el.style.minHeight = '0';
+                el.style.height = 'auto';
+            } catch (_) { /* ignore */ }
+        });
         host.appendChild(clone);
         document.body.appendChild(host);
         void clone.offsetWidth;
@@ -4515,11 +4527,10 @@ const DeliveryUI = {
         if (!voucher) return;
 
         const filename = `${voucher.type === 'receipt' ? 'Receipt' : 'Payment'}_${id}.pdf`;
-        const vchScale = this.GTES_VOUCHER_HTML2PDF_SCALE || 1.06;
+        const vchScale = this.GTES_VOUCHER_HTML2PDF_SCALE || 1.72;
         const opt = this.buildGtesHtml2PdfOptions({
             filename,
             margin: [0.35, 0.35, 0.35, 0.35],
-            image: { type: 'jpeg', quality: 0.85 },
             html2canvas: { scale: vchScale }
         });
 

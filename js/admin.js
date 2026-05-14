@@ -188,8 +188,13 @@ const AdminModule = {
                                 <div class="fw-semibold mb-1"><i class="bi bi-folder2-open me-1"></i> Desktop app data folder</div>
                                 <code class="small d-block text-break user-select-all" id="desktopDataRootPath"></code>
                                 <p class="small text-muted mb-0 mt-2">
-                                    Installed builds read and write JSON here. The web app uses Firebase / browser storage instead, so plain invoices and vouchers can appear in the browser while this folder still has older files. Copy updated <code>invoices.json</code> and <code>vouchers.json</code> here (or use Export/Import / Sync) so the desktop matches the web.
+                                    Installed builds read and write JSON here. The web app uses Firebase / browser storage instead, so plain invoices and vouchers can appear in the browser while this folder still has older files.
                                 </p>
+                                <ol class="small text-muted mb-0 mt-2 ps-3">
+                                    <li class="mb-1"><strong>Preferred:</strong> stay online in the desktop app and use <strong>Sync now</strong>, then Admin → <strong>Merge cloud + disk (invoices &amp; vouchers)</strong> so Firebase is the source of truth.</li>
+                                    <li class="mb-1"><strong>Manual OneDrive / folder copy:</strong> close the desktop app completely. Copy <code>invoices.json</code> and <code>vouchers.json</code> from your web backup (or from another PC that already synced) into this exact folder path above — same file names. If OneDrive syncs this folder, wait until sync finishes, then reopen the app.</li>
+                                    <li class="mb-0">After replacing files, use <strong>Clear invoice/voucher cache &amp; reload</strong> below if totals still look stale.</li>
+                                </ol>
                                 <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
                                     <button type="button" class="btn btn-sm btn-outline-primary" id="desktopDataFolderPickBtn">
                                         <i class="bi bi-folder-symlink"></i> Use a different Data folder…

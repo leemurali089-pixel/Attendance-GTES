@@ -1000,7 +1000,7 @@ const ReportsModule = {
                         orientation: 'portrait',
                         compress: true
                     },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                    pagebreak: { mode: ['avoid-all', 'css'] }
                 };
 
                 html2pdf().set(opt).from(element).save().then(() => {
@@ -1234,7 +1234,7 @@ const ReportsModule = {
                         orientation: 'portrait',
                         compress: true
                     },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                    pagebreak: { mode: ['avoid-all', 'css'] }
                 };
 
                 html2pdf().set(opt).from(element).save().then(() => {
@@ -1539,7 +1539,7 @@ const ReportsModule = {
                             image: { type: 'jpeg', quality: 0.98 },
                             html2canvas: { scale: 2, useCORS: true, logging: false },
                             jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
-                            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                            pagebreak: { mode: ['avoid-all', 'css'] }
                         };
 
                         try {
@@ -1576,7 +1576,7 @@ const ReportsModule = {
                             image: { type: 'jpeg', quality: 0.98 },
                             html2canvas: { scale: 2, useCORS: true, logging: false, letterRendering: true },
                             jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
-                            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                            pagebreak: { mode: ['avoid-all', 'css'] }
                         };
 
                         try {
@@ -1906,7 +1906,7 @@ const ReportsModule = {
                     orientation: 'landscape',
                     compress: true
                 },
-                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                pagebreak: { mode: ['avoid-all', 'css'] }
             };
 
             html2pdf().set(opt).from(element).output('bloburl').then((pdfUrl) => {

@@ -1,11 +1,1 @@
-[
-  {
-    "name": "XML Customer",
-    "accountType": "Customer",
-    "openingBalance": "0",
-    "phone": "9998887776",
-    "email": "xml@example.com",
-    "address": "123 XML Lane",
-    "createdAt": "2023-10-27T10:00:00.000Z"
-  }
-]
+[{"name":"XML Customer","accountType":"Customer","openingBalance":"0","phone":"9998887776","email":"xml@example.com","address":"123 XML Lane","createdAt":"2023-10-27T10:00:00.000Z"}]

@@ -38,12 +38,19 @@ const VouchersUI = {
         });
     },
 
-    /** Receipt: GST vs plain when `hasGst` is missing (Book Keeper / Firebase). */
+    /** Receipt: GST vs plain when `hasGst` is missing or wrong vs linked sales (Book Keeper / Firebase). */
     _receiptDerivedHasGst(v, invoices) {
         if (!v || v.type !== 'receipt') return true;
-        if (v.hasGst === true) return true;
         if (v.hasGst === false) return false;
         const pool = Array.isArray(invoices) ? invoices : DataManager.getData('invoices') || [];
+        const hasLinked =
+            (Array.isArray(v.linkedInvoices) && v.linkedInvoices.length > 0) ||
+            (Array.isArray(v.allocations) && v.allocations.length > 0) ||
+            (v.linkedInvoiceId != null && String(v.linkedInvoiceId).trim() !== '');
+        if (hasLinked && window.BookKeeperImport && typeof BookKeeperImport.resolveReceiptHasGstFromInvoices === 'function') {
+            return BookKeeperImport.resolveReceiptHasGstFromInvoices(v, pool);
+        }
+        if (v.hasGst === true) return true;
         if (window.BookKeeperImport && typeof BookKeeperImport.resolveReceiptHasGstFromInvoices === 'function') {
             return BookKeeperImport.resolveReceiptHasGstFromInvoices(v, pool);
         }
@@ -58,14 +65,20 @@ const VouchersUI = {
                 .map((inv) => inv.date);
         }
         if (this.currentMode === 'debit-note') {
-            return (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
+            const expDates = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
                 .filter((exp) => this._isDebitNotePurchase(exp))
                 .map((exp) => exp.date);
+            const bkPayDates = (DataManager.getData('vouchers') || [])
+                .filter((v) => this._isBookkeeperPurchaseReturnPaymentVoucher(v))
+                .map((v) => v.date);
+            return [...expDates, ...bkPayDates];
         }
         let vouchers = DataManager.getData('vouchers') || [];
         const invs = DataManager.getData('invoices') || [];
         if (this.currentMode === 'purchase') {
-            vouchers = vouchers.filter((v) => v.type === 'payment');
+            vouchers = vouchers.filter(
+                (v) => v.type === 'payment' && !this._isBookkeeperPurchaseReturnPaymentVoucher(v)
+            );
         } else if (this.currentMode === 'gst') {
             vouchers = vouchers.filter((v) => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
         } else if (this.currentMode === 'non-gst') {
@@ -226,6 +239,10 @@ const VouchersUI = {
     },
 
     _debitNoteRef(p) {
+        if (p && p._bkReturnVoucher) {
+            const r = String(p._bkDebitRef || '').trim();
+            return r || '-';
+        }
         return (typeof VoucherManager !== 'undefined' && VoucherManager.resolveDebitNotePurchaseRef)
             ? (VoucherManager.resolveDebitNotePurchaseRef(p) || '-')
             : (p.referenceNo || p.refNo || p.purchaseInvoiceRef || p.purchaseInvoiceNo || p.refInvoiceNo || p.baseInvoiceNo || p.originalInvoiceNo || p.supplierInvoiceNo || p.supplierBillNo || '-');
@@ -458,6 +475,9 @@ const VouchersUI = {
     },
 
     _debitNoteRowLinkStatus(exp) {
+        if (exp && exp._bkReturnVoucher) {
+            return String(exp._bkDebitRef || '').trim() ? 'linked' : 'unlinked';
+        }
         return this._debitNoteSettlementLinked(exp) ? 'linked' : 'unlinked';
     },
 
@@ -731,7 +751,9 @@ const VouchersUI = {
         // GST Vouchers Mode: Show Receipts (In)
         
         if (this.currentMode === 'purchase') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'payment');
+            vouchers = (DataManager.getData('vouchers') || []).filter(
+                (v) => v.type === 'payment' && !this._isBookkeeperPurchaseReturnPaymentVoucher(v)
+            );
         } else if (this.currentMode === 'gst') {
             vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
         } else if (this.currentMode === 'non-gst') {
@@ -888,6 +910,84 @@ const VouchersUI = {
         return exp.isDebitNote === true;
     },
 
+    /** True when payment lines reference a purchase/expense row classified as debit note / purchase return. */
+    _paymentAllocatesToDebitNotePurchase(v) {
+        if (!v || v.type !== 'payment') return false;
+        const want = new Set();
+        const add = (x) => {
+            const s = String(x ?? '').trim();
+            if (s) want.add(s);
+        };
+        (v.allocations || []).forEach((a) => {
+            if (!a || typeof a !== 'object') return;
+            [a.id, a.billNo, a.no, a.invoiceNo, a.supplierBillNo].forEach(add);
+        });
+        (v.linkedInvoices || []).forEach((x) => {
+            if (x == null) return;
+            if (typeof x === 'object') {
+                [x.id, x.billNo, x.no, x.invoiceNo].forEach(add);
+            } else {
+                add(x);
+            }
+        });
+        add(v.linkedInvoiceId);
+        if (want.size === 0) return false;
+        const primary = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+        const alt = DataManager.getData('gtes_expenses') || [];
+        const pool = primary === alt ? primary : [...primary, ...alt];
+        for (const exp of pool) {
+            if (!exp || !this._isDebitNotePurchase(exp)) continue;
+            const keys = [exp.id, exp.billNo, exp.vch_no, exp.invoiceNo, exp.bookkeeperId, exp.purchaseNo]
+                .map((k) => String(k || '').trim())
+                .filter(Boolean);
+            for (const k of keys) {
+                if (want.has(k)) return true;
+            }
+        }
+        return false;
+    },
+
+    /**
+     * Supplier debit return / purchase return payment — not a normal purchase voucher.
+     * Uses allocation → debit-note purchase match (works after cloud import) plus Book Keeper flags/text.
+     */
+    _isBookkeeperPurchaseReturnPaymentVoucher(v) {
+        if (!v || v.type !== 'payment') return false;
+        if (v.isPurchaseDebitReturn === true || v.isDebitReturn === true) return true;
+        if (this._paymentAllocatesToDebitNotePurchase(v)) return true;
+
+        const fromBk = String(v.source || '').toLowerCase() === 'bookkeeper' || /^BK-/i.test(String(v.bookkeeperId || ''));
+        const vt = String(v.bookkeeperVchType || v.v_type || '').toLowerCase();
+        const nar = String(v.narration || v.remarks || '').toLowerCase();
+        const blob = `${vt} ${nar}`;
+        if (/\bdebit\s*note\b/.test(blob) && (blob.includes('purchase') || blob.includes('purchas') || blob.includes('supplier') || blob.includes('vendor'))) return true;
+        if (/\bpurchase\s*returns?\b|\bpurchases\s*returns?\b/.test(blob)) return true;
+        if (/\bdebit\s*return\b/.test(blob)) return true;
+        if (blob.includes('debit') && blob.includes('return') && (blob.includes('purchase') || blob.includes('purchas'))) return true;
+        if (!fromBk) return false;
+        if (blob.includes('debit return')) return true;
+        if (blob.includes('purchase return') || blob.includes('purchases return')) return true;
+        if (blob.includes('debit') && blob.includes('return')) return true;
+        if (blob.includes('debit') && blob.includes('note') && blob.includes('purchase')) return true;
+        return false;
+    },
+
+    _bkPurchaseReturnPaymentAllocRef(v) {
+        if (!v) return '';
+        const a0 = Array.isArray(v.allocations) && v.allocations.length ? v.allocations[0] : null;
+        if (a0 && typeof a0 === 'object') {
+            const bits = [a0.billNo, a0.no, a0.supplierBillNo, a0.id].map((x) => String(x || '').trim()).filter(Boolean);
+            const bk = String(v.bookkeeperId || '').trim();
+            for (const b of bits) {
+                if (b && b !== bk) return b;
+            }
+        }
+        if (typeof VoucherManager !== 'undefined' && typeof VoucherManager.parsePurchaseInvoiceRefFromNarration === 'function') {
+            return String(VoucherManager.parsePurchaseInvoiceRefFromNarration(v.narration || '') || '').trim();
+        }
+        return '';
+    },
+
     updateCreditNotesTable() {
         if (!this._voucherSkipLimitReset) {
             this._vouchersListVisibleLimit = 150;
@@ -987,14 +1087,31 @@ const VouchersUI = {
 
         const container = document.getElementById('vouchersTableContainer');
         if (!container) return;
-        let purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
-            .filter(exp => this._isDebitNotePurchase(exp));
-        this._applyDebitNoteSort(purchases);
-
-        if (purchases.length === 0) {
+        const expRows = (DataManager.getData(DataManager.KEYS.EXPENSES) || []).filter((exp) => this._isDebitNotePurchase(exp));
+        const bkRows = (DataManager.getData('vouchers') || [])
+            .filter((v) => this._isBookkeeperPurchaseReturnPaymentVoucher(v))
+            .map((v) => ({
+                _bkReturnVoucher: true,
+                _voucherId: v.id,
+                date: v.date,
+                billNo: v.displayVoucherNo || v.voucherNo || v.id,
+                vch_no: v.bookkeeperVchNo || v.bookkeeperVchType || '',
+                vendor: v.customerName,
+                vendorName: v.customerName,
+                amount: v.amount,
+                total: v.amount,
+                vch_amt: v.amount,
+                narration: v.narration,
+                bookkeeperVchType: v.bookkeeperVchType,
+                _bkDebitRef: this._bkPurchaseReturnPaymentAllocRef(v),
+            }));
+        if (!expRows.length && !bkRows.length) {
             container.innerHTML = `<div class="text-center py-5 text-muted"><i class="bi bi-receipt-cutoff fs-1 d-block mb-3"></i>No debit notes found.</div>`;
             return;
         }
+
+        let purchases = [...expRows, ...bkRows];
+        this._applyDebitNoteSort(purchases);
 
         const fyFilter = (document.getElementById('filterVoucherFY')?.value || '').trim();
         const monthFilter = document.getElementById('filterVoucherMonth')?.value || '';
@@ -1015,7 +1132,7 @@ const VouchersUI = {
             if (linkFilter && this._debitNoteRowLinkStatus(p) !== linkFilter) return false;
             const docNo = p.billNo || p.vch_no || p.id || '';
             const refNo = this._debitNoteRef(p);
-            const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
+            const search = `${docNo} ${p.vendor || p.vendorName || ''} ${refNo}`.toLowerCase();
             if (query && !search.includes(query)) return false;
             return true;
         });
@@ -1045,7 +1162,7 @@ const VouchersUI = {
             const amount = Math.abs(parseFloat(p.total ?? p.amount ?? p.vch_amt ?? 0) || 0);
             const docNo = p.billNo || p.vch_no || p.id || '';
             const refNo = this._debitNoteRef(p);
-            const search = `${docNo} ${p.vendor || ''} ${refNo}`.toLowerCase();
+            const search = `${docNo} ${p.vendor || p.vendorName || ''} ${refNo}`.toLowerCase();
             const linkStr = this._debitNoteRowLinkStatus(p);
             const dt = new Date(p.date || '');
             const ymd = Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
@@ -1058,8 +1175,10 @@ const VouchersUI = {
                             <td>${refNo}</td>
                             <td class="text-end">₹${amount.toFixed(2)}</td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${p.id}')" title="View"><i class="bi bi-eye"></i></button>
-                                <button class="btn btn-sm btn-outline-light ms-1" onclick="DeliveryUI.downloadPurchasePdf('${p.id}')" title="Print/PDF"><i class="bi bi-printer"></i></button>
+                                ${p._bkReturnVoucher
+            ? `<button class="btn btn-sm btn-outline-info" onclick="VouchersUI.previewVoucher('${String(p._voucherId || '').replace(/'/g, "\\'")}')" title="View voucher"><i class="bi bi-eye"></i></button>`
+            : `<button class="btn btn-sm btn-outline-info" onclick="InvoicesUI.previewPurchase('${String(p.id || '').replace(/'/g, "\\'")}')" title="View"><i class="bi bi-eye"></i></button>
+                                <button class="btn btn-sm btn-outline-light ms-1" onclick="DeliveryUI.downloadPurchasePdf('${String(p.id || '').replace(/'/g, "\\'")}')" title="Print/PDF"><i class="bi bi-printer"></i></button>`}
                             </td>
                         </tr>`;
         }).join('')}
@@ -2582,12 +2701,23 @@ const VouchersUI = {
                 const st = (inv.status || 'pending').toLowerCase();
                 const statusMatch = st !== 'cancelled' && st !== 'paid';
 
-                const invType = (inv.type || '').toLowerCase();
                 let modeMatch = true;
                 if (this.currentMode === 'gst') {
-                    modeMatch = !inv.type || invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst';
+                    modeMatch =
+                        typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isGstSalesListRow === 'function'
+                            ? InvoiceManager.isGstSalesListRow(inv)
+                            : (() => {
+                                  const invType = (inv.type || '').toLowerCase();
+                                  return !inv.type || invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst';
+                              })();
                 } else if (this.currentMode === 'non-gst') {
-                    modeMatch = invType === 'without-bill' || invType === 'sales-non-gst' || invType === 'non-gst-invoice';
+                    modeMatch =
+                        typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isPlainSalesListRow === 'function'
+                            ? InvoiceManager.isPlainSalesListRow(inv)
+                            : (() => {
+                                  const invType = (inv.type || '').toLowerCase();
+                                  return invType === 'without-bill' || invType === 'sales-non-gst' || invType === 'non-gst-invoice';
+                              })();
                 }
 
                 return nameMatch && statusMatch && modeMatch;
@@ -3570,19 +3700,33 @@ const VouchersUI = {
         if (!element) return;
 
         const filename = `Voucher_${voucherId}.pdf`;
+        if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.buildGtesHtml2PdfOptions === 'function') {
+            const vchScale = DeliveryUI.GTES_VOUCHER_HTML2PDF_SCALE || 1.72;
+            const opt = {
+                ...DeliveryUI.buildGtesHtml2PdfOptions({
+                    filename,
+                    margin: [10, 10, 10, 10],
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                    html2canvas: { scale: vchScale }
+                }),
+            };
+            await html2pdf().set(opt).from(element).save();
+            return;
+        }
         const opt = {
             margin: [10, 10, 10, 10],
             filename,
-            image: { type: 'jpeg', quality: 0.85 },
+            image: { type: 'jpeg', quality: 0.94 },
             html2canvas: {
-                scale: (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_VOUCHER_HTML2PDF_SCALE) || 1.06,
+                scale: 1.72,
                 useCORS: true,
                 allowTaint: true,
                 logging: false,
-                backgroundColor: '#ffffff'
+                backgroundColor: '#ffffff',
+                letterRendering: true
             },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] }
+            pagebreak: { mode: ['css'] }
         };
         await html2pdf().set(opt).from(element).save();
     },

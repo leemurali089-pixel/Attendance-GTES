@@ -32,8 +32,10 @@ const VoucherManager = {
             return v.hasGst === false;
         }
         if (mode === 'purchase') {
-            // Purchase screen lists all outgoing payments; legacy rows may omit isPurchase
-            return v.type === 'payment' && v.isPurchase !== false;
+            if (v.type !== 'payment' || v.isPurchase === false) return false;
+            if (typeof VouchersUI !== 'undefined' && typeof VouchersUI._isBookkeeperPurchaseReturnPaymentVoucher === 'function' &&
+                VouchersUI._isBookkeeperPurchaseReturnPaymentVoucher(v)) return false;
+            return true;
         }
         return true;
     },

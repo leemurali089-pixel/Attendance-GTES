@@ -6,7 +6,7 @@
 
 const BookKeeperImport = {
     /** Bump with index.html ?v= when changing import/display logic (helps verify Electron loaded this file). */
-    BUILD_VERSION: '3.3',
+    BUILD_VERSION: '3.8',
 
     /**
      * Receipt vouchers from Book Keeper do not carry hasGst. Derive it from linked / allocated
@@ -16,9 +16,11 @@ const BookKeeperImport = {
         if (!voucher || voucher.type !== 'receipt') return false;
         const pool = Array.isArray(invoices) ? invoices : [];
         const im = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+        /** Match Plain/GST invoice tabs — not raw `type` alone (imports often force `with-bill` + gst flags). */
         const isGstInvoice = (inv) => {
             if (!inv) return false;
-            if (im && typeof im.isGSTType === 'function') return !!im.isGSTType(inv.type);
+            if (im && typeof im.isPlainSalesListRow === 'function' && im.isPlainSalesListRow(inv)) return false;
+            if (im && typeof im.isGstSalesListRow === 'function') return !!im.isGstSalesListRow(inv);
             const t = String(inv.type || '').toLowerCase();
             if (t.includes('non-gst') || t === 'without-bill' || t === 'non-gst-invoice') return false;
             return t === 'with-bill' || t === 'gst-invoice' || t === 'sales-gst' || !t;
@@ -44,6 +46,26 @@ const BookKeeperImport = {
         let matchedPlain = false;
         const invoicesMatchingRef = (r0) => {
             if (!r0) return [];
+            const exact = pool.filter((i) => {
+                const ids = [i.id, i.invoiceNo, i.bookkeeperId].map(norm).filter(Boolean);
+                return ids.some((id) => id === r0);
+            });
+            if (exact.length) return exact;
+            /** Bare numeric refs (e.g. Book Keeper "0001"): avoid suffix collision with `inv-nb-0001` vs GST `…-0001`. */
+            if (/^[0-9]{1,8}$/.test(r0)) {
+                const idsMatch = (i, pred) => {
+                    const ids = [i.id, i.invoiceNo, i.bookkeeperId].map(norm).filter(Boolean);
+                    return ids.some((id) => pred(id, r0));
+                };
+                const tailPred = (id, d) =>
+                    id === d || id.endsWith('-' + d) || id.endsWith('/' + d) || id.endsWith('_' + d) || id.endsWith(d);
+                const gstish = pool.filter((i) => {
+                    if (im && typeof im.isPlainSalesListRow === 'function' && im.isPlainSalesListRow(i)) return false;
+                    return idsMatch(i, tailPred);
+                });
+                if (gstish.length) return gstish;
+                return pool.filter((i) => idsMatch(i, tailPred));
+            }
             return pool.filter((i) => {
                 const ids = [i.id, i.invoiceNo, i.bookkeeperId].map(norm).filter(Boolean);
                 return ids.some((id) => id === r0 || r0.endsWith(id) || id.endsWith(r0));
@@ -52,9 +74,7 @@ const BookKeeperImport = {
         for (const ref of refs) {
             const r0 = norm(ref);
             if (!r0) continue;
-            // Must consider every match: bare BK display nos (e.g. "0001") suffix-match both
-            // INV-NB-0001 (plain) and a GST invoice; pool.find() picked the first row only and
-            // misclassified the receipt as plain.
+            // Must consider every match: suffix rules apply only after exact match and never for bare digits (see invoicesMatchingRef).
             const hits = invoicesMatchingRef(r0);
             for (const inv of hits) {
                 if (isGstInvoice(inv)) matchedGst = true;
@@ -1610,6 +1630,16 @@ const BookKeeperImport = {
 
             const vt = String(v.v_type || '').toLowerCase();
             const isReceipt = vt.includes('receipt');
+            const vtRaw = String(v.v_type || '');
+            const narLower = String(v.narration || '').toLowerCase();
+            const isPurchaseDebitReturn =
+                !isReceipt &&
+                ((vt.includes('debit') && vt.includes('return'))
+                    || vt.includes('purchase return')
+                    || vt.includes('purchases return')
+                    || vt.includes('debit return')
+                    || /debit\s*return|purchase\s*return|purchases?\s*return|debit\s*note/i.test(vtRaw)
+                    || /debit\s*return|purchase\s*return|purchases?\s*return|debit\s*note/i.test(narLower));
 
             // Smart Account Selection: Ignore common Bank/Cash accounts
             const isBankOrCash = (name) => {
@@ -1792,6 +1822,8 @@ const BookKeeperImport = {
                 mode: pMode,        // Backward compatibility
                 narration: v.narration || '',
                 voucherNo: displayVch || internalVch || '',
+                bookkeeperVchType: vtRaw.trim(),
+                isPurchaseDebitReturn: isPurchaseDebitReturn,
                 // Capture reference/invoice link
                 linkedInvoiceId: linkedInvoices[0] || '',
                 linkedInvoices: linkedInvoices,
@@ -4430,12 +4462,16 @@ const BookKeeperImport = {
                 changed = true;
             }
 
-            // 2b. Reclassify GST-tagged bills with no tax lines as plain (without-bill); skip credit notes
+            // 2b. Reclassify native GST-tagged bills with no tax as plain; skip credit notes and Book Keeper rows
+            // (BK tax may not map to cgst/sgst fields — do not guess plain from zeros).
             const isCn =
                 typeof InvoiceManager !== 'undefined' &&
                 InvoiceManager._isCreditNoteDoc &&
                 InvoiceManager._isCreditNoteDoc(inv);
-            if (!isCn && inv.type === 'with-bill') {
+            const isBkInv =
+                !!(inv.bookkeeperId && String(inv.bookkeeperId).trim()) ||
+                String(inv.source || '').toLowerCase() === 'bookkeeper';
+            if (!isCn && inv.type === 'with-bill' && !isBkInv) {
                 const hdr = (parseFloat(inv.cgst) || 0) + (parseFloat(inv.sgst) || 0) + (parseFloat(inv.igst) || 0);
                 const g = inv.gst && typeof inv.gst === 'object' ? inv.gst : {};
                 const hdr2 = hdr + (parseFloat(g.cgst) || 0) + (parseFloat(g.sgst) || 0) + (parseFloat(g.igst) || 0);
@@ -4445,8 +4481,12 @@ const BookKeeperImport = {
                         lineGst += (parseFloat(it.cgst) || 0) + (parseFloat(it.sgst) || 0) + (parseFloat(it.igst) || 0);
                     });
                 }
-                if (hdr2 < 0.01 && lineGst < 0.01) {
+                const no = String(inv.invoiceNo || inv.id || '');
+                const isNbSeries = /INV-NB-/i.test(no);
+                if (isNbSeries || (hdr2 < 0.01 && lineGst < 0.01)) {
                     inv.type = 'without-bill';
+                    inv.billType = 'plain';
+                    inv.hasGst = false;
                     changed = true;
                 }
             }

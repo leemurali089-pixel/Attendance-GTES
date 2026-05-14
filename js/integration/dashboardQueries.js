@@ -437,6 +437,11 @@
         : { isGSTType: () => true, isDcStyleSalesInvoice: () => false };
     list = list.filter((inv) => {
       if (im.isDcStyleSalesInvoice && im.isDcStyleSalesInvoice(inv)) return false;
+      if (im.isGstSalesListRow && im.isPlainSalesListRow) {
+        if (scope === "gst") return im.isGstSalesListRow(inv);
+        if (scope === "plain") return im.isPlainSalesListRow(inv);
+        return true;
+      }
       if (scope === "gst") return im.isGSTType(inv.type);
       if (scope === "plain") return !im.isGSTType(inv.type);
       return true;

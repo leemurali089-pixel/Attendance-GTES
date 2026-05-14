@@ -3267,7 +3267,8 @@ const InvoicesUI = {
 
         // Fetch purchases for filters
         const purchases = (DataManager.getData(DataManager.KEYS.EXPENSES) || [])
-            .filter(p => (p.category || '').toLowerCase().includes('purchase'));
+            .filter(p => (p.category || '').toLowerCase().includes('purchase'))
+            .filter((p) => !this._isDebitNotePurchaseDoc(p));
 
         const purchaseFyList = this._indianFyOptionListFromDates(purchases.map((p) => p.date));
         const purchaseFyOptionsHtml = purchaseFyList
@@ -3437,7 +3438,7 @@ const InvoicesUI = {
                 isPaid: isDebitNote ? true : balance <= 0.05,
                 isPartial: balance > 0.05 && balance < (docTotal - 0.05)
             };
-        });
+        }).filter((p) => !p.isDebitNote);
 
         // Filter UI states
         const fyPurchase = document.getElementById('filterPurchaseFY')?.value?.trim() || '';

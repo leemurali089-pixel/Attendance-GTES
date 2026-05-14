@@ -532,13 +532,26 @@ const BonusModule = {
             const element = document.createElement('div');
             element.innerHTML = await this._generatePayslipHTML(batch, settings);
 
-            const opt = {
-                margin: 10,
-                filename: `Bonus_Payslips_FY_${batch.financialYear}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+            const opt =
+                typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.buildGtesHtml2PdfOptions === 'function'
+                    ? DeliveryUI.buildGtesHtml2PdfOptions({
+                          filename: `Bonus_Payslips_FY_${batch.financialYear}.pdf`,
+                          margin: [10, 10, 10, 10],
+                          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                      })
+                    : {
+                          margin: [10, 10, 10, 10],
+                          filename: `Bonus_Payslips_FY_${batch.financialYear}.pdf`,
+                          image: { type: 'jpeg', quality: 0.94 },
+                          html2canvas: {
+                              scale: 2,
+                              useCORS: true,
+                              logging: false,
+                              letterRendering: true
+                          },
+                          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                          pagebreak: { mode: ['css'] }
+                      };
 
             await html2pdf().set(opt).from(element).save();
             App.showNotification('Bonus payslips generated successfully', 'success');

@@ -254,17 +254,44 @@ const InvoiceManager = {
         return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
     },
 
+    /** Sum of CGST/SGST/IGST on header, nested gst, and line items. */
+    _effectiveInvoiceGstTotal(inv) {
+        if (!inv) return 0;
+        const hdr = (parseFloat(inv.cgst) || 0) + (parseFloat(inv.sgst) || 0) + (parseFloat(inv.igst) || 0);
+        const g = inv.gst && typeof inv.gst === 'object' ? inv.gst : {};
+        const hdr2 = hdr + (parseFloat(g.cgst) || 0) + (parseFloat(g.sgst) || 0) + (parseFloat(g.igst) || 0);
+        let lineGst = 0;
+        if (Array.isArray(inv.items)) {
+            inv.items.forEach((it) => {
+                lineGst += (parseFloat(it.cgst) || 0) + (parseFloat(it.sgst) || 0) + (parseFloat(it.igst) || 0);
+            });
+        }
+        return hdr2 + lineGst;
+    },
+
+    /** Book Keeper SQL import rows — do not guess "plain" from INV-NB / zero tax (GST lines may live only in BK columns). */
+    _isBookkeeperImportedSalesInvoice(inv) {
+        if (!inv) return false;
+        if (String(inv.source || '').toLowerCase() === 'bookkeeper') return true;
+        const bid = String(inv.bookkeeperId || '').trim();
+        return bid.length > 0 && /^BK-/i.test(bid);
+    },
+
     /** Plain (non-GST) sales list row. Excludes DC-only and credit notes. */
     isPlainSalesListRow(inv) {
         if (!inv || this.isDcStyleSalesInvoice(inv) || this._isCreditNoteDoc(inv)) return false;
         if (inv.billType === 'plain') return true;
-        const no = String(inv.invoiceNo || inv.id || '');
-        if (/INV-NB-/i.test(no)) return true;
+        const isBk = this._isBookkeeperImportedSalesInvoice(inv);
+        if (!isBk) {
+            const no = String(inv.invoiceNo || inv.id || '');
+            if (/INV-NB-/i.test(no)) return true;
+            if (inv.hasGst === false) return true;
+            if (this._effectiveInvoiceGstTotal(inv) < 0.01) return true;
+        }
         const t = inv.type;
         if (t != null && String(t).trim() !== '') {
             return !this.isGSTType(t);
         }
-        if (inv.hasGst === false) return true;
         return false;
     },
 
@@ -361,7 +388,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 16; // Plain vs GST list: billType, INV-NB-, hasGst; voucher list derives hasGst
+        const logicVersion = 18; // BK-linked rows: no INV-NB / zero-tax plain guess; use type + billType
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
