@@ -806,6 +806,10 @@ const DataManager = {
             data = this._normalizeGtesUsersPayload(data);
         }
 
+        if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && data != null && !Array.isArray(data) && typeof data === 'object') {
+            data = this.coerceJsonArray(data);
+        }
+
         if (data === null || data === undefined) {
             data = localParsed;
             if (data === null || data === undefined) {

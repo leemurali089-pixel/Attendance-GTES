@@ -325,24 +325,42 @@ const FileStorage = {
             }
         }
 
+        const DM = window.DataManager;
+        const arrayKey =
+            !!(DM && typeof DM._keysStoredAsArrays === 'function' && DM._keysStoredAsArrays().has(key));
+        const toArr = (v) => {
+            if (!arrayKey || !DM || typeof DM.coerceJsonArray !== 'function') return v;
+            return DM.coerceJsonArray(v);
+        };
+
         try {
             // Routine; use debug so DevTools default level stays quiet (enable Verbose to see).
             console.debug(`[FileStorage] Fetching '${key}' from Realtime Database…`);
             const snapshot = await window.db.ref(key).once('value');
-            if (snapshot.exists()) {
-                const cloudVal = snapshot.val();
-                // If we're on desktop and have both local + cloud, prefer merged/newer for array datasets.
-                if (window.electronAPI && localData != null) {
-                    if (Array.isArray(localData) && Array.isArray(cloudVal) && window.DataManager && typeof window.DataManager._mergeRecordArraysById === 'function') {
-                        return window.DataManager._mergeRecordArraysById(localData, cloudVal);
-                    }
-                    // For non-array (or if merge is not possible), prefer cloud as source of truth.
-                    return cloudVal;
-                }
-                return cloudVal;
+            if (!snapshot.exists()) {
+                return arrayKey ? toArr(localData) : localData;
             }
-            // No cloud value; fall back to local if any.
-            return localData;
+
+            const cloudRaw = snapshot.val();
+            const cloudArr = arrayKey ? toArr(cloudRaw) : cloudRaw;
+
+            if (window.electronAPI) {
+                const locArr = arrayKey ? toArr(localData) : localData;
+                if (
+                    arrayKey &&
+                    Array.isArray(locArr) &&
+                    Array.isArray(cloudArr) &&
+                    DM &&
+                    typeof DM._mergeRecordArraysById === 'function'
+                ) {
+                    return DM._mergeRecordArraysById(locArr, cloudArr, key);
+                }
+                if (arrayKey && Array.isArray(cloudArr)) return cloudArr;
+                if (arrayKey && Array.isArray(locArr)) return locArr;
+                return cloudArr;
+            }
+
+            return cloudArr;
         } catch (error) {
             const code = error && error.code;
             const msg = error && error.message ? String(error.message) : '';
