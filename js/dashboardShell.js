@@ -12,7 +12,7 @@
   const INLINE_DETAIL_ROWS = 120;
   let _gtesLastShellVisSig = "";
   let _fyRehydrateTimer = null;
-  const ADMIN_COMPANY_DETAILS = { companyName: "Gas Tech Engineering Service", tagline: "Excellence in Engineering & Service Solutions.", registeredAddress: "No.233/233, Nageshwar Rao Road, Athipet, Chennai - 600058", worksAddress: "23/4/A, 1st Street, Nageshwar Rao Road, Athipet, Chennai - 600058", email: "gastechengservice@gmail.com", altEmail: "rajmohan67raj@gmail.com", phone: "+91 96000 19838, +91 95682 02896", gstin: "33AFKPR2353A3ZF", iec: "AFKPR2353A", pan: "AFKPR2353A", version: "1.3.34", support: "Support: leemurali001@gmail.com / +91 99529 70089", developedBy: "Developed by Murali D" };
+  const ADMIN_COMPANY_DETAILS = { companyName: "Gas Tech Engineering Service", tagline: "Excellence in Engineering & Service Solutions.", registeredAddress: "No.233/233, Nageshwar Rao Road, Athipet, Chennai - 600058", worksAddress: "23/4/A, 1st Street, Nageshwar Rao Road, Athipet, Chennai - 600058", email: "gastechengservice@gmail.com", altEmail: "rajmohan67raj@gmail.com", phone: "+91 96000 19838, +91 95682 02896", gstin: "33AFKPR2353A3ZF", iec: "AFKPR2353A", pan: "AFKPR2353A", version: "1.3.35", support: "Support: leemurali001@gmail.com / +91 99529 70089", developedBy: "Developed by Murali D" };
 
   /** Jump targets: do not use `data-view` (reserved for main nav binding). */
   const JUMP_PAGES = [

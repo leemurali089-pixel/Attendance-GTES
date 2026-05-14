@@ -839,7 +839,14 @@ const DataManager = {
         }
 
         if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
-            const loc = Array.isArray(localParsed) ? localParsed : [];
+            let loc = Array.isArray(localParsed) ? localParsed : [];
+            // Electron: disk + RTDB are merged in FileStorage.loadData. Browser localStorage/LS mirrors
+            // for invoices/vouchers are often huge stale snapshots that overwrite newer union rows
+            // (plain bills that exist only in Firebase after sync).
+            if (typeof window !== 'undefined' && window.electronAPI &&
+                (storageKey === 'invoices' || storageKey === 'vouchers')) {
+                loc = [];
+            }
             let merged = this._mergeRecordArraysById(loc, data, storageKey);
             // Critical recovery path:
             // For large lists we often mirror to IDB only (localStorage removed). If cloud write was
@@ -852,7 +859,9 @@ const DataManager = {
                         idbArr = await this.getFromIDB('challans');
                     }
                     if (Array.isArray(idbArr) && idbArr.length > 0) {
-                        merged = this._mergeRecordArraysById(idbArr, merged, storageKey);
+                        // Prefer freshly merged disk+cloud (`merged`); IDB wins only when strictly newer
+                        // (offline edits). Old order merged idb first and could let stale IDB beat fresh cloud.
+                        merged = this._mergeRecordArraysById(merged, idbArr, storageKey);
                     }
                 } catch (e) {
                     console.warn(`[DataManager] IDB merge skipped for '${storageKey}':`, e);
@@ -883,9 +892,19 @@ const DataManager = {
     getData(key) {
         const storageKey = this.resolveStorageKey(key);
         if (Object.prototype.hasOwnProperty.call(this._cache, storageKey)) {
+            let c = this._cache[storageKey];
+            if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && c != null && !Array.isArray(c) && typeof c === 'object') {
+                c = this.coerceJsonArray(c);
+                this._cache[storageKey] = c;
+            }
             return this._cache[storageKey];
         }
         if (storageKey === this.KEYS.CHALLANS && Object.prototype.hasOwnProperty.call(this._cache, 'challans')) {
+            let c = this._cache['challans'];
+            if (this.MERGE_ON_LOAD_KEYS.has('challans') && c != null && !Array.isArray(c) && typeof c === 'object') {
+                c = this.coerceJsonArray(c);
+                this._cache['challans'] = c;
+            }
             return this._cache['challans'];
         }
 
@@ -895,7 +914,10 @@ const DataManager = {
         }
         if (!raw) return null;
         try {
-            const parsed = JSON.parse(raw);
+            let parsed = JSON.parse(raw);
+            if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && parsed != null && !Array.isArray(parsed) && typeof parsed === 'object') {
+                parsed = this.coerceJsonArray(parsed);
+            }
             this._cache[storageKey] = parsed;
             this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
             if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = parsed;

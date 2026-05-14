@@ -219,7 +219,14 @@ const InvoiceManager = {
      * Get all invoices
      */
     getAllInvoices() {
-        return DataManager.getData('invoices') || [];
+        const raw = DataManager.getData('invoices');
+        if (raw == null) return [];
+        if (Array.isArray(raw)) return raw;
+        if (typeof DataManager.coerceJsonArray === 'function') {
+            const arr = DataManager.coerceJsonArray(raw);
+            return Array.isArray(arr) ? arr : [];
+        }
+        return [];
     },
 
     /**
@@ -347,7 +354,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 14; // hasGst on BK receipts; plain vs GST voucher split
+        const logicVersion = 15; // Electron: skip LS merge for invoices; IDB merge order; getAllInvoices coerce
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
