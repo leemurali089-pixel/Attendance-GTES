@@ -122,9 +122,6 @@ const VoucherManager = {
 
         vouchers.push(voucher);
         await DataManager.saveData('vouchers', vouchers, { skipPreSaveMerge: true });
-        if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
-            void FileStorage.flushPendingCloudWrites(2500);
-        }
 
         // Update linked document statuses in the background — can scan many invoices and block the UI if awaited
         const allocIds = (data.allocations || []).flatMap(a => [a.id, a.no, a.billNo, a.invoiceNo].filter(Boolean));
@@ -1002,40 +999,51 @@ const VoucherManager = {
             return docFields.some(f => (f || '').toString().trim() === key);
         };
 
+        const docRefIndex = new Map();
+        const indexDoc = (doc, fields, docCtx) => {
+            fields.forEach((f) => {
+                const k = (f || '').toString().trim();
+                if (!k) return;
+                if (!docRefIndex.has(k)) docRefIndex.set(k, []);
+                docRefIndex.get(k).push({ doc, docCtx });
+            });
+        };
+        if (!filterType || filterType === 'receipt') {
+            (DataManager.getData('invoices') || []).forEach((inv) => {
+                indexDoc(inv, [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo], 'receipt');
+            });
+        }
+        if (!filterType || filterType === 'payment') {
+            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
+            const purchases = DataManager.getData('purchases') || [];
+            const collections = purchases === expenses ? [expenses] : [expenses, purchases];
+            collections.forEach((col) => {
+                (col || []).forEach((doc) => {
+                    indexDoc(doc, [doc.id, doc.billNo, doc.vch_no, doc.invoiceNo, doc.bookkeeperVchNo], 'payment');
+                });
+            });
+        }
+
         const resolveDocIdsForVoucherKey = (raw, voucher, ctx) => {
             const out = [];
             const s = (raw || '').toString().trim();
             if (!s || !voucher) return out;
 
-            // For receipts -> invoices; for payments -> expenses/purchases
-            if (!ctx || ctx === 'receipt') {
-                const invs = DataManager.getData('invoices') || [];
-                for (const inv of invs) {
-                    const invFields = [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo].filter(Boolean);
-                    if (keysMatchDocRef(s, invFields) && partyMatchesDoc(inv, voucher)) {
-                        if (inv.id) out.push(inv.id);
-                        if (inv.invoiceNo) out.push(inv.invoiceNo);
-                        break;
-                    }
-                }
-            }
+            const hits = docRefIndex.get(s);
+            if (!hits || !hits.length) return out;
 
-            if (!ctx || ctx === 'payment') {
-                const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
-                const purchases = DataManager.getData('purchases') || [];
-                const collections = purchases === expenses ? [expenses] : [expenses, purchases];
-
-                for (const col of collections) {
-                    for (const doc of col) {
-                        const docFields = [doc.id, doc.billNo, doc.vch_no, doc.invoiceNo, doc.bookkeeperVchNo].filter(Boolean);
-                        if (keysMatchDocRef(s, docFields) && partyMatchesDoc(doc, voucher)) {
-                            if (doc.id) out.push(doc.id);
-                            if (doc.billNo) out.push(doc.billNo);
-                            if (doc.vch_no) out.push(doc.vch_no);
-                            break;
-                        }
-                    }
+            for (const { doc, docCtx } of hits) {
+                if (ctx && docCtx !== ctx) continue;
+                if (!partyMatchesDoc(doc, voucher)) continue;
+                if (docCtx === 'receipt') {
+                    if (doc.id) out.push(doc.id);
+                    if (doc.invoiceNo) out.push(doc.invoiceNo);
+                } else {
+                    if (doc.id) out.push(doc.id);
+                    if (doc.billNo) out.push(doc.billNo);
+                    if (doc.vch_no) out.push(doc.vch_no);
                 }
+                break;
             }
             return out;
         };

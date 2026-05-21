@@ -626,11 +626,12 @@ const SyncManager = {
         try {
             if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
                 this.setSyncProgress(2, 'Uploading pending changes to cloud…');
-                await FileStorage.flushPendingCloudWrites(4000);
+                await FileStorage.flushPendingCloudWrites(2000);
             }
             DataManager.invalidateDataCache();
-            this.setSyncProgress(3, 'Reloading datasets from disk / cloud…');
+            this.setSyncProgress(3, 'Reloading sales data from disk / cloud…');
             await DataManager.reloadAllDataAfterCacheClear({
+                priorityOnly: true,
                 onProgress: (pct, msg) => {
                     const p = Math.max(3, Math.min(99, Number(pct) || 0));
                     this.setSyncProgress(p, msg || 'Reloading…');
@@ -639,29 +640,26 @@ const SyncManager = {
             this.setSyncProgress(100, 'Finishing…');
 
             const currentView = App.currentView;
-            if (currentView && typeof App.showView === 'function') {
-                const runShow = () => {
-                    try {
-                        if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
-                            if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
-                        }
-                    } catch (_) {
-                        return;
+            const runLightRefresh = () => {
+                try {
+                    if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
+                        if (!sessionStorage.getItem(UserManager.SESSION_KEY)) return;
                     }
-                    try {
-                        void App.showView(currentView);
-                    } catch (e) {
-                        console.warn('[SyncManager] showView after sync:', e && e.message);
-                    }
-                };
-                if (typeof requestAnimationFrame === 'function') {
-                    requestAnimationFrame(() => {
-                        setTimeout(runShow, 0);
-                    });
-                } else {
-                    setTimeout(runShow, 0);
+                } catch (_) {
+                    return;
                 }
-            }
+                try {
+                    if (typeof App.flushDeferredDataRefresh === 'function') {
+                        void App.flushDeferredDataRefresh();
+                    }
+                    if (currentView && typeof App.lightRefreshCurrentView === 'function') {
+                        App.lightRefreshCurrentView(currentView);
+                    }
+                } catch (e) {
+                    console.warn('[SyncManager] light refresh after sync:', e && e.message);
+                }
+            };
+            setTimeout(runLightRefresh, 0);
 
             this.lastSyncTime = new Date();
             this.updateStatus('synced');

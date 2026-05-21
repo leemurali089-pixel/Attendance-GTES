@@ -646,6 +646,20 @@ const DataManager = {
 
     // Initialize data storage
     /** Core + background keys used by init prefetch and sync reload */
+    /** Financial keys reloaded on Sync Now (skip inventory/challans until those views open). */
+    getSyncPriorityReloadKeys() {
+        const K = this.KEYS || {};
+        return [...new Set([
+            'customers',
+            'invoices',
+            'vouchers',
+            'purchases',
+            'gtes_expenses',
+            K.EXPENSES,
+            K.ATTENDANCE
+        ].filter(Boolean))];
+    },
+
     getDataLoadKeyGroups() {
         return {
             core: [
@@ -767,11 +781,8 @@ const DataManager = {
                 }
             };
 
-            if (typeof requestAnimationFrame === 'function') {
-                this._dataChangedDispatchHandle = requestAnimationFrame(flush);
-            } else {
-                this._dataChangedDispatchHandle = setTimeout(flush, 0);
-            }
+            const delay = this._shouldYieldDuringSaveBurst() ? 480 : 110;
+            this._dataChangedDispatchHandle = setTimeout(flush, delay);
         } catch (_) {
             // Worst-case fallback: behave as before.
             try {
@@ -870,7 +881,12 @@ const DataManager = {
     /** After invalidateDataCache(): pull fresh data from storage/cloud (used by Sync Now). */
     async reloadAllDataAfterCacheClear(options = {}) {
         const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
-        const { core, background } = this.getDataLoadKeyGroups();
+        const priorityOnly = !!options.priorityOnly;
+        let { core, background } = this.getDataLoadKeyGroups();
+        if (priorityOnly) {
+            const keep = new Set(this.getSyncPriorityReloadKeys());
+            background = background.filter((k) => keep.has(k));
+        }
         const total = (core.length + background.length) || 1;
         let completed = 0;
         const emit = (keyHint) => {

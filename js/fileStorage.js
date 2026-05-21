@@ -7,6 +7,104 @@ const FileStorage = {
     _mirrorWriteKeys: new Set(),
     /** Debounced RTDB upload queue: key -> { timer, data, lastQueuedAt } */
     _pendingCloudSets: new Map(),
+    /** Debounced RTDB listener applies (key -> timer id). */
+    _remoteApplyTimers: new Map(),
+
+    _rtdbHeavyMirrorKeys() {
+        if (this._rtdbHeavyMirrorKeySet) return this._rtdbHeavyMirrorKeySet;
+        const s = new Set(['invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses', 'gtes_attendance', 'inventory', 'inventoryTransactions']);
+        try {
+            const DM = window.DataManager;
+            if (DM && DM.KEYS) {
+                [DM.KEYS.INVOICES, DM.KEYS.VOUCHERS, DM.KEYS.EXPENSES, DM.KEYS.ATTENDANCE, DM.KEYS.CHALLANS].filter(Boolean).forEach((k) => s.add(k));
+            }
+        } catch (_) { /* ignore */ }
+        this._rtdbHeavyMirrorKeySet = s;
+        return s;
+    },
+
+    _scheduleRemoteApply(key, snap) {
+        const exists = snap.exists();
+        const val = exists ? snap.val() : null;
+        const prev = this._remoteApplyTimers.get(key);
+        if (prev && prev.timer) clearTimeout(prev.timer);
+        const syncing = !!(window.SyncManager && window.SyncManager.status === 'syncing');
+        const delay = syncing ? 780 : 220;
+        const timer = setTimeout(() => {
+            this._remoteApplyTimers.delete(key);
+            this._applyRemoteSnapshot(key, { exists, val });
+        }, delay);
+        this._remoteApplyTimers.set(key, { timer, exists, val });
+    },
+
+    _applyRemoteSnapshot(key, payload) {
+        const DM = window.DataManager;
+        if (!DM || !DM.KEYS) return;
+        const { exists, val } = payload || {};
+        try {
+            if (!exists) {
+                DM.invalidateDataCache(key);
+                const arrKeys = typeof DM._keysStoredAsArrays === 'function' ? DM._keysStoredAsArrays() : null;
+                let emptyMirror = null;
+                if (key === 'gtes_users' || (arrKeys && arrKeys.has(key))) {
+                    emptyMirror = [];
+                }
+                DM._cache[key] = emptyMirror;
+                DM._trustedCacheKeys.add(key);
+                if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
+                    DM._clearAttendanceDerivedCaches();
+                }
+                DM._emitDataChangedEvent(key, 'firebase-listener');
+                this._mirrorRemoteToDisk(key, emptyMirror == null ? {} : emptyMirror);
+                if (typeof DM._mirrorToLocalOrIDB === 'function') {
+                    void DM._mirrorToLocalOrIDB(key, Array.isArray(emptyMirror) ? emptyMirror : []).catch(() => {});
+                }
+                return;
+            }
+            const toStore = typeof DM.coerceRealtimeSnapshotValue === 'function'
+                ? DM.coerceRealtimeSnapshotValue(key, val)
+                : val;
+            DM._cache[key] = toStore;
+            if (DM.KEYS && key === DM.KEYS.CHALLANS) {
+                DM._cache['challans'] = toStore;
+            }
+            DM._trustedCacheKeys.add(key);
+            if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
+                DM._clearAttendanceDerivedCaches();
+            }
+            const emitKey = DM.KEYS && key === DM.KEYS.CHALLANS ? 'challans' : key;
+            DM._emitDataChangedEvent(emitKey, 'firebase-listener');
+            this._mirrorRemoteToDisk(key, toStore);
+            if (typeof DM._mirrorToLocalOrIDB === 'function') {
+                void DM._mirrorToLocalOrIDB(key, toStore).catch(() => {});
+            }
+        } catch (e) {
+            console.warn('[FileStorage] Realtime merge failed:', key, e && e.message);
+        }
+    },
+
+    _mirrorRemoteToDisk(key, toStore) {
+        if (!window.electronAPI) return;
+        const heavy = this._rtdbHeavyMirrorKeys();
+        const syncing = !!(window.SyncManager && window.SyncManager.status === 'syncing');
+        const deferDisk = syncing && heavy.has(key);
+        const run = () => {
+            FileStorage.markMirrorWriteFromRtdb(key);
+            window.electronAPI.saveData(key, toStore)
+                .then((res) => {
+                    if (!res || !res.success) FileStorage.unmarkMirrorWriteFromRtdb(key);
+                })
+                .catch((e) => {
+                    FileStorage.unmarkMirrorWriteFromRtdb(key);
+                    console.warn('[FileStorage] Mirror RTDB to local disk failed:', key, e && e.message);
+                });
+        };
+        if (deferDisk) {
+            setTimeout(run, 2800);
+        } else {
+            run();
+        }
+    },
 
     markMirrorWriteFromRtdb(key) {
         if (key) this._mirrorWriteKeys.add(key);
@@ -64,7 +162,7 @@ const FileStorage = {
 
     _scheduleCloudSet(key, data, opts = {}) {
         const priority = this._priorityCloudSyncKeys().has(key);
-        const debounceMs = Number(opts.debounceMs ?? (priority ? 120 : 500));
+        const debounceMs = Number(opts.debounceMs ?? (priority ? 380 : 500));
         const prev = this._pendingCloudSets.get(key);
         if (prev && prev.timer) clearTimeout(prev.timer);
         const next = {
@@ -174,73 +272,9 @@ const FileStorage = {
 
         const onRemote = (key, snap) => {
             try {
-                if (!snap.exists()) {
-                    DM.invalidateDataCache(key);
-                    const arrKeys = typeof DM._keysStoredAsArrays === 'function' ? DM._keysStoredAsArrays() : null;
-                    let emptyMirror = null;
-                    if (key === 'gtes_users' || (arrKeys && arrKeys.has(key))) {
-                        emptyMirror = [];
-                    } else {
-                        emptyMirror = null;
-                    }
-                    DM._cache[key] = emptyMirror;
-                    DM._trustedCacheKeys.add(key);
-                    if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
-                        DM._clearAttendanceDerivedCaches();
-                    }
-                    DM._emitDataChangedEvent(key, 'firebase-listener');
-                    if (window.electronAPI) {
-                        const payload = emptyMirror == null ? {} : emptyMirror;
-                        FileStorage.markMirrorWriteFromRtdb(key);
-                        window.electronAPI.saveData(key, payload)
-                            .then((res) => {
-                                if (!res || !res.success) FileStorage.unmarkMirrorWriteFromRtdb(key);
-                            })
-                            .catch((e) => {
-                                FileStorage.unmarkMirrorWriteFromRtdb(key);
-                                console.warn('[FileStorage] Mirror empty RTDB to local disk failed:', key, e && e.message);
-                            });
-                    }
-                    if (typeof DM._mirrorToLocalOrIDB === 'function') {
-                        void DM._mirrorToLocalOrIDB(key, Array.isArray(emptyMirror) ? emptyMirror : []).catch(() => {});
-                    }
-                    return;
-                }
-                // Do not invalidate before assigning: clearing the cache lets a concurrent loadData()
-                // fall through to Electron/local JSON and repopulate stale rows before this write lands.
-                const val = snap.val();
-                const toStore = typeof DM.coerceRealtimeSnapshotValue === 'function'
-                    ? DM.coerceRealtimeSnapshotValue(key, val)
-                    : val;
-                DM._cache[key] = toStore;
-                if (DM.KEYS && key === DM.KEYS.CHALLANS) {
-                    DM._cache['challans'] = toStore;
-                }
-                DM._trustedCacheKeys.add(key);
-                if (key === DM.KEYS.ATTENDANCE && typeof DM._clearAttendanceDerivedCaches === 'function') {
-                    DM._clearAttendanceDerivedCaches();
-                }
-                const emitKey = DM.KEYS && key === DM.KEYS.CHALLANS ? 'challans' : key;
-                DM._emitDataChangedEvent(emitKey, 'firebase-listener');
-
-                // Electron: keep local JSON in sync with RTDB so loadData() + file watcher never
-                // re-merge stale on-disk rows over fresher cloud edits from another device.
-                if (window.electronAPI) {
-                    FileStorage.markMirrorWriteFromRtdb(key);
-                    window.electronAPI.saveData(key, toStore)
-                        .then((res) => {
-                            if (!res || !res.success) FileStorage.unmarkMirrorWriteFromRtdb(key);
-                        })
-                        .catch((e) => {
-                            FileStorage.unmarkMirrorWriteFromRtdb(key);
-                            console.warn('[FileStorage] Mirror RTDB to local disk failed:', key, e && e.message);
-                        });
-                }
-                if (typeof DM._mirrorToLocalOrIDB === 'function') {
-                    void DM._mirrorToLocalOrIDB(key, toStore).catch(() => {});
-                }
+                this._scheduleRemoteApply(key, snap);
             } catch (e) {
-                console.warn('[FileStorage] Realtime merge failed:', key, e && e.message);
+                console.warn('[FileStorage] Realtime schedule failed:', key, e && e.message);
             }
         };
 
@@ -306,7 +340,7 @@ const FileStorage = {
             const isDeferred = deferSet.has(key);
             const priority = this._priorityCloudSyncKeys().has(key);
             this._scheduleCloudSet(key, data, {
-                debounceMs: priority ? 120 : (isDeferred ? 400 : 280)
+                debounceMs: priority ? 380 : (isDeferred ? 400 : 280)
             });
             return true;
         }

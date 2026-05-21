@@ -132,9 +132,11 @@ const App = {
         if (!this._deferredDataRefreshKeys) this._deferredDataRefreshKeys = new Set();
         this._deferredDataRefreshKeys.add(key);
         if (this._deferredDataRefreshTimer) return;
+        const SM = window.SyncManager;
+        const delay = (SM && SM.status === 'syncing') ? 1400 : 900;
         this._deferredDataRefreshTimer = setTimeout(() => {
             this.flushDeferredDataRefresh().catch(() => {});
-        }, 800);
+        }, delay);
     },
 
     /** Debounced light table refresh (invoices/vouchers) — avoids full VouchersUI.load() on every cloud tick. */
@@ -143,10 +145,48 @@ const App = {
         if (!this._liveFinancialRefreshTimers) this._liveFinancialRefreshTimers = new Map();
         const prev = this._liveFinancialRefreshTimers.get(key);
         if (prev) clearTimeout(prev);
+        const SM = window.SyncManager;
+        const delay = (SM && SM.status === 'syncing') ? 720 : 420;
         this._liveFinancialRefreshTimers.set(key, setTimeout(() => {
             this._liveFinancialRefreshTimers.delete(key);
             this._lightRefreshUIFromDataKey(key).catch(() => {});
-        }, 280));
+        }, delay));
+    },
+
+    /** After Sync Now: refresh visible tables/KPIs without reloading the whole view shell. */
+    lightRefreshCurrentView(view) {
+        const v = view || this.currentView;
+        if (!v) return;
+        try {
+            if (v === 'dashboard') {
+                void this.loadDashboard();
+                this._refreshPremiumDashboardShell();
+                return;
+            }
+            if (v === 'invoices' && window.InvoicesUI && typeof InvoicesUI.updateTable === 'function') {
+                InvoicesUI.updateTable();
+                return;
+            }
+            if (v === 'vouchers' && window.VouchersUI) {
+                if (VouchersUI.currentMode === 'credit-note' && typeof VouchersUI.updateCreditNotesTable === 'function') {
+                    VouchersUI.updateCreditNotesTable();
+                } else if (VouchersUI.currentMode === 'debit-note' && typeof VouchersUI.updateDebitNotesTable === 'function') {
+                    VouchersUI.updateDebitNotesTable();
+                } else if (typeof VouchersUI.updateTable === 'function') {
+                    VouchersUI.updateTable();
+                }
+                return;
+            }
+            if (v === 'accounting' && window.AccountingUI && typeof AccountingUI.refreshCurrentTab === 'function') {
+                AccountingUI.refreshCurrentTab();
+                return;
+            }
+            if (v === 'payments' && window.PaymentsUI && typeof PaymentsUI.refreshData === 'function') {
+                PaymentsUI.refreshData();
+            }
+        } catch (e) {
+            console.warn('[App] lightRefreshCurrentView:', v, e && e.message);
+        }
     },
 
     async _lightRefreshUIFromDataKey(key) {
@@ -321,7 +361,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.41';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.42';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -2443,7 +2483,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.41';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.42';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');
