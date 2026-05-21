@@ -137,6 +137,69 @@ const App = {
         }, 800);
     },
 
+    /** Debounced light table refresh (invoices/vouchers) — avoids full VouchersUI.load() on every cloud tick. */
+    _queueLiveFinancialRefresh(key) {
+        if (!key) return;
+        if (!this._liveFinancialRefreshTimers) this._liveFinancialRefreshTimers = new Map();
+        const prev = this._liveFinancialRefreshTimers.get(key);
+        if (prev) clearTimeout(prev);
+        this._liveFinancialRefreshTimers.set(key, setTimeout(() => {
+            this._liveFinancialRefreshTimers.delete(key);
+            this._lightRefreshUIFromDataKey(key).catch(() => {});
+        }, 280));
+    },
+
+    async _lightRefreshUIFromDataKey(key) {
+        if (!key || key === DataManager.KEYS.ATTENDANCE) return;
+        const v = this.currentView;
+        const financialKeys = new Set([
+            'invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses',
+            DataManager.KEYS.EXPENSES, DataManager.KEYS.CHALLANS, 'challans'
+        ]);
+        if (!financialKeys.has(key)) {
+            await this._refreshUIFromDataKey(key);
+            return;
+        }
+        try {
+            if (typeof VoucherManager !== 'undefined' && VoucherManager.invalidateAllocationsCache) {
+                VoucherManager.invalidateAllocationsCache();
+            }
+        } catch (_) { /* ignore */ }
+        try {
+            if (v === 'invoices' && window.InvoicesUI) {
+                if (key === 'purchases' || key === DataManager.KEYS.EXPENSES || key === 'gtes_expenses') {
+                    if (typeof InvoicesUI.updatePurchasesTable === 'function') InvoicesUI.updatePurchasesTable();
+                } else if (typeof InvoicesUI.updateTable === 'function') {
+                    InvoicesUI.updateTable();
+                }
+                return;
+            }
+            if (v === 'vouchers' && window.VouchersUI) {
+                if (VouchersUI.currentMode === 'credit-note' && typeof VouchersUI.updateCreditNotesTable === 'function') {
+                    VouchersUI.updateCreditNotesTable();
+                } else if (VouchersUI.currentMode === 'debit-note' && typeof VouchersUI.updateDebitNotesTable === 'function') {
+                    VouchersUI.updateDebitNotesTable();
+                } else if (typeof VouchersUI.updateTable === 'function') {
+                    VouchersUI.updateTable();
+                }
+                return;
+            }
+            if (v === 'accounting' && window.AccountingUI && ['invoices', 'vouchers', 'customers', 'purchases'].indexOf(key) !== -1) {
+                if (typeof AccountingUI.refreshCurrentTab === 'function') AccountingUI.refreshCurrentTab();
+                else await AccountingUI.load();
+                return;
+            }
+            if (v === 'payments' && window.PaymentsUI && ['vouchers', 'invoices', 'customers', 'purchases'].indexOf(key) !== -1) {
+                if (typeof PaymentsUI.refreshData === 'function') PaymentsUI.refreshData();
+                else await PaymentsUI.load();
+                return;
+            }
+        } catch (e) {
+            console.warn('[App] _lightRefreshUIFromDataKey:', key, e && e.message);
+        }
+        await this._refreshUIFromDataKey(key);
+    },
+
     async flushDeferredDataRefresh() {
         try {
             if (typeof UserManager !== 'undefined' && UserManager.SESSION_KEY) {
@@ -230,7 +293,17 @@ const App = {
         }
     },
 
+    /** True for ~30s after boot — background BK/cloud sync is deferred to keep startup responsive. */
+    isInStartupGrace() {
+        return !!(this._startupGraceEndsAt && Date.now() < this._startupGraceEndsAt);
+    },
+
+    _markStartupGrace(ms = 30000) {
+        this._startupGraceEndsAt = Date.now() + Math.max(5000, Number(ms) || 30000);
+    },
+
     async init() {
+        this._markStartupGrace(35000);
         // Initialize state
         this.currentView = 'landing';
         this.previousView = 'landing';
@@ -248,7 +321,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.38';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.39';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -282,7 +355,7 @@ const App = {
                     void UserManager.init().then(() => {
                         this.updateCompanyBranding().catch((e) => console.warn('[App] updateCompanyBranding:', e));
                     });
-                    setTimeout(() => this._initDeferredModules(), 0);
+                    setTimeout(() => this._initDeferredModules(), 15000);
                 } else {
                     this._setInitialBootProgress(78, 'First-time setup…');
                     await UserManager.init();
@@ -290,15 +363,15 @@ const App = {
                     this._setInitialBootProgress(100, 'Ready');
                     this.hideLoader(0);
                     loginScreenReady = true;
-                    setTimeout(() => this._initDeferredModules(), 0);
+                    setTimeout(() => this._initDeferredModules(), 15000);
                 }
             } else {
                 this._setInitialBootProgress(74, 'User profile…');
                 await UserManager.init();
                 this._setInitialBootProgress(86, 'Branding…');
                 await this.updateCompanyBranding();
-                this._setInitialBootProgress(94, 'Background services…');
-                this._initDeferredModules();
+                this._setInitialBootProgress(94, 'Ready');
+                setTimeout(() => this._initDeferredModules(), 12000);
                 this._setInitialBootProgress(100, 'Ready');
             }
         } catch (error) {
@@ -358,6 +431,7 @@ const App = {
             document.documentElement.dataset.gtesBkVisBound = '1';
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') return;
+                if (this.isInStartupGrace && this.isInStartupGrace()) return;
                 if (window.BookKeeperSync && typeof BookKeeperSync.onAppForeground === 'function') {
                     BookKeeperSync.onAppForeground();
                 }
@@ -712,24 +786,22 @@ const App = {
                 landingThemeToggle.checked = savedTheme === 'light';
             }
 
-            // Pending-invoice KPIs need invoices + vouchers in cache; prefetch alone does not emit data-changed.
-            this._setInitialBootProgress(50, 'Loading sales data…');
-            try {
-                await Promise.all([
-                    DataManager.loadData('invoices').catch((e) => console.warn('[App] boot invoices:', e && e.message)),
-                    DataManager.loadData('vouchers').catch((e) => console.warn('[App] boot vouchers:', e && e.message)),
-                ]);
-            } catch (_) { /* ignore */ }
-
-            // Load dashboard view by default (premium dashboard shell)
+            // Open dashboard first; load heavy sales data in the background (avoids boot freeze).
             this._setInitialBootProgress(55, 'Opening dashboard…');
             await this.showView('dashboard', {}, { suppressLoader: !!this._bootSequenceActive });
             if (typeof window.__gtesSyncShellVisibility === 'function') {
                 window.__gtesSyncShellVisibility();
             }
-            if (window.BookKeeperSync && typeof BookKeeperSync.onAppForeground === 'function') {
-                setTimeout(() => BookKeeperSync.onAppForeground(), 400);
-            }
+            setTimeout(() => {
+                void Promise.all([
+                    DataManager.loadData('invoices').catch((e) => console.warn('[App] boot invoices:', e && e.message)),
+                    DataManager.loadData('vouchers').catch((e) => console.warn('[App] boot vouchers:', e && e.message)),
+                ]).then(() => {
+                    try {
+                        this._refreshPremiumDashboardShell();
+                    } catch (_) { /* ignore */ }
+                });
+            }, 0);
             return true;
         }
 
@@ -918,8 +990,17 @@ const App = {
                     this._queueDeferredDataRefresh(d.key);
                     return;
                 }
-                // Dashboard KPIs (BookKeeper / invoices / stock) must react to disk/local hydration too — not only firebase-listener.
                 const K = DataManager.KEYS;
+                const liveFinancialKeys = new Set([
+                    'invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses',
+                    K.EXPENSES, 'challans', K.CHALLANS
+                ]);
+                const financialViews = new Set(['invoices', 'vouchers', 'accounting', 'payments']);
+                if (financialViews.has(v) && liveFinancialKeys.has(d.key)) {
+                    this._queueLiveFinancialRefresh(d.key);
+                    return;
+                }
+                // Dashboard KPIs (BookKeeper / invoices / stock) must react to disk/local hydration too — not only firebase-listener.
                 const dashDataKeys = new Set([
                     'invoices', 'vouchers', 'customers', 'purchases', 'challans', K.CHALLANS, 'inventory', 'inventoryTransactions',
                     K.INVENTORY_ITEMS, K.SERVICES, K.WAREHOUSES, K.ACCOUNTS, 'gtes_expenses', K.EXPENSE_CATEGORIES,
@@ -2362,7 +2443,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.38';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.39';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');

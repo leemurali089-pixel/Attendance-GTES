@@ -164,7 +164,10 @@ const InvoiceManager = {
         };
 
         invoices.push(invoice);
-        await DataManager.saveData('invoices', invoices);
+        await DataManager.saveData('invoices', invoices, { skipPreSaveMerge: true });
+        if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
+            void FileStorage.flushPendingCloudWrites(2500);
+        }
 
         // Update Challan status if linked
         if (invoice.challanId && typeof DeliveryManager !== 'undefined') {
@@ -195,7 +198,10 @@ const InvoiceManager = {
             updatedAt: new Date().toISOString()
         };
 
-        await DataManager.saveData('invoices', invoices);
+        await DataManager.saveData('invoices', invoices, { skipPreSaveMerge: true });
+        if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
+            void FileStorage.flushPendingCloudWrites(2500);
+        }
         return invoices[index];
     },
 

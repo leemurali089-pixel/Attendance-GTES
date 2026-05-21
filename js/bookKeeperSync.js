@@ -7,7 +7,7 @@ const BookKeeperSync = {
         autoSync: true,
         backupPath: null, // User selected path to .db file
         /** Poll backup mtime — lower = closer to real-time when you edit Book Keeper and save the .db (Electron). */
-        syncInterval: 4000, // poll backup mtime — closer to real-time when Book Keeper writes the .db
+        syncInterval: 15000, // poll backup mtime (less CPU than 4s; still picks up BK saves)
         lastModified: 0
     },
 
@@ -85,6 +85,7 @@ const BookKeeperSync = {
     /** One stat check at a time (interval does not await). */
     _fileStatInFlight: false,
     _initDone: false,
+    _backgroundServicesStarted: false,
 
     /** True when file-based Book Keeper sync can run (desktop only). */
     _isElectronFileContext() {
@@ -109,15 +110,24 @@ const BookKeeperSync = {
             this.config.autoSync = true;
         }
 
-        // File watcher + mtime polling need Electron IPC — never start on web/PWA (avoids noisy warnings).
+        window.BookKeeperSync = this;
+    },
+
+    /**
+     * Deferred from SyncManager (~18s after boot) so Book Keeper file watch / re-import do not lag login.
+     */
+    startBackgroundServices() {
+        if (this._backgroundServicesStarted) return;
+        this._backgroundServicesStarted = true;
+        console.log('[BK] Starting background sync services (deferred)…');
+
         if (this._isElectronFileContext() && this.config.backupPath && this.config.autoSync) {
-            this.startWatcher();
+            setTimeout(() => this.startWatcher(), 3000);
         }
 
-        window.BookKeeperSync = this;
-
-        // After DataManager has loaded (SyncManager runs post–DataManager.init), restore BK data if storage was cleared but we still have a backup path + prior sync.
-        void this.maybeRehydrateFromBackup();
+        setTimeout(() => {
+            void this.maybeRehydrateFromBackup();
+        }, 8000);
     },
 
     /**
@@ -132,6 +142,9 @@ const BookKeeperSync = {
         } catch (_) {
             /* ignore */
         }
+        if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
+            return;
+        }
         if (!this._isElectronFileContext() || !this.config.backupPath) {
             return;
         }
@@ -140,7 +153,7 @@ const BookKeeperSync = {
                 this.startWatcher();
             }
         }
-        void this.checkFile();
+        setTimeout(() => void this.checkFile(), 1200);
     },
 
     /**
@@ -148,7 +161,12 @@ const BookKeeperSync = {
      * Auto re-import once from the saved .db path (Electron only). File watcher only detects *changes*, not empty storage.
      */
     async maybeRehydrateFromBackup() {
-        await new Promise((r) => setTimeout(r, 50));
+        if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
+            return;
+        }
+        if (this._importInProgress) {
+            return;
+        }
 
         if (!window.electronAPI || !window.electronAPI.readFileBuffer) {
             return;

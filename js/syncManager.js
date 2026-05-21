@@ -35,24 +35,27 @@ const SyncManager = {
         // Initial check
         this.updateNetworkStatus();
 
-        // Automatic backup on startup - Delay by 5s to avoid initial main-thread contention
+        // Heavy startup work is deferred until after the UI is interactive (see App.isInStartupGrace).
         if (window.electronAPI) {
-            setTimeout(() => this.checkBackup(), 5000);
+            setTimeout(() => this.checkBackup(), 120000);
         }
 
-        // NEW: Initialize BookKeeper Sync if available
         if (typeof BookKeeperSync !== 'undefined') {
             BookKeeperSync.init();
+            setTimeout(() => {
+                if (typeof BookKeeperSync.startBackgroundServices === 'function') {
+                    BookKeeperSync.startBackgroundServices();
+                }
+            }, 6000);
         }
 
-        // BookKeeper panel + modal chrome: hydrate from persisted bk_sync_config without opening the modal.
         setTimeout(() => {
             try {
                 this.updateAuditModalUI();
             } catch (e) {
                 console.warn('[SyncManager] updateAuditModalUI on init:', e && e.message);
             }
-        }, 0);
+        }, 4000);
 
         console.log('SyncManager initialized');
     },
@@ -198,7 +201,10 @@ const SyncManager = {
         window.addEventListener('online', () => {
             this.logSyncEvent('info', 'Network connection restored');
             this.updateNetworkStatus();
-            this.syncNow(); // Auto-sync on reconnect
+            const inGrace = window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace();
+            if (!inGrace) {
+                setTimeout(() => this.syncNow(), 2500);
+            }
         });
         window.addEventListener('offline', () => {
             this.logSyncEvent('warning', 'Network connection lost');
@@ -618,6 +624,10 @@ const SyncManager = {
         this.setSyncProgress(1, 'Clearing in-memory cache…');
 
         try {
+            if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
+                this.setSyncProgress(2, 'Uploading pending changes to cloud…');
+                await FileStorage.flushPendingCloudWrites(4000);
+            }
             DataManager.invalidateDataCache();
             this.setSyncProgress(3, 'Reloading datasets from disk / cloud…');
             await DataManager.reloadAllDataAfterCacheClear({

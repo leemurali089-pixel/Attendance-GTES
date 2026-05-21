@@ -45,8 +45,26 @@ const FileStorage = {
         return s;
     },
 
+    /** Keys that must reach Firebase quickly for desktop ↔ web sync. */
+    _priorityCloudSyncKeys() {
+        if (this._priorityCloudKeySet) return this._priorityCloudKeySet;
+        const s = new Set(['invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses', 'challans', 'gtes_challans']);
+        try {
+            const DM = window.DataManager;
+            if (DM && DM.KEYS) {
+                if (DM.KEYS.INVOICES) s.add(DM.KEYS.INVOICES);
+                if (DM.KEYS.VOUCHERS) s.add(DM.KEYS.VOUCHERS);
+                if (DM.KEYS.EXPENSES) s.add(DM.KEYS.EXPENSES);
+                if (DM.KEYS.CHALLANS) s.add(DM.KEYS.CHALLANS);
+            }
+        } catch (_) { /* ignore */ }
+        this._priorityCloudKeySet = s;
+        return s;
+    },
+
     _scheduleCloudSet(key, data, opts = {}) {
-        const debounceMs = Number(opts.debounceMs ?? 500);
+        const priority = this._priorityCloudSyncKeys().has(key);
+        const debounceMs = Number(opts.debounceMs ?? (priority ? 120 : 500));
         const prev = this._pendingCloudSets.get(key);
         if (prev && prev.timer) clearTimeout(prev.timer);
         const next = {
@@ -125,15 +143,19 @@ const FileStorage = {
                 try { void this.flushPendingCloudWrites(1500); } catch (_) { }
             });
         }
-        // Defer dozens of .on('value') listeners to the next task so the UI can paint (login form)
-        // before the browser processes every subscription callback in one long synchronous stretch.
-        setTimeout(() => {
+        // Defer RTDB listeners until after first paint + boot grace (large snapshots block the main thread).
+        const attachDelay = () => {
             try {
                 this.attachRealtimeListeners();
             } catch (e) {
                 console.warn('[FileStorage] attachRealtimeListeners error:', e && e.message);
             }
-        }, 0);
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(() => setTimeout(attachDelay, 5000), { timeout: 12000 });
+        } else {
+            setTimeout(attachDelay, 8000);
+        }
         return true;
     },
 
@@ -282,7 +304,10 @@ const FileStorage = {
         if (canUpload) {
             // Always background-upload for realtime cross-device sync; debounced to avoid lag.
             const isDeferred = deferSet.has(key);
-            this._scheduleCloudSet(key, data, { debounceMs: isDeferred ? 650 : 350 });
+            const priority = this._priorityCloudSyncKeys().has(key);
+            this._scheduleCloudSet(key, data, {
+                debounceMs: priority ? 120 : (isDeferred ? 400 : 280)
+            });
             return true;
         }
         return localSuccess;

@@ -13,6 +13,9 @@ const VouchersUI = {
     noteListSortDir: 'asc',
     _vouchersListVisibleLimit: 150,
     _voucherSkipLimitReset: false,
+    _voucherTableRaf: null,
+    _receiptGstCache: null,
+    _receiptGstCacheInvLen: 0,
     async _yieldToUI() {
         return new Promise((resolve) => {
             if (typeof requestAnimationFrame === 'function') {
@@ -36,6 +39,21 @@ const VouchersUI = {
             const yb = parseInt(String(b).slice(0, 4), 10);
             return yb - ya;
         });
+    },
+
+    _receiptDerivedHasGstCached(v, invoices) {
+        if (!v || v.type !== 'receipt') return true;
+        const pool = Array.isArray(invoices) ? invoices : DataManager.getData('invoices') || [];
+        const invLen = pool.length;
+        if (!this._receiptGstCache || this._receiptGstCacheInvLen !== invLen) {
+            this._receiptGstCache = new Map();
+            this._receiptGstCacheInvLen = invLen;
+        }
+        const id = v.id || v.bookkeeperId || JSON.stringify([v.customerName, v.date, v.amount]);
+        if (this._receiptGstCache.has(id)) return this._receiptGstCache.get(id);
+        const gst = this._receiptDerivedHasGst(v, pool);
+        this._receiptGstCache.set(id, gst);
+        return gst;
     },
 
     /** Receipt: GST vs plain when `hasGst` is missing or wrong vs linked sales (Book Keeper / Firebase). */
@@ -80,9 +98,9 @@ const VouchersUI = {
                 (v) => v.type === 'payment' && !this._isBookkeeperPurchaseReturnPaymentVoucher(v)
             );
         } else if (this.currentMode === 'gst') {
-            vouchers = vouchers.filter((v) => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && this._receiptDerivedHasGstCached(v, invs));
         } else if (this.currentMode === 'non-gst') {
-            vouchers = vouchers.filter((v) => v.type === 'receipt' && !this._receiptDerivedHasGst(v, invs));
+            vouchers = vouchers.filter((v) => v.type === 'receipt' && !this._receiptDerivedHasGstCached(v, invs));
         }
         return (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v)).map((v) => v.date);
     },
@@ -482,6 +500,8 @@ const VouchersUI = {
     },
 
     load(params = {}) {
+        this._receiptGstCache = null;
+        this._receiptGstCacheInvLen = 0;
         // Bank Mail → Create Voucher handoff: the Bank Mail view passes
         // `{ fromBankMail: true, prefill: {...}, mode: 'purchase' | 'gst' | 'non-gst' }`.
         // Pull prefill from sessionStorage as a fallback if the caller didn't
@@ -537,6 +557,7 @@ const VouchersUI = {
             if (prefill.amount != null && !isNaN(Number(prefill.amount))) {
                 const amountField = form.querySelector('[name="amount"]');
                 if (amountField) amountField.value = Number(prefill.amount);
+                this.calculateTotal();
             }
 
             if (prefill.receivedAt) {
@@ -736,28 +757,36 @@ const VouchersUI = {
             this.updateDebitNotesTable();
             return;
         }
+        if (typeof cancelAnimationFrame === 'function' && this._voucherTableRaf != null) {
+            cancelAnimationFrame(this._voucherTableRaf);
+        }
+        if (typeof requestAnimationFrame === 'function') {
+            this._voucherTableRaf = requestAnimationFrame(() => {
+                this._voucherTableRaf = null;
+                this._updateTableImpl();
+            });
+        } else {
+            this._updateTableImpl();
+        }
+    },
 
+    _updateTableImpl() {
         if (!this._voucherSkipLimitReset) {
             this._vouchersListVisibleLimit = 150;
         }
         this._voucherSkipLimitReset = false;
 
-        // Fetch vouchers
         let vouchers = DataManager.getData('vouchers') || [];
         const invs = DataManager.getData('invoices') || [];
 
-        // Refactored logic based on user feedback:
-        // Purchase Vouchers Mode: Show Payments (Out)
-        // GST Vouchers Mode: Show Receipts (In)
-        
         if (this.currentMode === 'purchase') {
             vouchers = (DataManager.getData('vouchers') || []).filter(
                 (v) => v.type === 'payment' && !this._isBookkeeperPurchaseReturnPaymentVoucher(v)
             );
         } else if (this.currentMode === 'gst') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && this._receiptDerivedHasGst(v, invs));
+            vouchers = (DataManager.getData('vouchers') || []).filter((v) => v.type === 'receipt' && this._receiptDerivedHasGstCached(v, invs));
         } else if (this.currentMode === 'non-gst') {
-            vouchers = (DataManager.getData('vouchers') || []).filter(v => v.type === 'receipt' && !this._receiptDerivedHasGst(v, invs));
+            vouchers = (DataManager.getData('vouchers') || []).filter((v) => v.type === 'receipt' && !this._receiptDerivedHasGstCached(v, invs));
         }
 
         const list = (vouchers || []).filter((v) => this._voucherPassesListModeFilter(v));
@@ -1309,7 +1338,7 @@ const VouchersUI = {
                                     <div class="row">
                                          <div class="col-md-3">
                                             <div class="vch-form-label">Amount</div>
-                                            <input type="number" class="form-control vch-form-control" name="amount" min="0" step="0.01" required>
+                                            <input type="number" class="form-control vch-form-control" name="amount" min="0" step="0.01" required oninput="VouchersUI.calculateTotal()">
                                         </div>
                                         <div class="col-md-3">
                                             <div class="vch-form-label">Payment Mode</div>
@@ -1358,8 +1387,11 @@ const VouchersUI = {
                                             </tbody>
                                             <tfoot>
                                                 <tr class="fw-bold">
-                                                    <td colspan="4" class="text-end pe-3">Advance Payment / On Account:</td>
-                                                    <td class="p-0"><input type="number" class="form-control form-control-sm bg-dark text-white border-0 text-end" id="advanceAmount" value="0.00" oninput="VouchersUI.calculateTotal()" /></td>
+                                                    <td colspan="4" class="text-end pe-3">
+                                                        Advance Payment / On Account:
+                                                        <div class="small fw-normal text-muted">Auto: unallocated balance</div>
+                                                    </td>
+                                                    <td class="p-0"><input type="number" class="form-control form-control-sm bg-dark text-white border-0 text-end" id="advanceAmount" value="0.00" readonly tabindex="-1" title="Unallocated balance (updates when amount or invoices change)" /></td>
                                                 </tr>
                                                 <tr class="fw-bold table-active">
                                                     <td colspan="4" class="text-end pe-3">Total Voucher Amount:</td>
@@ -1398,6 +1430,7 @@ const VouchersUI = {
         });
 
         modal.show();
+        setTimeout(() => this.calculateTotal(), 50);
     },
 
     onVoucherTypeChange(type) {
@@ -1860,6 +1893,7 @@ const VouchersUI = {
                 if (amtField) amtField.value = tx.amount;
                 const visibleAmtField = form.querySelector('[name="amount"]');
                 if (visibleAmtField) visibleAmtField.value = tx.amount;
+                this.calculateTotal();
 
                 // Pre-fill Date
                 const dateField = form.querySelector('[name="date"]');
@@ -2734,12 +2768,13 @@ const VouchersUI = {
         }
         const mv = tx ? tx.mappedVoucher : (this._editingVoucher || null);
 
-        if (pendingDocs.length > 0) {
-            container.classList.remove('d-none');
-            // Update Header Label
-            const lbl = container.querySelector('label');
-            if (lbl) lbl.textContent = isPayment ? 'Select Pending Purchase Bills:' : 'Select Pending Invoices:';
+        container.classList.remove('d-none');
+        const lbl = container.querySelector('label');
+        if (lbl) lbl.textContent = isPayment ? 'Select Pending Purchase Bills:' : 'Select Pending Invoices:';
 
+        if (pendingDocs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">No pending ${isPayment ? 'bills' : 'invoices'} — the full amount will be posted as Advance Payment / On Account.</td></tr>`;
+        } else {
             pendingDocs.forEach(doc => {
                 const tr = document.createElement('tr');
                 const docNo = doc.invoiceNo || doc.billNo || doc.vch_no || doc.id;
@@ -2806,23 +2841,10 @@ const VouchersUI = {
                 `;
                 tbody.appendChild(tr);
             });
-        } else {
-            container.classList.add('d-none');
         }
 
-        // RESTORE: Advance Payment if already set in session / editing voucher
-        if (mv && mv.amount !== undefined) {
-            const advanceInput = document.getElementById('advanceAmount');
-            if (advanceInput) {
-                // Advance = total amount - sum of allocations
-                const totalAlloc = (mv.allocations || []).reduce((sum, a) => sum + parseFloat(a.amount || 0), 0);
-                const advance = Math.max(0, mv.amount - totalAlloc);
-                advanceInput.value = advance.toFixed(2);
-            }
-        }
-
-        // Recalculate totals after restoration
-        setTimeout(() => this.calculateTotal(), 500);
+        // Recalculate totals (advance auto-fills from unallocated balance)
+        setTimeout(() => this.calculateTotal(), 100);
     },
 
     calculateTotal(checkbox) {
@@ -2830,7 +2852,7 @@ const VouchersUI = {
         const visibleAmountInput = document.querySelector('#createVoucherForm [name="amount"]');
         const bankAmount = parseFloat(visibleAmountInput ? visibleAmountInput.value : 0) || 0;
 
-        // NEW: Calculate Total Settlement (Gross)
+        // Total settlement = bank/cash + TDS + discount (gross applied to party)
         const tds = parseFloat(document.getElementById('tdsAmount')?.value) || 0;
         const discount = parseFloat(document.getElementById('discountAmount')?.value) || 0;
         const totalSettlement = bankAmount + tds + discount;
@@ -2842,30 +2864,27 @@ const VouchersUI = {
             input.disabled = !checkbox.checked;
 
             if (checkbox.checked) {
-                // Calculate how much is already allocated in OTHER checked rows
+                // Remaining = settlement minus other invoice lines only (advance is derived last)
                 let alreadyAllocated = 0;
                 document.querySelectorAll('.pay-input:not(:disabled)').forEach(pi => {
                     if (pi !== input) {
                         alreadyAllocated += parseFloat(pi.value) || 0;
                     }
                 });
-                // Add current advance allocation too
-                const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
-                alreadyAllocated += advance;
 
                 const remaining = Math.max(0, totalSettlement - alreadyAllocated);
                 const billAmount = parseFloat(checkbox.dataset.amount) || 0;
 
-                // Fill min(billAmount, remaining) — partial payment if needed
+                // Fill min(bill pending, remaining) — partial payment if needed
                 input.value = Math.min(billAmount, remaining).toFixed(2);
             } else {
                 input.value = 0;
             }
         }
 
-        // Now recalculate totals
+        // Sum invoice / purchase bill allocations
         const inputs = document.querySelectorAll('.pay-input:not(:disabled)');
-        let allocated = 0;
+        let invoiceAllocated = 0;
         const selectedIds = [];
         const invoiceNos = [];
 
@@ -2873,7 +2892,7 @@ const VouchersUI = {
 
         inputs.forEach(input => {
             const val = parseFloat(input.value) || 0;
-            allocated += val;
+            invoiceAllocated += val;
             if (val > 0) {
                 const row = input.closest('tr');
                 const cb = row.querySelector('.invoice-check');
@@ -2884,8 +2903,12 @@ const VouchersUI = {
             }
         });
 
-        // Add Advance amount
-        const advance = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
+        // Advance = unallocated balance (full amount when no bills selected)
+        const advanceInput = document.getElementById('advanceAmount');
+        const advance = Math.max(0, totalSettlement - invoiceAllocated);
+        if (advanceInput) {
+            advanceInput.value = advance.toFixed(2);
+        }
 
         // Proportionally distribute TDS and Discount across allocations
         const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
@@ -2908,8 +2931,8 @@ const VouchersUI = {
         }
         allocField.value = JSON.stringify(allocations);
 
-        allocated += advance;
- 
+        const allocated = invoiceAllocated + advance;
+
         const balance = totalSettlement - allocated;
 
         // Update the running balance display
@@ -3000,16 +3023,21 @@ const VouchersUI = {
 
         const linkedJson = formData.get('linkedInvoicesJSON');
         const linkedInvoices = linkedJson ? JSON.parse(linkedJson) : [];
-        const allocatedAmount = parseFloat(formData.get('amount')) || 0;
+        const bankAmount = parseFloat(formData.get('amount')) || 0;
+        const tdsSave = parseFloat(formData.get('tdsAmount') || 0);
+        const discountSave = parseFloat(formData.get('discountAmount') || 0);
+        const totalSettlement = bankAmount + tdsSave + discountSave;
+        const allocatedTotal = parseFloat(formData.get('finalAmount')) || 0;
+        const advanceSave = parseFloat(document.getElementById('advanceAmount')?.value) || 0;
 
-        // --- NEW: Strict Bank Transaction Allocation Check ---
+        // --- Strict Bank Transaction Allocation Check (invoices + advance = settlement) ---
         const txIndex = formData.get('bankTxIndex');
         if (txIndex !== null && txIndex !== '' && this.currentBankTransactions) {
             const tx = this.currentBankTransactions[txIndex];
             if (tx) {
-                // Allow a small floating point tolerance (e.g., 0.01)
-                if (Math.abs(allocatedAmount - tx.amount) > 0.02) {
-                    App.showNotification(`Please allocate the exact bank transaction amount (₹${tx.amount.toFixed(2)}) using invoices or the Advance Payment field. Current allocation: ₹${allocatedAmount.toFixed(2)}`, 'warning');
+                const expectedSettlement = parseFloat(tx.amount) + tdsSave + discountSave;
+                if (Math.abs(allocatedTotal - expectedSettlement) > 0.02) {
+                    App.showNotification(`Please allocate the full transaction (₹${expectedSettlement.toFixed(2)}): invoices and Advance Payment must total this amount. Current: ₹${allocatedTotal.toFixed(2)} (Advance: ₹${advanceSave.toFixed(2)})`, 'warning');
                     this._saveVoucherInProgress = false;
                     if (saveBtn) saveBtn.disabled = false;
                     return; // Block saving
@@ -3028,7 +3056,8 @@ const VouchersUI = {
             customerName: name,
             customerId: customerId,
             partyId: partyId || '',
-            amount: allocatedAmount,
+            amount: bankAmount,
+            advanceAmount: advanceSave,
             paymentMode: formData.get('paymentMode'),
             /** Book Keeper style: bank vouchers post to Bank A/Cs; cash to Cash-in-hand */
             contraLedgerGroup: pm === 'bank' ? 'Bank A/Cs' : 'Cash-in-hand',
@@ -3871,6 +3900,11 @@ const VouchersUI = {
                 ? CustomerManager.resolvePartyId({ customerId: resolvedId, customerName: name })
                 : '');
 
+        const linkedJson = formData.get('linkedInvoicesJSON');
+        const linkedInvoices = linkedJson ? JSON.parse(linkedJson) : [];
+        const allocJson = formData.get('linkedAllocationsJSON');
+        const allocations = allocJson ? JSON.parse(allocJson) : [];
+
         const updates = {
             type: formData.get('type'),
             date: formData.get('date'),
@@ -3879,8 +3913,12 @@ const VouchersUI = {
             partyId: partyId || '',
             customerAddress: formData.get('customerAddress') || '',
             amount: parseFloat(formData.get('amount')) || 0,
+            advanceAmount: parseFloat(document.getElementById('advanceAmount')?.value) || 0,
             paymentMode: formData.get('paymentMode'),
             referenceId: formData.get('refNo'),
+            linkedInvoiceId: linkedInvoices.length > 0 ? linkedInvoices[0] : null,
+            linkedInvoices,
+            allocations,
             tdsAmount: parseFloat(formData.get('tdsAmount') || 0),
             discountAmount: parseFloat(formData.get('discountAmount') || 0),
             remarks: formData.get('remarks'),

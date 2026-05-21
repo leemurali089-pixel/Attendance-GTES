@@ -494,6 +494,12 @@ const DataManager = {
             if (typeof InvoiceManager !== 'undefined' && InvoiceManager) {
                 InvoiceManager._balanceCache = null;
             }
+            if (typeof VoucherManager !== 'undefined' && VoucherManager && typeof VoucherManager.invalidateAllocationsCache === 'function') {
+                VoucherManager.invalidateAllocationsCache();
+            } else if (typeof VoucherManager !== 'undefined' && VoucherManager) {
+                VoucherManager._allocationsCache = null;
+                VoucherManager._lastVoucherCount = null;
+            }
         } catch (_) { /* ignore */ }
     },
 
@@ -632,9 +638,12 @@ const DataManager = {
         
         // Asynchronous Second Phase: Heavy data loads (don't block UI boot)
         // This is deferred so the Login/Dashboard can appear immediately.
-        setTimeout(async () => {
+        const runPrefetch = async () => {
+            if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
+                await new Promise((r) => setTimeout(r, 4000));
+            }
             console.log("[DataManager]: Prefetching transaction modules in background...");
-            const prefetchBatch = 4;
+            const prefetchBatch = 2;
             for (let i = 0; i < dataKeys.length; i += prefetchBatch) {
                 const chunk = dataKeys.slice(i, i + prefetchBatch);
                 await Promise.all(chunk.map((key) =>
@@ -642,14 +651,13 @@ const DataManager = {
                         console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
                     })
                 ));
-                await new Promise((r) => setTimeout(r, 0));
+                await new Promise((r) => setTimeout(r, 60));
             }
             console.log("[DataManager]: Background data prefetch complete.");
-
-            // Sunday automation — SyncManager is started from App (see _initDeferredModules) to avoid double init.
             this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
             this.scheduleSundayHolidayCheck();
-        }, 100); // 100ms delay to let the UI breathe first
+        };
+        setTimeout(() => { void runPrefetch(); }, 6000);
         })();
     },
 
@@ -780,41 +788,54 @@ const DataManager = {
     // Helper methods for storage operations
     async saveData(key, data, options = {}) {
         const storageKey = this.resolveStorageKey(key);
-        // Update memory cache for synchronous access
-        this._cache[storageKey] = data;
+        const skipPreSaveMerge = options.skipPreSaveMerge === true
+            || (window.SyncManager && window.SyncManager.suppressConflictPrompts === true);
+
+        // Snapshot for in-memory union-merge (avoids slow disk/cloud reload on every voucher/invoice save).
+        let mergeBaseline = null;
+        if (!skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
+            try {
+                const pending = (typeof FileStorage !== 'undefined' && FileStorage._pendingCloudSets)
+                    ? FileStorage._pendingCloudSets.get(storageKey)
+                    : null;
+                if (pending && pending.data && Array.isArray(pending.data)) {
+                    mergeBaseline = pending.data;
+                } else if (this._trustedCacheKeys.has(storageKey) && Array.isArray(this._cache[storageKey])) {
+                    mergeBaseline = this._cache[storageKey];
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        let payload = data;
+        if (!skipPreSaveMerge && mergeBaseline && Array.isArray(mergeBaseline) && mergeBaseline.length > 0) {
+            payload = this._mergeRecordArraysById(mergeBaseline, data, storageKey);
+        } else if (!skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
+            try {
+                const cloudExisting = await FileStorage.loadData(storageKey);
+                if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
+                    payload = this._mergeRecordArraysById(cloudExisting, data, storageKey);
+                }
+            } catch (e) {
+                console.warn(`[DataManager] Pre-save merge skipped for '${storageKey}':`, e);
+            }
+        }
+
+        this._cache[storageKey] = payload;
         this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
-        if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = data;
+        if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = payload;
         this._trustedCacheKeys.add(storageKey);
         if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
         if (storageKey === this.KEYS.ATTENDANCE) {
             this._clearAttendanceDerivedCaches();
         }
 
-        // Try local storage cache (large JSON → IndexedDB only)
-        await this._mirrorToLocalOrIDB(storageKey, data);
+        await this._mirrorToLocalOrIDB(storageKey, payload);
 
-        // Phase 5: Check for conflicts before saving
         if (window.SyncManager) {
             const canProceed = await window.SyncManager.checkConflict(storageKey);
             if (!canProceed) return false;
         }
-        let payload = data;
-        const skipPreSaveMerge = options.skipPreSaveMerge === true
-            || (window.SyncManager && window.SyncManager.suppressConflictPrompts === true);
-        if (!skipPreSaveMerge && this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
-            try {
-                const cloudExisting = await FileStorage.loadData(storageKey);
-                if (Array.isArray(cloudExisting) && cloudExisting.length > 0) {
-                    payload = this._mergeRecordArraysById(cloudExisting, data, storageKey);
-                    this._cache[storageKey] = payload;
-                    this._invalidateInvoiceBalanceCacheForStorageKey(storageKey);
-                    if (storageKey === this.KEYS.CHALLANS) this._cache['challans'] = payload;
-                    await this._mirrorToLocalOrIDB(storageKey, payload);
-                }
-            } catch (e) {
-                console.warn(`[DataManager] Pre-save merge skipped for '${storageKey}':`, e);
-            }
-        }
+
         const ok = await FileStorage.saveData(storageKey, payload);
         const emitKey = storageKey === this.KEYS.CHALLANS ? 'challans' : storageKey;
         this._emitDataChangedEvent(emitKey, 'saveData');

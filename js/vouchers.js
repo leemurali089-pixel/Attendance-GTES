@@ -6,6 +6,11 @@
 
 const VoucherManager = {
     _allocationsCache: null,
+
+    invalidateAllocationsCache() {
+        this._allocationsCache = null;
+        this._lastVoucherCount = null;
+    },
     _lastVoucherCount: 0,
 
     /**
@@ -104,6 +109,7 @@ const VoucherManager = {
             referenceId: data.referenceId || '',
             linkedInvoices: data.linkedInvoices || [], // Array of invoice IDs being paid
             allocations: data.allocations || [], // NEW: Detailed allocations [{id, no, amount}]
+            advanceAmount: parseFloat(data.advanceAmount || 0),
             remarks: data.remarks || '',
             hasGst: data.hasGst,
             isPurchase: data.isPurchase,
@@ -114,7 +120,10 @@ const VoucherManager = {
         this.recordUsedSerial(data.type, uniqueId, voucherMode);
 
         vouchers.push(voucher);
-        await DataManager.saveData('vouchers', vouchers);
+        await DataManager.saveData('vouchers', vouchers, { skipPreSaveMerge: true });
+        if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
+            void FileStorage.flushPendingCloudWrites(2500);
+        }
 
         // Update linked document statuses in the background — can scan many invoices and block the UI if awaited
         const allocIds = (data.allocations || []).flatMap(a => [a.id, a.no, a.billNo, a.invoiceNo].filter(Boolean));
