@@ -173,6 +173,128 @@ const DataManager = {
         return Array.from(map.values());
     },
 
+    /** Book Keeper import row (BK id / bookkeeper source). */
+    isBookkeeperFinancialRow(row, storageKey = null) {
+        if (!row || typeof row !== 'object') return false;
+        if (row.source === 'bookkeeper' || row.source === 'seed' || row.bookkeeperId) return true;
+        const idStr = String(row.id != null ? row.id : '');
+        if (storageKey === 'vouchers' && idStr && /^(BK-|vch_bk-)/i.test(idStr)) return true;
+        return false;
+    },
+
+    isLocalProtectedFinancialRow(row) {
+        if (!row || typeof row !== 'object') return false;
+        const s = String(row.source || '').toLowerCase();
+        return s === 'local' || s === 'mjsprime' || s === 'manual';
+    },
+
+    /**
+     * Filter invoices/vouchers for restore or display scope: all | gst | plain | purchase.
+     * Plain/GST restore excludes Book Keeper rows (BK-* / source bookkeeper).
+     */
+    filterRowsByAccountingScope(rows, storageKey, scope = 'all') {
+        const list = Array.isArray(rows) ? rows : [];
+        const sc = String(scope || 'all').toLowerCase();
+        if (sc === 'all') return list;
+        const IM = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+        const VU = typeof VouchersUI !== 'undefined' ? VouchersUI : null;
+        if (storageKey === 'invoices') {
+            return list.filter((inv) => {
+                if (this.isBookkeeperFinancialRow(inv, 'invoices')) return false;
+                if (sc === 'gst') {
+                    return IM && typeof IM.isGstSalesListRow === 'function' ? IM.isGstSalesListRow(inv) : false;
+                }
+                if (sc === 'plain') {
+                    return IM && typeof IM.isPlainSalesListRow === 'function' ? IM.isPlainSalesListRow(inv) : false;
+                }
+                if (sc === 'purchase') {
+                    const t = String(inv.type || '').toLowerCase();
+                    return t.includes('purchase');
+                }
+                return true;
+            });
+        }
+        if (storageKey === 'vouchers') {
+            return list.filter((v) => {
+                if (this.isBookkeeperFinancialRow(v, 'vouchers')) return false;
+                if (sc === 'purchase') {
+                    return v.type === 'payment' && v.isPurchase !== false &&
+                        !(VU && typeof VU._isBookkeeperPurchaseReturnPaymentVoucher === 'function' &&
+                            VU._isBookkeeperPurchaseReturnPaymentVoucher(v));
+                }
+                if (v.type !== 'receipt') return false;
+                if (sc === 'gst') {
+                    if (v.hasGst === true) return true;
+                    if (VU && typeof VU._receiptDerivedHasGst === 'function') {
+                        const invs = this.getData('invoices') || [];
+                        return VU._receiptDerivedHasGst(v, invs);
+                    }
+                    return v.hasGst !== false;
+                }
+                if (sc === 'plain') {
+                    if (v.hasGst === false) return true;
+                    if (VU && typeof VU._receiptDerivedHasGst === 'function') {
+                        const invs = this.getData('invoices') || [];
+                        return !VU._receiptDerivedHasGst(v, invs);
+                    }
+                    return v.hasGst === false;
+                }
+                return true;
+            });
+        }
+        return list;
+    },
+
+    /**
+     * Tag plain app invoices/vouchers as source=local so Book Keeper reset keeps them.
+     * @returns {{ invoices: number, vouchers: number }}
+     */
+    tagPlainFinancialRecordsAsLocal(options = {}) {
+        const onlyUntagged = options.onlyUntagged !== false;
+        let invTagged = 0;
+        let vchTagged = 0;
+        const IM = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
+
+        let invoices = this.getData('invoices') || [];
+        if (!Array.isArray(invoices)) invoices = [];
+        let invChanged = false;
+        invoices = invoices.map((inv) => {
+            if (!inv || this.isBookkeeperFinancialRow(inv, 'invoices')) return inv;
+            const plain = IM && typeof IM.isPlainSalesListRow === 'function' && IM.isPlainSalesListRow(inv);
+            if (!plain) return inv;
+            if (onlyUntagged && this.isLocalProtectedFinancialRow(inv)) return inv;
+            invTagged++;
+            invChanged = true;
+            return { ...inv, source: 'local', updatedAt: new Date().toISOString() };
+        });
+
+        let vouchers = this.getData('vouchers') || [];
+        if (!Array.isArray(vouchers)) vouchers = [];
+        let vchChanged = false;
+        vouchers = vouchers.map((v) => {
+            if (!v || this.isBookkeeperFinancialRow(v, 'vouchers')) return v;
+            if (v.type !== 'receipt') return v;
+            const plain = v.hasGst === false ||
+                (typeof VouchersUI !== 'undefined' && VouchersUI._receiptDerivedHasGst &&
+                    !VouchersUI._receiptDerivedHasGst(v, invoices));
+            if (!plain) return v;
+            if (onlyUntagged && this.isLocalProtectedFinancialRow(v)) return v;
+            vchTagged++;
+            vchChanged = true;
+            return { ...v, source: 'local', hasGst: false, updatedAt: new Date().toISOString() };
+        });
+
+        if (invChanged) {
+            this._cache.invoices = invoices;
+            this._trustedCacheKeys.add('invoices');
+        }
+        if (vchChanged) {
+            this._cache.vouchers = vouchers;
+            this._trustedCacheKeys.add('vouchers');
+        }
+        return { invoices: invTagged, vouchers: vchTagged, invChanged, vchChanged, invoices, vouchers };
+    },
+
     /**
      * Union-merge two record arrays. Vouchers: prefer bookkeeperId (BK-*) as key so repeating vch_no
      * (e.g. "110") from different parties does not collapse into one row during sync.

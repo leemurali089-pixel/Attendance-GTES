@@ -159,6 +159,7 @@ const InvoiceManager = {
             paymentDate: null,
             paymentMode: null,
 
+            source: invoiceData.source || (invoiceData.bookkeeperId ? 'bookkeeper' : 'local'),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };

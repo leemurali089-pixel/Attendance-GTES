@@ -3655,7 +3655,7 @@ const BookKeeperImport = {
      * Confirm and Clear All BookKeeper Data
      */
     async confirmClearData() {
-        if (confirm('Delete all BookKeeper–imported data from this device?\n\nKeeps only parties and records created in this app (source = local).\n\nRemoves: BookKeeper-tagged customers/vendors, imported invoices, vouchers, purchases, inventory from import, challans, and related rows.\n\nRe-open and save any manual party in the app if it was created before the "local" tag was added, so it is kept on future resets.\n\nThis action cannot be undone.')) {
+        if (confirm('Delete all BookKeeper–imported data from this device?\n\nKeeps: rows tagged LOCAL (plain/GST you created in GTES) and plain invoices/vouchers without BK-* ids.\n\nRemoves: BookKeeper-tagged (BK) customers, invoices, vouchers, purchases, inventory, challans.\n\nTip: Admin → Settings → "Tag plain as LOCAL now" before reset if plain rows have no LOCAL badge.\n\nThis cannot be undone.')) {
             await this.clearAllData();
         }
     },
@@ -3704,24 +3704,43 @@ const BookKeeperImport = {
 
         // 1. Invoices (drop BK + credit notes / sales return rows that often linger after import)
         const invoices = DataManager.getData('invoices') || [];
-        const cleanInvoices = invoices.filter((i) => {
+        const keepLocalInvoice = (i) => {
+            if (!i || typeof i !== 'object') return false;
+            if (DataManager.isLocalProtectedFinancialRow && DataManager.isLocalProtectedFinancialRow(i)) return true;
+            if (DataManager.isBookkeeperFinancialRow && DataManager.isBookkeeperFinancialRow(i, 'invoices')) return false;
             if (i.source === 'bookkeeper' || i.source === 'seed' || i.bookkeeperId) return false;
             const t = String(i.type || '').toLowerCase();
             if (t === 'credit-note' || t === 'credit_note' || t === 'sales-return' || t === 'sales_return') return false;
-            return true;
-        });
+            if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isPlainSalesListRow === 'function' &&
+                InvoiceManager.isPlainSalesListRow(i)) return true;
+            if (typeof InvoiceManager !== 'undefined' && typeof InvoiceManager.isGstSalesListRow === 'function' &&
+                InvoiceManager.isGstSalesListRow(i) && !i.bookkeeperId) return true;
+            return false;
+        };
+        const cleanInvoices = invoices.filter(keepLocalInvoice);
         await saveSwept('invoices', cleanInvoices, noMerge);
 
-        // 2. Vouchers (Transactions)
+        // 2. Vouchers (Transactions) — keep source=local and plain app receipts (no BK-*)
         const vouchers = DataManager.getData('vouchers') || [];
-        const cleanVouchers = vouchers.filter((v) => {
+        const keepLocalVoucher = (v) => {
             if (!v || typeof v !== 'object') return false;
+            if (DataManager.isLocalProtectedFinancialRow && DataManager.isLocalProtectedFinancialRow(v)) return true;
+            if (DataManager.isBookkeeperFinancialRow && DataManager.isBookkeeperFinancialRow(v, 'vouchers')) return false;
             if (v.source === 'bookkeeper' || v.source === 'seed' || v.bookkeeperId) return false;
             const idStr = String(v.id != null ? v.id : '');
             if (idStr && /^(BK-|vch_bk-)/i.test(idStr)) return false;
-            return true;
-        });
+            if (v.type === 'receipt' && v.hasGst === false) return true;
+            if (v.type === 'payment' && v.isPurchase && !v.bookkeeperId) return true;
+            return false;
+        };
+        const cleanVouchers = vouchers.filter(keepLocalVoucher);
         await saveSwept('vouchers', cleanVouchers, noMerge);
+
+        if (typeof DataManager.tagPlainFinancialRecordsAsLocal === 'function') {
+            const tag = DataManager.tagPlainFinancialRecordsAsLocal({ onlyUntagged: true });
+            if (tag.invChanged) await saveSwept('invoices', tag.invoices, noMerge);
+            if (tag.vchChanged) await saveSwept('vouchers', tag.vouchers, noMerge);
+        }
 
         // 3. Inventory (Robust Cleanup for all import variants)
         const invRaw = DataManager.getData('inventory') || DataManager.getData('gtes_inventory_items') || [];

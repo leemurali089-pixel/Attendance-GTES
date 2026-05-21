@@ -860,6 +860,14 @@ const VouchersUI = {
                 <tbody>
                     ${page.map((v) => {
             const vchLabel = String(v.displayVoucherNo || v.voucherNo || '').trim() || v.id;
+            const srcTag = String(v.source || '').toLowerCase();
+            const isBk =
+                srcTag === 'bookkeeper' ||
+                (v.bookkeeperId && String(v.bookkeeperId).trim()) ||
+                /^BK-/i.test(String(v.id || ''));
+            const originBadge = srcTag === 'local'
+                ? '<span class="badge bg-primary ms-1" title="Created in GTES — kept on Book Keeper reset">LOCAL</span>'
+                : (isBk ? '<span class="badge bg-secondary ms-1" title="Book Keeper import">BK</span>' : '');
             const searchStr = `${v.id} ${v.displayVoucherNo || ''} ${v.voucherNo || ''} ${v.customerName || ''} ${v.remarks || ''} ${v.paymentMode || ''}`.toLowerCase();
             const yearStr = DataManager.getFinancialYear(v.date);
             const dt = new Date(v.date || '');
@@ -871,7 +879,7 @@ const VouchersUI = {
             return `
                         <tr data-search="${searchStr}" data-year="${yearStr}" data-month="${ym}" data-date="${ymd}" data-type="${typeStr}" data-link="${linkStr}">
                             <td>${v.date}</td>
-                            <td class="fw-bold text-info">${vchLabel}${vchLabel !== v.id ? `<br><small class="text-muted">${v.id}</small>` : ''}</td>
+                            <td class="fw-bold text-info">${vchLabel}${originBadge}${vchLabel !== v.id ? `<br><small class="text-muted">${v.id}</small>` : ''}</td>
                             <td><span class="badge bg-${v.type === 'receipt' ? 'success' : (v.type === 'payment' ? 'danger' : 'warning')} text-capitalize">${v.type || 'General'}</span></td>
                             <td>
                                 ${v.customerName || v.customerId || 'N/A'}

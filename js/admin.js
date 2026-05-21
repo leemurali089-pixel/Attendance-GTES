@@ -219,8 +219,42 @@ const AdminModule = {
                                 <div class="fw-semibold mb-1"><i class="bi bi-upload me-1"></i> Restore from backup file</div>
                                 <p class="small text-muted mb-2">
                                     Pick a <strong>full backup</strong> (<code>backup_full_*.json</code>) or a single dataset file.
-                                    Only the selected dataset is replaced; other data is left unchanged.
+                                    Choose <strong>GST / Plain / Purchases</strong> so Book Keeper (BK-*) rows are not imported when you only want plain data.
                                 </p>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Restore invoices — scope</label>
+                                        <div class="btn-group btn-group-sm w-100 flex-wrap" role="group" id="restoreInvoiceScopeGroup">
+                                            <input type="radio" class="btn-check" name="restoreInvoiceScope" id="restoreInvScopeAll" value="all" checked>
+                                            <label class="btn btn-outline-secondary" for="restoreInvScopeAll">All</label>
+                                            <input type="radio" class="btn-check" name="restoreInvoiceScope" id="restoreInvScopeGst" value="gst">
+                                            <label class="btn btn-outline-secondary" for="restoreInvScopeGst">GST</label>
+                                            <input type="radio" class="btn-check" name="restoreInvoiceScope" id="restoreInvScopePlain" value="plain">
+                                            <label class="btn btn-outline-secondary" for="restoreInvScopePlain">Plain</label>
+                                            <input type="radio" class="btn-check" name="restoreInvoiceScope" id="restoreInvScopePur" value="purchase">
+                                            <label class="btn btn-outline-secondary" for="restoreInvScopePur">Purchases</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Restore vouchers — scope</label>
+                                        <div class="btn-group btn-group-sm w-100 flex-wrap" role="group" id="restoreVoucherScopeGroup">
+                                            <input type="radio" class="btn-check" name="restoreVoucherScope" id="restoreVchScopeAll" value="all" checked>
+                                            <label class="btn btn-outline-secondary" for="restoreVchScopeAll">All</label>
+                                            <input type="radio" class="btn-check" name="restoreVoucherScope" id="restoreVchScopeGst" value="gst">
+                                            <label class="btn btn-outline-secondary" for="restoreVchScopeGst">GST</label>
+                                            <input type="radio" class="btn-check" name="restoreVoucherScope" id="restoreVchScopePlain" value="plain" checked>
+                                            <label class="btn btn-outline-primary" for="restoreVchScopePlain">Plain</label>
+                                            <input type="radio" class="btn-check" name="restoreVoucherScope" id="restoreVchScopePur" value="purchase">
+                                            <label class="btn btn-outline-secondary" for="restoreVchScopePur">Purchases</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="restoreTagAsLocal" checked>
+                                    <label class="form-check-label small" for="restoreTagAsLocal">
+                                        Tag restored rows as <strong>LOCAL</strong> (kept when you reset Book Keeper data)
+                                    </label>
+                                </div>
                                 <div class="d-flex flex-wrap gap-2 align-items-center">
                                     <button type="button" class="btn btn-sm btn-outline-primary" id="restoreInvoicesBtn">
                                         <i class="bi bi-file-earmark-text"></i> Restore Invoices
@@ -230,6 +264,9 @@ const AdminModule = {
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-primary" id="restoreAttendanceBtn">
                                         <i class="bi bi-calendar-check"></i> Restore Attendance
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-success" id="tagPlainLocalBtn">
+                                        <i class="bi bi-tag"></i> Tag plain as LOCAL now
                                     </button>
                                 </div>
                                 <input type="file" id="restoreBackupFileInput" accept=".json,application/json" class="d-none" />
@@ -560,15 +597,29 @@ const AdminModule = {
         return null;
     },
 
+    _getRestoreScope(kind) {
+        const name = kind === 'invoices' ? 'restoreInvoiceScope' : kind === 'vouchers' ? 'restoreVoucherScope' : null;
+        if (!name) return 'all';
+        const el = document.querySelector(`input[name="${name}"]:checked`);
+        return (el && el.value) ? el.value : 'all';
+    },
+
     _wireRestoreBackupBtns() {
         const input = document.getElementById('restoreBackupFileInput');
         const statusEl = document.getElementById('restoreBackupStatus');
+        const tagBtn = document.getElementById('tagPlainLocalBtn');
+        if (tagBtn) {
+            tagBtn.onclick = () => this.tagPlainInvoicesVouchersAsLocal();
+        }
         const bind = (id, kind) => {
             const btn = document.getElementById(id);
             if (!btn) return;
             btn.onclick = () => {
                 this._pendingRestoreKind = kind;
-                if (statusEl) statusEl.textContent = `Select backup file to restore ${this._restoreSpecs()[kind].label}…`;
+                const scope = this._getRestoreScope(kind);
+                if (statusEl) {
+                    statusEl.textContent = `Select backup — restore ${this._restoreSpecs()[kind].label} (${scope}, no BK rows for plain/GST)…`;
+                }
                 if (input) {
                     input.value = '';
                     input.click();
@@ -584,14 +635,46 @@ const AdminModule = {
                 const kind = this._pendingRestoreKind;
                 this._pendingRestoreKind = null;
                 if (!file || !kind) return;
-                await this.restoreDatasetFromBackupFile(kind, file);
+                const scope = this._getRestoreScope(kind);
+                const tagLocal = document.getElementById('restoreTagAsLocal')?.checked !== false;
+                await this.restoreDatasetFromBackupFile(kind, file, { scope, tagLocal });
             };
         }
     },
 
-    async restoreDatasetFromBackupFile(kind, file) {
+    async tagPlainInvoicesVouchersAsLocal() {
+        if (typeof DataManager === 'undefined' || typeof DataManager.tagPlainFinancialRecordsAsLocal !== 'function') {
+            App.showNotification('Tag helper not available.', 'error');
+            return;
+        }
+        const tag = DataManager.tagPlainFinancialRecordsAsLocal({ onlyUntagged: true });
+        try {
+            if (tag.invChanged) {
+                await DataManager.saveData('invoices', tag.invoices, { skipPreSaveMerge: true });
+            }
+            if (tag.vchChanged) {
+                await DataManager.saveData('vouchers', tag.vouchers, { skipPreSaveMerge: true });
+            }
+            if (typeof FileStorage !== 'undefined' && FileStorage.flushPendingCloudWrites) {
+                await FileStorage.flushPendingCloudWrites(4000);
+            }
+        } catch (e) {
+            App.showNotification('Save failed: ' + (e && e.message), 'error');
+            return;
+        }
+        const msg = `Tagged LOCAL: ${tag.invoices} invoice(s), ${tag.vouchers} voucher(s). These are kept on Book Keeper reset.`;
+        const statusEl = document.getElementById('restoreBackupStatus');
+        if (statusEl) statusEl.textContent = msg;
+        App.showNotification(msg, 'success');
+        if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+        if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+    },
+
+    async restoreDatasetFromBackupFile(kind, file, options = {}) {
         const spec = this._restoreSpecs()[kind];
         const statusEl = document.getElementById('restoreBackupStatus');
+        const scope = options.scope || 'all';
+        const tagLocal = options.tagLocal !== false;
         if (!spec || !file) return;
 
         let parsed;
@@ -603,7 +686,7 @@ const AdminModule = {
             return;
         }
 
-        const rows = this._extractRowsFromBackupFile(parsed, kind);
+        let rows = this._extractRowsFromBackupFile(parsed, kind);
         if (!Array.isArray(rows)) {
             if (typeof App !== 'undefined') {
                 App.showNotification(
@@ -615,6 +698,29 @@ const AdminModule = {
             return;
         }
 
+        const rawCount = rows.length;
+        if (kind === 'invoices' || kind === 'vouchers') {
+            if (typeof DataManager.filterRowsByAccountingScope === 'function') {
+                rows = DataManager.filterRowsByAccountingScope(rows, spec.storageKey, scope);
+            }
+        }
+        if ((kind === 'invoices' || kind === 'vouchers') && rows.length === 0) {
+            App.showNotification(
+                `No ${spec.label} matched scope "${scope}" (BK rows excluded). ${rawCount} row(s) in file.`,
+                'warning'
+            );
+            if (statusEl) statusEl.textContent = `No rows for scope ${scope} in ${file.name}.`;
+            return;
+        }
+
+        if (tagLocal && (kind === 'invoices' || kind === 'vouchers')) {
+            rows = rows.map((r) => {
+                const out = { ...r, source: 'local', updatedAt: new Date().toISOString() };
+                delete out.bookkeeperId;
+                return out;
+            });
+        }
+
         const current =
             typeof DataManager !== 'undefined' && typeof DataManager.getData === 'function'
                 ? DataManager.getData(spec.storageKey)
@@ -624,8 +730,10 @@ const AdminModule = {
         if (
             !confirm(
                 `Restore ${spec.label} from "${file.name}"?\n\n` +
-                    `This will REPLACE all current ${spec.label} (${curCount} row(s)) with ${rows.length} row(s) from the backup.\n\n` +
-                    'Other datasets (customers, settings, etc.) are not changed. Continue?'
+                    `Scope: ${scope} (${rawCount} in file → ${rows.length} to import, BK excluded for plain/GST).\n` +
+                    (tagLocal ? 'Imported rows will be tagged LOCAL (protected on Book Keeper reset).\n\n' : '') +
+                    `This will REPLACE all current ${spec.label} (${curCount} row(s)).\n\n` +
+                    'Other datasets are not changed. Continue?'
             )
         ) {
             if (statusEl) statusEl.textContent = 'Restore cancelled.';
@@ -698,7 +806,7 @@ const AdminModule = {
                 AuditManager.log('BACKUP_RESTORE_PARTIAL', `Restored ${rows.length} ${spec.label} from ${file.name}`);
             }
 
-            const msg = `Restored ${payload.length} ${spec.label} from ${file.name}.`;
+            const msg = `Restored ${payload.length} ${spec.label} (${scope}) from ${file.name}${tagLocal ? ' — tagged LOCAL' : ''}.`;
             toast?.complete(msg);
             if (statusEl) statusEl.textContent = msg;
             if (typeof App !== 'undefined') App.showNotification(msg, 'success');

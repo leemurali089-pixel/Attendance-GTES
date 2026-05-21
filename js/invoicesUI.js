@@ -1179,6 +1179,11 @@ const InvoicesUI = {
             const creditAdjBadge = hasCreditAdjustment(inv)
                 ? '<span class="badge bg-secondary-subtle text-secondary border border-secondary ms-2">Credit Note</span>'
                 : '';
+            const srcTag = String(inv.source || '').toLowerCase();
+            const invBk = srcTag === 'bookkeeper' || (inv.bookkeeperId && String(inv.bookkeeperId).trim());
+            const originBadge = srcTag === 'local'
+                ? '<span class="badge bg-primary ms-1" title="GTES — kept on Book Keeper reset">LOCAL</span>'
+                : (invBk ? '<span class="badge bg-secondary ms-1" title="Book Keeper">BK</span>' : '');
             const ld = getLedgerDueForInv(inv);
             const ledgerCell = ld == null
                 ? '<td class="text-end text-muted">—</td>'
@@ -1188,7 +1193,7 @@ const InvoicesUI = {
                         <tr>
                             <td>${DataManager.formatDateDisplay(inv.date)}</td>
                             <td>
-                                <div class="fw-bold text-info">${inv.invoiceNo || inv.id}${creditAdjBadge}</div>
+                                <div class="fw-bold text-info">${inv.invoiceNo || inv.id}${originBadge}${creditAdjBadge}</div>
                                 <div class="inv-line-preview text-truncate" style="max-width: 200px;">
                                     ${itemsList}
                                 </div>
