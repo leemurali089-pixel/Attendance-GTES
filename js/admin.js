@@ -215,6 +215,26 @@ const AdminModule = {
                                 </div>
                                 <p class="small text-muted mb-0 mt-2">Use <strong>Merge cloud + disk</strong> first if plain data exists online but not locally. Use <strong>Clear cache</strong> only when mirrors are clearly stale.</p>
                             </div>
+                            <div class="alert alert-warning border mb-3" id="restoreFromBackupCard">
+                                <div class="fw-semibold mb-1"><i class="bi bi-upload me-1"></i> Restore from backup file</div>
+                                <p class="small text-muted mb-2">
+                                    Pick a <strong>full backup</strong> (<code>backup_full_*.json</code>) or a single dataset file.
+                                    Only the selected dataset is replaced; other data is left unchanged.
+                                </p>
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="restoreInvoicesBtn">
+                                        <i class="bi bi-file-earmark-text"></i> Restore Invoices
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="restoreVouchersBtn">
+                                        <i class="bi bi-wallet2"></i> Restore Vouchers
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="restoreAttendanceBtn">
+                                        <i class="bi bi-calendar-check"></i> Restore Attendance
+                                    </button>
+                                </div>
+                                <input type="file" id="restoreBackupFileInput" accept=".json,application/json" class="d-none" />
+                                <p class="small text-muted mb-0 mt-2" id="restoreBackupStatus"></p>
+                            </div>
                             <form id="companySettingsForm" onsubmit="AdminModule.saveSettings(event)">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
@@ -482,6 +502,213 @@ const AdminModule = {
         this._wireAppUpdateCard();
         await this._showDesktopDataFolderBanner();
         this._wireInvoiceVoucherCacheReloadBtn();
+        this._wireRestoreBackupBtns();
+    },
+
+    /** @type {'invoices'|'vouchers'|'attendance'|null} */
+    _pendingRestoreKind: null,
+
+    _restoreSpecs() {
+        const K = typeof DataManager !== 'undefined' && DataManager.KEYS ? DataManager.KEYS : {};
+        return {
+            invoices: {
+                kind: 'invoices',
+                storageKey: 'invoices',
+                label: 'invoices',
+                backupKeys: ['invoices', 'gtes_invoices'],
+            },
+            vouchers: {
+                kind: 'vouchers',
+                storageKey: 'vouchers',
+                label: 'vouchers',
+                backupKeys: ['vouchers', 'gtes_vouchers'],
+            },
+            attendance: {
+                kind: 'attendance',
+                storageKey: K.ATTENDANCE || 'gtes_attendance',
+                label: 'attendance',
+                backupKeys: ['gtes_attendance', 'attendance'],
+            },
+        };
+    },
+
+    _coerceBackupRows(raw) {
+        if (raw == null) return null;
+        if (Array.isArray(raw)) return raw;
+        if (typeof DataManager !== 'undefined' && typeof DataManager.coerceJsonArray === 'function') {
+            const arr = DataManager.coerceJsonArray(raw);
+            return Array.isArray(arr) ? arr : null;
+        }
+        if (typeof raw === 'object') {
+            const vals = Object.values(raw).filter((x) => x && typeof x === 'object');
+            return vals.length ? vals : null;
+        }
+        return null;
+    },
+
+    _extractRowsFromBackupFile(parsed, kind) {
+        const spec = this._restoreSpecs()[kind];
+        if (!spec || parsed == null) return null;
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed !== 'object') return null;
+        for (const k of spec.backupKeys) {
+            if (Object.prototype.hasOwnProperty.call(parsed, k)) {
+                const rows = this._coerceBackupRows(parsed[k]);
+                if (rows && rows.length >= 0) return rows;
+            }
+        }
+        return null;
+    },
+
+    _wireRestoreBackupBtns() {
+        const input = document.getElementById('restoreBackupFileInput');
+        const statusEl = document.getElementById('restoreBackupStatus');
+        const bind = (id, kind) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.onclick = () => {
+                this._pendingRestoreKind = kind;
+                if (statusEl) statusEl.textContent = `Select backup file to restore ${this._restoreSpecs()[kind].label}…`;
+                if (input) {
+                    input.value = '';
+                    input.click();
+                }
+            };
+        };
+        bind('restoreInvoicesBtn', 'invoices');
+        bind('restoreVouchersBtn', 'vouchers');
+        bind('restoreAttendanceBtn', 'attendance');
+        if (input) {
+            input.onchange = async (e) => {
+                const file = e.target.files && e.target.files[0];
+                const kind = this._pendingRestoreKind;
+                this._pendingRestoreKind = null;
+                if (!file || !kind) return;
+                await this.restoreDatasetFromBackupFile(kind, file);
+            };
+        }
+    },
+
+    async restoreDatasetFromBackupFile(kind, file) {
+        const spec = this._restoreSpecs()[kind];
+        const statusEl = document.getElementById('restoreBackupStatus');
+        if (!spec || !file) return;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(await file.text());
+        } catch (e) {
+            if (typeof App !== 'undefined') App.showNotification('Invalid JSON backup file.', 'error');
+            if (statusEl) statusEl.textContent = 'Restore failed: invalid JSON.';
+            return;
+        }
+
+        const rows = this._extractRowsFromBackupFile(parsed, kind);
+        if (!Array.isArray(rows)) {
+            if (typeof App !== 'undefined') {
+                App.showNotification(
+                    `Could not find ${spec.label} in this file. Use a full backup or a JSON array of ${spec.label}.`,
+                    'error'
+                );
+            }
+            if (statusEl) statusEl.textContent = `No ${spec.label} data found in ${file.name}.`;
+            return;
+        }
+
+        const current =
+            typeof DataManager !== 'undefined' && typeof DataManager.getData === 'function'
+                ? DataManager.getData(spec.storageKey)
+                : null;
+        const curCount = Array.isArray(current) ? current.length : 0;
+
+        if (
+            !confirm(
+                `Restore ${spec.label} from "${file.name}"?\n\n` +
+                    `This will REPLACE all current ${spec.label} (${curCount} row(s)) with ${rows.length} row(s) from the backup.\n\n` +
+                    'Other datasets (customers, settings, etc.) are not changed. Continue?'
+            )
+        ) {
+            if (statusEl) statusEl.textContent = 'Restore cancelled.';
+            return;
+        }
+
+        const toast =
+            typeof App !== 'undefined' && typeof App.showTaskProgressToast === 'function'
+                ? App.showTaskProgressToast(`Restore ${spec.label}`, { subtitle: file.name })
+                : null;
+
+        try {
+            toast?.setProgress(10, 'Preparing…');
+            let payload = rows.slice();
+            if (
+                (kind === 'invoices' || kind === 'vouchers') &&
+                typeof DataManager._dedupeFinancialRecords === 'function'
+            ) {
+                payload = DataManager._dedupeFinancialRecords(payload, spec.storageKey);
+            }
+
+            if (typeof DataManager.wipeKeyMirrorsForReset === 'function') {
+                toast?.setProgress(35, 'Clearing local mirrors…');
+                await DataManager.wipeKeyMirrorsForReset(spec.storageKey);
+            }
+            if (typeof DataManager.invalidateDataCache === 'function') {
+                DataManager.invalidateDataCache(spec.storageKey);
+            }
+
+            toast?.setProgress(60, 'Saving restored data…');
+            const ok = await DataManager.saveData(spec.storageKey, payload, { skipPreSaveMerge: true });
+            if (ok === false) {
+                throw new Error('Save was blocked (sync conflict). Try Sync Now, then restore again.');
+            }
+
+            if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
+                toast?.setProgress(85, 'Uploading to cloud…');
+                await FileStorage.flushPendingCloudWrites(5000);
+            }
+
+            if (kind === 'invoices' && typeof InvoiceManager !== 'undefined') {
+                InvoiceManager._balanceCache = null;
+                InvoiceManager._lastLogicVersion = null;
+            }
+            if (kind === 'vouchers' && typeof VoucherManager !== 'undefined' && VoucherManager.invalidateAllocationsCache) {
+                VoucherManager.invalidateAllocationsCache();
+            }
+            if (kind === 'attendance' && typeof DataManager._clearAttendanceDerivedCaches === 'function') {
+                DataManager._clearAttendanceDerivedCaches();
+            }
+
+            toast?.setProgress(95, 'Refreshing views…');
+            if (kind === 'invoices' && typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+            if (kind === 'vouchers' && typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+            if (kind === 'attendance' && typeof AttendanceModule !== 'undefined') {
+                if (typeof AttendanceModule.load === 'function') void AttendanceModule.load();
+                else if (typeof AttendanceModule.loadAttendanceForDate === 'function') {
+                    void AttendanceModule.loadAttendanceForDate();
+                }
+            }
+
+            try {
+                if (typeof App !== 'undefined' && App.currentView === 'dashboard') {
+                    App._refreshPremiumDashboardShell();
+                    void App.loadDashboard();
+                }
+            } catch (_) { /* ignore */ }
+
+            if (typeof AuditManager !== 'undefined' && AuditManager.log) {
+                AuditManager.log('BACKUP_RESTORE_PARTIAL', `Restored ${rows.length} ${spec.label} from ${file.name}`);
+            }
+
+            const msg = `Restored ${payload.length} ${spec.label} from ${file.name}.`;
+            toast?.complete(msg);
+            if (statusEl) statusEl.textContent = msg;
+            if (typeof App !== 'undefined') App.showNotification(msg, 'success');
+        } catch (e) {
+            console.error('[Admin] restoreDatasetFromBackupFile', e);
+            const errMsg = String((e && e.message) || e);
+            toast?.fail(errMsg);
+            if (statusEl) statusEl.textContent = `Restore failed: ${errMsg}`;
+            if (typeof App !== 'undefined') App.showNotification('Restore failed: ' + errMsg, 'error');
+        }
     },
 
     async clearInvoiceVoucherCacheAndReload() {
