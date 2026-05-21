@@ -321,7 +321,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.40';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.41';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -2443,7 +2443,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.40';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.41';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');
