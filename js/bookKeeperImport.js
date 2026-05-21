@@ -3689,6 +3689,18 @@ const BookKeeperImport = {
 
         let _bkResetSweepError = null;
         try {
+        if (typeof DataManager.snapshotProtectedCoreData === 'function') {
+            try {
+                const snap = await DataManager.snapshotProtectedCoreData('bk_reset');
+                console.log(
+                    `[BK Reset] Protected snapshot: ${snap.invoices?.length || 0} invoices, ` +
+                    `${snap.vouchers?.length || 0} vouchers, ${snap.attendance?.length || 0} attendance`
+                );
+            } catch (e) {
+                console.warn('[BK Reset] Protected snapshot failed:', e);
+            }
+        }
+        // Attendance is NEVER modified by Book Keeper reset.
         // Load full collections from cloud + local union (IndexedDB included) so filters see every row; large `purchases` were often hidden from getData (LS-only) before a full load.
         const _bkResetRefreshKeys = [
             'invoices', 'vouchers', 'customers', 'inventory', 'gtes_inventory_items',
@@ -3718,7 +3730,7 @@ const BookKeeperImport = {
             return false;
         };
         const cleanInvoices = invoices.filter(keepLocalInvoice);
-        await saveSwept('invoices', cleanInvoices, noMerge);
+        await saveSwept('invoices', cleanInvoices, { ...noMerge, bkResetSweep: true });
 
         // 2. Vouchers (Transactions) — keep source=local and plain app receipts (no BK-*)
         const vouchers = DataManager.getData('vouchers') || [];
@@ -3729,17 +3741,20 @@ const BookKeeperImport = {
             if (v.source === 'bookkeeper' || v.source === 'seed' || v.bookkeeperId) return false;
             const idStr = String(v.id != null ? v.id : '');
             if (idStr && /^(BK-|vch_bk-)/i.test(idStr)) return false;
-            if (v.type === 'receipt' && v.hasGst === false) return true;
-            if (v.type === 'payment' && v.isPurchase && !v.bookkeeperId) return true;
+            if (v.type === 'receipt') return true;
+            if (v.type === 'payment') return true;
             return false;
         };
         const cleanVouchers = vouchers.filter(keepLocalVoucher);
-        await saveSwept('vouchers', cleanVouchers, noMerge);
+        await saveSwept('vouchers', cleanVouchers, { ...noMerge, bkResetSweep: true });
 
-        if (typeof DataManager.tagPlainFinancialRecordsAsLocal === 'function') {
-            const tag = DataManager.tagPlainFinancialRecordsAsLocal({ onlyUntagged: true });
-            if (tag.invChanged) await saveSwept('invoices', tag.invoices, noMerge);
-            if (tag.vchChanged) await saveSwept('vouchers', tag.vouchers, noMerge);
+        if (typeof DataManager.tagAllAppFinancialRecordsAsLocal === 'function') {
+            const tag = DataManager.tagAllAppFinancialRecordsAsLocal({ onlyUntagged: true });
+            if (tag.invChanged) await saveSwept('invoices', tag.invoices, { ...noMerge, bkResetSweep: true });
+            if (tag.vchChanged) await saveSwept('vouchers', tag.vouchers, { ...noMerge, bkResetSweep: true });
+        }
+        if (typeof DataManager.tagAttendanceRecordsAsLocal === 'function') {
+            await DataManager.tagAttendanceRecordsAsLocal();
         }
 
         // 3. Inventory (Robust Cleanup for all import variants)

@@ -54,6 +54,9 @@ const DataManager = {
         RECYCLE_BIN: 'gtes_recycle_bin'
     },
 
+    /** Never wiped by Book Keeper reset; saves blocked if data would be erased accidentally. */
+    PROTECTED_CORE_KEYS: new Set(['gtes_attendance', 'invoices', 'vouchers', 'gtes_employees']),
+
     /** On load, union-merge local/cloud for append-heavy transactional collections only. */
     MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_challans', 'customers', 'purchases', 'gtes_employees']),
 
@@ -188,6 +191,126 @@ const DataManager = {
         return s === 'local' || s === 'mjsprime' || s === 'manual';
     },
 
+    isProtectedStorageKey(key) {
+        const sk = this.resolveStorageKey(key);
+        return this.PROTECTED_CORE_KEYS.has(sk);
+    },
+
+    /**
+     * Block accidental wipe of attendance / invoices / vouchers (e.g. bad restore, empty sync).
+     * @returns {{ ok: boolean, reason?: string }}
+     */
+    _guardProtectedDatasetSave(storageKey, payload, options = {}) {
+        if (!this.isProtectedStorageKey(storageKey)) return { ok: true };
+        if (options.allowProtectedWipe === true || options.bkResetSweep === true) return { ok: true };
+
+        let prev = this._cache[storageKey];
+        if (!Array.isArray(prev)) {
+            try {
+                prev = this.getData(storageKey);
+            } catch (_) { /* ignore */ }
+        }
+        if (!Array.isArray(prev)) prev = [];
+        const next = Array.isArray(payload) ? payload : (payload == null ? [] : null);
+        if (next === null) return { ok: true };
+        const prevLen = prev.length;
+        const nextLen = next.length;
+        if (prevLen > 0 && nextLen === 0) {
+            return {
+                ok: false,
+                reason: `Refusing to erase all ${storageKey} (${prevLen} record(s)). Use Admin restore or pass allowProtectedWipe.`,
+            };
+        }
+        if (prevLen >= 50 && nextLen < Math.max(5, Math.floor(prevLen * 0.05))) {
+            return {
+                ok: false,
+                reason: `Refusing to drop ${storageKey} from ${prevLen} to ${nextLen} rows (possible accidental wipe).`,
+            };
+        }
+        return { ok: true };
+    },
+
+    _stampAttendanceRecordsLocal(records) {
+        if (!Array.isArray(records)) return [];
+        return records.map((r) => {
+            if (!r || typeof r !== 'object') return r;
+            if (String(r.source || '').toLowerCase() === 'bookkeeper') return r;
+            return { ...r, source: 'local' };
+        });
+    },
+
+    /**
+     * Snapshot GTES core data before Book Keeper reset (local invoices/vouchers + full attendance).
+     */
+    async snapshotProtectedCoreData(reason = 'bk_reset') {
+        let invoices = this.getData('invoices') || [];
+        let vouchers = this.getData('vouchers') || [];
+        if (!Array.isArray(invoices)) invoices = [];
+        if (!Array.isArray(vouchers)) vouchers = [];
+        invoices = invoices.filter((i) => !this.isBookkeeperFinancialRow(i, 'invoices'));
+        vouchers = vouchers.filter((v) => !this.isBookkeeperFinancialRow(v, 'vouchers'));
+        const attendance = await this.getAttendance();
+        const snap = {
+            createdAt: new Date().toISOString(),
+            reason: String(reason || 'snapshot'),
+            invoices,
+            vouchers,
+            attendance: Array.isArray(attendance) ? attendance : [],
+        };
+        try {
+            localStorage.setItem('gtes_protected_core_snapshot', JSON.stringify(snap));
+        } catch (e) {
+            console.warn('[DataManager] snapshot localStorage failed:', e);
+        }
+        try {
+            if (typeof FileStorage !== 'undefined' && FileStorage.saveData) {
+                await FileStorage.saveData('gtes_protected_core_snapshot', snap);
+            }
+        } catch (e) {
+            console.warn('[DataManager] snapshot cloud save failed:', e);
+        }
+        return snap;
+    },
+
+    /**
+     * Restore last protected snapshot (invoices, vouchers, attendance).
+     */
+    async restoreProtectedCoreSnapshot() {
+        let snap = null;
+        try {
+            const raw = localStorage.getItem('gtes_protected_core_snapshot');
+            if (raw) snap = JSON.parse(raw);
+        } catch (_) { /* ignore */ }
+        if (!snap && typeof FileStorage !== 'undefined') {
+            try {
+                snap = await FileStorage.loadData('gtes_protected_core_snapshot');
+            } catch (_) { /* ignore */ }
+        }
+        if (!snap || typeof snap !== 'object') {
+            throw new Error('No protected snapshot found. Run Book Keeper reset once (creates snapshot) or export a backup.');
+        }
+        let invoices = (Array.isArray(snap.invoices) ? snap.invoices : []).map((i) =>
+            i && typeof i === 'object' ? { ...i, source: 'local' } : i
+        );
+        let vouchers = (Array.isArray(snap.vouchers) ? snap.vouchers : []).map((v) =>
+            v && typeof v === 'object' ? { ...v, source: 'local' } : v
+        );
+        let attendance = this._stampAttendanceRecordsLocal(snap.attendance || []);
+
+        await this.saveData('invoices', invoices, { skipPreSaveMerge: true, allowProtectedWipe: true });
+        await this.saveData('vouchers', vouchers, { skipPreSaveMerge: true, allowProtectedWipe: true });
+        await this.saveData(this.KEYS.ATTENDANCE, attendance, { skipPreSaveMerge: true, allowProtectedWipe: true });
+        if (typeof FileStorage !== 'undefined' && FileStorage.flushPendingCloudWrites) {
+            await FileStorage.flushPendingCloudWrites(5000);
+        }
+        return {
+            invoices: invoices.length,
+            vouchers: vouchers.length,
+            attendance: attendance.length,
+            createdAt: snap.createdAt,
+        };
+    },
+
     /**
      * Filter invoices/vouchers for restore or display scope: all | gst | plain | purchase.
      * Plain/GST restore excludes Book Keeper rows (BK-* / source bookkeeper).
@@ -246,22 +369,19 @@ const DataManager = {
     },
 
     /**
-     * Tag plain app invoices/vouchers as source=local so Book Keeper reset keeps them.
+     * Tag all non–Book Keeper invoices/vouchers as source=local (plain + GST created in GTES).
      * @returns {{ invoices: number, vouchers: number }}
      */
-    tagPlainFinancialRecordsAsLocal(options = {}) {
+    tagAllAppFinancialRecordsAsLocal(options = {}) {
         const onlyUntagged = options.onlyUntagged !== false;
         let invTagged = 0;
         let vchTagged = 0;
-        const IM = typeof InvoiceManager !== 'undefined' ? InvoiceManager : null;
 
         let invoices = this.getData('invoices') || [];
         if (!Array.isArray(invoices)) invoices = [];
         let invChanged = false;
         invoices = invoices.map((inv) => {
             if (!inv || this.isBookkeeperFinancialRow(inv, 'invoices')) return inv;
-            const plain = IM && typeof IM.isPlainSalesListRow === 'function' && IM.isPlainSalesListRow(inv);
-            if (!plain) return inv;
             if (onlyUntagged && this.isLocalProtectedFinancialRow(inv)) return inv;
             invTagged++;
             invChanged = true;
@@ -273,15 +393,12 @@ const DataManager = {
         let vchChanged = false;
         vouchers = vouchers.map((v) => {
             if (!v || this.isBookkeeperFinancialRow(v, 'vouchers')) return v;
-            if (v.type !== 'receipt') return v;
-            const plain = v.hasGst === false ||
-                (typeof VouchersUI !== 'undefined' && VouchersUI._receiptDerivedHasGst &&
-                    !VouchersUI._receiptDerivedHasGst(v, invoices));
-            if (!plain) return v;
             if (onlyUntagged && this.isLocalProtectedFinancialRow(v)) return v;
             vchTagged++;
             vchChanged = true;
-            return { ...v, source: 'local', hasGst: false, updatedAt: new Date().toISOString() };
+            const out = { ...v, source: 'local', updatedAt: new Date().toISOString() };
+            if (v.type === 'receipt' && v.hasGst === undefined) out.hasGst = false;
+            return out;
         });
 
         if (invChanged) {
@@ -293,6 +410,22 @@ const DataManager = {
             this._trustedCacheKeys.add('vouchers');
         }
         return { invoices: invTagged, vouchers: vchTagged, invChanged, vchChanged, invoices, vouchers };
+    },
+
+    /** @deprecated alias */
+    tagPlainFinancialRecordsAsLocal(options = {}) {
+        return this.tagAllAppFinancialRecordsAsLocal(options);
+    },
+
+    async tagAttendanceRecordsAsLocal() {
+        let attendance = await this.getAttendance();
+        const stamped = this._stampAttendanceRecordsLocal(attendance);
+        const changed = stamped.length !== attendance.length ||
+            stamped.some((r, i) => (r.source || '') !== (attendance[i] && attendance[i].source));
+        if (changed) {
+            await this.saveData(this.KEYS.ATTENDANCE, stamped, { skipPreSaveMerge: true });
+        }
+        return { count: stamped.length, changed };
     },
 
     /**
@@ -969,6 +1102,14 @@ const DataManager = {
     // Helper methods for storage operations
     async saveData(key, data, options = {}) {
         const storageKey = this.resolveStorageKey(key);
+        const guard = this._guardProtectedDatasetSave(storageKey, data, options);
+        if (!guard.ok) {
+            console.warn(`[DataManager] Protected save blocked for '${storageKey}':`, guard.reason);
+            if (typeof App !== 'undefined' && App.showNotification) {
+                App.showNotification(guard.reason, 'error');
+            }
+            return false;
+        }
         const skipPreSaveMerge = options.skipPreSaveMerge === true
             || (window.SyncManager && window.SyncManager.suppressConflictPrompts === true);
 
@@ -1764,9 +1905,10 @@ const DataManager = {
         return Array.isArray(data) ? data : [];
     },
 
-    async saveAttendance(attendance) {
-        await this._createAttendanceBackupBeforeSave(attendance);
-        await this.saveData(this.KEYS.ATTENDANCE, attendance);
+    async saveAttendance(attendance, options = {}) {
+        const stamped = this._stampAttendanceRecordsLocal(Array.isArray(attendance) ? attendance : []);
+        await this._createAttendanceBackupBeforeSave(stamped);
+        await this.saveData(this.KEYS.ATTENDANCE, stamped, options);
     },
 
     _getAttendanceBackupKey(slot) {

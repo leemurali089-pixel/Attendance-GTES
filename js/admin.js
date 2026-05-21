@@ -266,9 +266,16 @@ const AdminModule = {
                                         <i class="bi bi-calendar-check"></i> Restore Attendance
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-success" id="tagPlainLocalBtn">
-                                        <i class="bi bi-tag"></i> Tag plain as LOCAL now
+                                        <i class="bi bi-tag"></i> Tag all app data LOCAL
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-warning" id="restoreProtectedSnapshotBtn" title="Last auto-snapshot from Book Keeper reset">
+                                        <i class="bi bi-shield-check"></i> Restore protected snapshot
                                     </button>
                                 </div>
+                                <p class="small text-muted mb-0 mt-1">
+                                    <i class="bi bi-shield-lock"></i> Attendance, invoices, and vouchers are <strong>protected</strong>: Book Keeper reset never deletes them;
+                                    accidental empty saves are blocked.
+                                </p>
                                 <input type="file" id="restoreBackupFileInput" accept=".json,application/json" class="d-none" />
                                 <p class="small text-muted mb-0 mt-2" id="restoreBackupStatus"></p>
                             </div>
@@ -609,7 +616,11 @@ const AdminModule = {
         const statusEl = document.getElementById('restoreBackupStatus');
         const tagBtn = document.getElementById('tagPlainLocalBtn');
         if (tagBtn) {
-            tagBtn.onclick = () => this.tagPlainInvoicesVouchersAsLocal();
+            tagBtn.onclick = () => this.tagAllCoreDataAsLocal();
+        }
+        const snapBtn = document.getElementById('restoreProtectedSnapshotBtn');
+        if (snapBtn) {
+            snapBtn.onclick = () => this.restoreProtectedCoreSnapshot();
         }
         const bind = (id, kind) => {
             const btn = document.getElementById(id);
@@ -642,32 +653,62 @@ const AdminModule = {
         }
     },
 
-    async tagPlainInvoicesVouchersAsLocal() {
-        if (typeof DataManager === 'undefined' || typeof DataManager.tagPlainFinancialRecordsAsLocal !== 'function') {
-            App.showNotification('Tag helper not available.', 'error');
+    async tagAllCoreDataAsLocal() {
+        if (typeof DataManager === 'undefined') {
+            App.showNotification('DataManager not available.', 'error');
             return;
         }
-        const tag = DataManager.tagPlainFinancialRecordsAsLocal({ onlyUntagged: true });
         try {
-            if (tag.invChanged) {
-                await DataManager.saveData('invoices', tag.invoices, { skipPreSaveMerge: true });
+            let invN = 0;
+            let vchN = 0;
+            if (typeof DataManager.tagAllAppFinancialRecordsAsLocal === 'function') {
+                const tag = DataManager.tagAllAppFinancialRecordsAsLocal({ onlyUntagged: true });
+                invN = tag.invoices;
+                vchN = tag.vouchers;
+                if (tag.invChanged) {
+                    await DataManager.saveData('invoices', tag.invoices, { skipPreSaveMerge: true });
+                }
+                if (tag.vchChanged) {
+                    await DataManager.saveData('vouchers', tag.vouchers, { skipPreSaveMerge: true });
+                }
             }
-            if (tag.vchChanged) {
-                await DataManager.saveData('vouchers', tag.vouchers, { skipPreSaveMerge: true });
+            let attN = 0;
+            if (typeof DataManager.tagAttendanceRecordsAsLocal === 'function') {
+                const att = await DataManager.tagAttendanceRecordsAsLocal();
+                attN = att.count;
             }
             if (typeof FileStorage !== 'undefined' && FileStorage.flushPendingCloudWrites) {
                 await FileStorage.flushPendingCloudWrites(4000);
             }
+            const msg = `Tagged LOCAL: ${invN} invoice(s), ${vchN} voucher(s), ${attN} attendance row(s). Protected on Book Keeper reset.`;
+            const statusEl = document.getElementById('restoreBackupStatus');
+            if (statusEl) statusEl.textContent = msg;
+            App.showNotification(msg, 'success');
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+            if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
         } catch (e) {
-            App.showNotification('Save failed: ' + (e && e.message), 'error');
+            App.showNotification('Tag failed: ' + (e && e.message), 'error');
+        }
+    },
+
+    async restoreProtectedCoreSnapshot() {
+        if (!confirm(
+            'Restore the last protected snapshot (invoices, vouchers, attendance saved before Book Keeper reset)?\n\n' +
+                'This replaces current data in those three datasets. Continue?'
+        )) {
             return;
         }
-        const msg = `Tagged LOCAL: ${tag.invoices} invoice(s), ${tag.vouchers} voucher(s). These are kept on Book Keeper reset.`;
-        const statusEl = document.getElementById('restoreBackupStatus');
-        if (statusEl) statusEl.textContent = msg;
-        App.showNotification(msg, 'success');
-        if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
-        if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+        try {
+            const r = await DataManager.restoreProtectedCoreSnapshot();
+            const msg = `Restored snapshot from ${r.createdAt || '?'}: ${r.invoices} invoices, ${r.vouchers} vouchers, ${r.attendance} attendance.`;
+            document.getElementById('restoreBackupStatus').textContent = msg;
+            App.showNotification(msg, 'success');
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.updateTable) InvoicesUI.updateTable();
+            if (typeof VouchersUI !== 'undefined' && VouchersUI.updateTable) VouchersUI.updateTable();
+            if (typeof AttendanceModule !== 'undefined' && AttendanceModule.load) void AttendanceModule.load();
+        } catch (e) {
+            App.showNotification(String(e && e.message || e), 'error');
+        }
     },
 
     async restoreDatasetFromBackupFile(kind, file, options = {}) {
@@ -764,9 +805,18 @@ const AdminModule = {
             }
 
             toast?.setProgress(60, 'Saving restored data…');
-            const ok = await DataManager.saveData(spec.storageKey, payload, { skipPreSaveMerge: true });
+            const saveOpts = {
+                skipPreSaveMerge: true,
+                allowProtectedWipe: true,
+            };
+            if (kind === 'attendance') {
+                payload = DataManager._stampAttendanceRecordsLocal
+                    ? DataManager._stampAttendanceRecordsLocal(payload)
+                    : payload;
+            }
+            const ok = await DataManager.saveData(spec.storageKey, payload, saveOpts);
             if (ok === false) {
-                throw new Error('Save was blocked (sync conflict). Try Sync Now, then restore again.');
+                throw new Error('Save was blocked (sync conflict or protected-data guard). Try Sync Now, then restore again.');
             }
 
             if (typeof FileStorage !== 'undefined' && typeof FileStorage.flushPendingCloudWrites === 'function') {
@@ -1754,17 +1804,29 @@ const AdminModule = {
 
             if (isFullBackup) {
                 console.log('Detected single-file full backup');
+                const protectedKeys = new Set(['gtes_attendance', 'invoices', 'vouchers']);
                 let successCount = 0;
 
                 for (const [key, value] of Object.entries(data)) {
-                    if (key.startsWith('gtes_')) {
+                    if (!key.startsWith('gtes_') && key !== 'invoices' && key !== 'vouchers') continue;
+                    if (protectedKeys.has(key) || key === 'invoices' || key === 'vouchers') {
+                        console.warn(`[Import] Skipped protected key '${key}' — use Admin restore buttons instead.`);
+                        continue;
+                    }
+                    if (window.electronAPI && window.electronAPI.saveData) {
                         await window.electronAPI.saveData(key, value);
+                        successCount++;
+                    } else if (typeof DataManager !== 'undefined' && DataManager.saveData) {
+                        await DataManager.saveData(key, value, { allowProtectedWipe: true });
                         successCount++;
                     }
                 }
 
-                AuditManager.log('BACKUP_IMPORT', `Imported full backup from ${file.name}`);
-                App.showNotification(`Backup imported successfully! ${successCount} data sets restored. Page will reload.`, 'success');
+                AuditManager.log('BACKUP_IMPORT', `Imported full backup from ${file.name} (attendance/invoices/vouchers skipped)`);
+                App.showNotification(
+                    `Imported ${successCount} dataset(s). Attendance, invoices, and vouchers were NOT overwritten — use Admin restore buttons.`,
+                    'success'
+                );
 
                 // Reload application to reflect changes
                 setTimeout(() => window.location.reload(), 1500);
