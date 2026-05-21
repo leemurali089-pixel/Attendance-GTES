@@ -5219,7 +5219,12 @@ const DeliveryUI = {
                 const vouchers = DataManager.getData('vouchers') || [];
                 const index = vouchers.findIndex(v => v.id === this.editingVoucherId);
                 if (index !== -1) {
-                    vouchers[index] = { ...vouchers[index], ...voucherData, updatedAt: new Date().toISOString() };
+                    vouchers[index] = {
+                        ...vouchers[index],
+                        ...voucherData,
+                        source: vouchers[index].source || 'local',
+                        updatedAt: new Date().toISOString()
+                    };
                     await DataManager.saveData('vouchers', vouchers);
                     App.showNotification('Voucher updated successfully!', 'success');
                 }

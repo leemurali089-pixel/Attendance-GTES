@@ -731,15 +731,12 @@ const SyncManager = {
 
     async resetData() {
         const ok = confirm(
-            'This will remove BookKeeper–imported accounting data and clear the Book Keeper backup connection, then load the official demo seed dataset (sample inventory, invoices, purchases, vouchers).\n\n' +
-                'Local parties tagged as created in this app are kept where possible.\n\nContinue?'
+            'This will remove BookKeeper–imported accounting data and clear the Book Keeper backup connection.\n\n' +
+                'Keeps: vouchers and invoices you created in this app (tagged local / no BookKeeper id).\n\n' +
+                'Does NOT load demo seed data (your plain/GST vouchers are not replaced).\n\nContinue?'
         );
         if (!ok) return;
         try {
-            if (!window.SeedData || typeof SeedData.seedSystem !== 'function') {
-                App.showNotification('Reset Data is not available.', 'warning');
-                return;
-            }
             if (window.BookKeeperImport && typeof BookKeeperImport.clearAllData === 'function') {
                 const swept = await BookKeeperImport.clearAllData({ reloadAfter: false, notifySuccess: false });
                 if (swept === false) {
@@ -747,9 +744,8 @@ const SyncManager = {
                     return;
                 }
             }
-            await SeedData.seedSystem();
-            this.logSyncEvent('warning', 'System reset: BookKeeper sweep + seed data applied');
-            App.showNotification('System reset completed.', 'success');
+            this.logSyncEvent('warning', 'System reset: BookKeeper import data cleared; app vouchers/invoices kept');
+            App.showNotification('BookKeeper data cleared. Your app-created vouchers and invoices were kept.', 'success');
             setTimeout(() => window.location.reload(), 1200);
         } catch (error) {
             console.error('Reset data failed:', error);

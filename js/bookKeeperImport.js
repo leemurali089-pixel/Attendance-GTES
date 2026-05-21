@@ -3715,9 +3715,8 @@ const BookKeeperImport = {
         // 2. Vouchers (Transactions)
         const vouchers = DataManager.getData('vouchers') || [];
         const cleanVouchers = vouchers.filter((v) => {
+            if (!v || typeof v !== 'object') return false;
             if (v.source === 'bookkeeper' || v.source === 'seed' || v.bookkeeperId) return false;
-            const s = String(v.source || '').toLowerCase();
-            if (s && s !== 'local' && s !== 'mjsprime' && s !== 'manual') return false;
             const idStr = String(v.id != null ? v.id : '');
             if (idStr && /^(BK-|vch_bk-)/i.test(idStr)) return false;
             return true;

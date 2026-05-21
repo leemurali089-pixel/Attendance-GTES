@@ -60,6 +60,7 @@ const VouchersUI = {
     _receiptDerivedHasGst(v, invoices) {
         if (!v || v.type !== 'receipt') return true;
         if (v.hasGst === false) return false;
+        if (String(v.source || '').toLowerCase() === 'local') return v.hasGst === true;
         const pool = Array.isArray(invoices) ? invoices : DataManager.getData('invoices') || [];
         const hasLinked =
             (Array.isArray(v.linkedInvoices) && v.linkedInvoices.length > 0) ||
@@ -3070,7 +3071,8 @@ const VouchersUI = {
             remarks: formData.get('remarks'),
             customerAddress: formData.get('customerAddress') || '',
             hasGst: this.currentMode === 'gst',
-            isPurchase: this.currentMode === 'purchase'
+            isPurchase: this.currentMode === 'purchase',
+            source: 'local'
         };
 
         try {
@@ -3923,7 +3925,8 @@ const VouchersUI = {
             discountAmount: parseFloat(formData.get('discountAmount') || 0),
             remarks: formData.get('remarks'),
             hasGst: this.currentMode === 'gst',
-            isPurchase: this.currentMode === 'purchase'
+            isPurchase: this.currentMode === 'purchase',
+            source: 'local'
         };
 
         try {

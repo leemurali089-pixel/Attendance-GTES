@@ -185,14 +185,29 @@ const SeedData = {
             }
         ];
 
-        // Save to DataManager
-        await DataManager.saveData('inventory', inventoryData);
-        await DataManager.saveData('gtes_services', serviceData);
-        await DataManager.saveData(DataManager.KEYS.EXPENSES, purchaseData);
-        await DataManager.saveData('invoices', salesData);
-        await DataManager.saveData('vouchers', voucherData);
+        const keepAppRow = (row) => {
+            if (!row || typeof row !== 'object') return false;
+            if (row.source === 'seed') return false;
+            if (row.source === 'bookkeeper' || row.bookkeeperId) return false;
+            if (row.source === 'local' || row.source === 'mjsprime' || row.source === 'manual') return true;
+            return !row.source;
+        };
+        const mergeSeed = async (key, seedRows) => {
+            let existing = DataManager.getData(key) || [];
+            if (!Array.isArray(existing) && typeof DataManager.coerceJsonArray === 'function') {
+                existing = DataManager.coerceJsonArray(existing) || [];
+            }
+            const kept = (Array.isArray(existing) ? existing : []).filter(keepAppRow);
+            await DataManager.saveData(key, [...kept, ...seedRows], { skipPreSaveMerge: true });
+        };
 
-        console.log('[Seed] System initialized successfully.');
+        await mergeSeed('inventory', inventoryData);
+        await mergeSeed('gtes_services', serviceData);
+        await mergeSeed(DataManager.KEYS.EXPENSES, purchaseData);
+        await mergeSeed('invoices', salesData);
+        await mergeSeed('vouchers', voucherData);
+
+        console.log('[Seed] Demo seed merged (app-created rows kept).');
         return true;
     }
 };

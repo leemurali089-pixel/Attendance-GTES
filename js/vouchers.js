@@ -113,6 +113,7 @@ const VoucherManager = {
             remarks: data.remarks || '',
             hasGst: data.hasGst,
             isPurchase: data.isPurchase,
+            source: data.source || 'local',
             createdAt: new Date().toISOString()
         };
 
