@@ -86,6 +86,57 @@
     return false;
   }
 
+  function _invoiceBusinessKey(inv) {
+    if (!inv) return "";
+    if (typeof DataManager !== "undefined" && typeof DataManager._financialRecordMergeKey === "function") {
+      return DataManager._financialRecordMergeKey(inv, "invoices") || "";
+    }
+    const bk = String(inv.bookkeeperId || "").trim();
+    if (bk) return `ibk:${bk}`;
+    const noKey =
+      typeof DataManager !== "undefined" && typeof DataManager._normalizeDocNumberKey === "function"
+        ? DataManager._normalizeDocNumberKey(inv.invoiceNo || inv.billNo || inv.id)
+        : String(inv.invoiceNo || inv.billNo || inv.id || "").trim();
+    const party =
+      typeof DataManager !== "undefined" && typeof DataManager._normalizeKeyToken === "function"
+        ? DataManager._normalizeKeyToken(inv.customerId || inv.partyId || inv.customerName || "")
+        : String(inv.customerId || inv.partyId || inv.customerName || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+    if (noKey && party) return `inv:${party}|${noKey}`;
+    if (noKey) return `invno:${noKey}`;
+    return inv.id != null ? `id:${inv.id}` : "";
+  }
+
+  function _isVoidOrCancelled(inv) {
+    const s = String(inv?.status || "").toLowerCase();
+    return s === "cancelled" || s === "canceled" || s === "void";
+  }
+
+  /** Collapse duplicate pending rows (web localStorage + cloud union produced twin ids). */
+  function _dedupePendingSalesRows(rows) {
+    const map = new Map();
+    (rows || []).forEach((inv) => {
+      const key = _invoiceBusinessKey(inv);
+      if (!key) return;
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, inv);
+        return;
+      }
+      const pt = Date.parse(prev.updatedAt || prev.createdAt || 0) || 0;
+      const nt = Date.parse(inv.updatedAt || inv.createdAt || 0) || 0;
+      const pick = nt >= pt ? inv : prev;
+      const balPick = (parseFloat(pick.balance) || 0) <= (parseFloat(prev.balance) || 0) + 0.05 &&
+        (parseFloat(pick.balance) || 0) <= (parseFloat(inv.balance) || 0) + 0.05
+        ? pick
+        : (parseFloat(inv.balance) || 0) < (parseFloat(prev.balance) || 0) ? inv : prev;
+      map.set(key, balPick);
+    });
+    return Array.from(map.values());
+  }
+
   function _salesScopeFilter(inv, scope) {
     if (typeof InvoiceManager !== "undefined" && InvoiceManager.isGstSalesListRow && InvoiceManager.isPlainSalesListRow) {
       if (scope === "gst") return InvoiceManager.isGstSalesListRow(inv);
@@ -104,10 +155,13 @@
   function _pendingSalesRows(scope, limit) {
     const asOf = _resolveAsOfEnd();
     let rows = _salesInvoicesWithBalance()
+      .filter((inv) => !_isDc(inv))
+      .filter((inv) => !_isVoidOrCancelled(inv))
       .filter((inv) => _salesScopeFilter(inv, scope))
       .filter((inv) => !_isCreditNoteSales(inv));
     rows = rows.filter((inv) => (parseFloat(inv.balance) || 0) > THRESH);
     if (asOf) rows = rows.filter((inv) => _docOnOrBefore(inv, asOf));
+    rows = _dedupePendingSalesRows(rows);
     rows.sort((a, b) => (parseFloat(b.balance) || 0) - (parseFloat(a.balance) || 0));
     const lim = Math.min(Math.max(1, limit || 500), 20000);
     const top = rows.slice(0, lim);
@@ -139,10 +193,13 @@
   function _pendingSalesPartyRows(scope, limit) {
     const asOf = _resolveAsOfEnd();
     let rows = _salesInvoicesWithBalance()
+      .filter((inv) => !_isDc(inv))
+      .filter((inv) => !_isVoidOrCancelled(inv))
       .filter((inv) => _salesScopeFilter(inv, scope))
       .filter((inv) => !_isCreditNoteSales(inv));
     rows = rows.filter((inv) => (parseFloat(inv.balance) || 0) > THRESH);
     if (asOf) rows = rows.filter((inv) => _docOnOrBefore(inv, asOf));
+    rows = _dedupePendingSalesRows(rows);
     const map = new Map();
     rows.forEach((inv) => {
       const party = inv.customerName || inv.customerId || "Party";
@@ -164,10 +221,14 @@
   function _pendingSalesTotals(scope) {
     const asOf = _resolveAsOfEnd();
     let rows = _salesInvoicesWithBalance()
+      .filter((inv) => !_isDc(inv))
+      .filter((inv) => !_isVoidOrCancelled(inv))
       .filter((inv) => _salesScopeFilter(inv, scope))
       .filter((inv) => !_isCreditNoteSales(inv));
-    let pending = rows.filter((inv) => (parseFloat(inv.balance) || 0) > THRESH);
+    let pending = rows
+      .filter((inv) => (parseFloat(inv.balance) || 0) > THRESH);
     if (asOf) pending = pending.filter((inv) => _docOnOrBefore(inv, asOf));
+    pending = _dedupePendingSalesRows(pending);
     const totalBalance = pending.reduce((s, inv) => s + (parseFloat(inv.balance) || 0), 0);
     return { totalBalance, count: pending.length };
   }

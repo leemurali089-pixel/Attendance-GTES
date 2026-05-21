@@ -87,6 +87,92 @@ const DataManager = {
             .filter(Boolean);
     },
 
+    _normalizeKeyToken(s) {
+        return String(s || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+    },
+
+    /** Normalize bill/invoice numbers so "080", "0080", "INV-080" match for dedupe. */
+    _normalizeDocNumberKey(raw) {
+        let s = String(raw || '').trim().toUpperCase();
+        if (!s) return '';
+        const gtes = s.match(/GTES\/\d{2}-\d{2}\/(.+)$/i);
+        if (gtes) s = gtes[1];
+        s = s.replace(/^INV[-/]?/i, '').replace(/^NB[-/]?/i, '');
+        const digits = s.replace(/\D/g, '');
+        if (digits) {
+            const trimmed = digits.replace(/^0+/, '') || '0';
+            return trimmed;
+        }
+        return s.replace(/[^A-Z0-9]/g, '');
+    },
+
+    /**
+     * Stable merge key for invoices/vouchers/customers (used by union-merge and post-load dedupe).
+     */
+    _financialRecordMergeKey(item, storageKey = null) {
+        if (!item || typeof item !== 'object') return null;
+        if (storageKey === 'vouchers') {
+            const bk = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
+            if (bk) return `bk:${bk}`;
+        }
+        if (storageKey === 'invoices') {
+            const bk = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
+            if (bk) return `ibk:${bk}`;
+            const bkn = item.bookkeeperVchNo != null ? String(item.bookkeeperVchNo).trim() : '';
+            if (bkn) return `ibkv:${bkn}`;
+            const noKey = this._normalizeDocNumberKey(item.invoiceNo || item.billNo || item.vch_no || item.id);
+            if (noKey) {
+                const party = this._normalizeKeyToken(
+                    item.customerId || item.partyId || item.customerName || item.vendor || ''
+                );
+                if (party) return `inv:${party}|${noKey}`;
+                return `invno:${noKey}`;
+            }
+        }
+        if (storageKey === 'customers') {
+            const bka = item.bookkeeperAccountId != null ? String(item.bookkeeperAccountId).trim() : '';
+            if (bka) return `bka:${bka}`;
+            const bki = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
+            if (bki) return `bki:${bki}`;
+            const gst = String(item.gstin || '')
+                .replace(/\s/g, '')
+                .toUpperCase();
+            if (gst.length === 15) return `gst:${gst}`;
+            const n = this._normalizeKeyToken(item.name);
+            const src = String(item.source || '').toLowerCase();
+            if (n && (src === 'bookkeeper' || src === 'bookkeeper_service_table')) {
+                return `bkn:${n}`;
+            }
+            const at = this._normalizeKeyToken(item.accountType || item.type || 'customer');
+            if (n) return `cn:${at}|${n}`;
+        }
+        const id = item.id;
+        if (id === undefined || id === null || id === '') return null;
+        return `id:${String(id)}`;
+    },
+
+    _dedupeFinancialRecords(arr, storageKey = null) {
+        if (!Array.isArray(arr) || !storageKey) return arr;
+        if (storageKey !== 'invoices' && storageKey !== 'vouchers' && storageKey !== 'customers') return arr;
+        const map = new Map();
+        arr.forEach((item) => {
+            const idKey = this._financialRecordMergeKey(item, storageKey);
+            if (!idKey) return;
+            const prev = map.get(idKey);
+            if (!prev) {
+                map.set(idKey, item);
+                return;
+            }
+            const pt = Date.parse(prev.updatedAt || prev.createdAt || 0) || 0;
+            const nt = Date.parse(item.updatedAt || item.createdAt || 0) || 0;
+            map.set(idKey, nt >= pt ? item : prev);
+        });
+        return Array.from(map.values());
+    },
+
     /**
      * Union-merge two record arrays. Vouchers: prefer bookkeeperId (BK-*) as key so repeating vch_no
      * (e.g. "110") from different parties does not collapse into one row during sync.
@@ -95,34 +181,7 @@ const DataManager = {
         const a = Array.isArray(localArr) ? localArr : [];
         const b = Array.isArray(cloudArr) ? cloudArr : [];
         const map = new Map();
-        const mergeKey = (item) => {
-            if (!item || typeof item !== 'object') return null;
-            if (storageKey === 'vouchers') {
-                const bk = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
-                if (bk) return `bk:${bk}`;
-            }
-            if (storageKey === 'customers') {
-                const bka = item.bookkeeperAccountId != null ? String(item.bookkeeperAccountId).trim() : '';
-                if (bka) return `bka:${bka}`;
-                const bki = item.bookkeeperId != null ? String(item.bookkeeperId).trim() : '';
-                if (bki) return `bki:${bki}`;
-                const gst = String(item.gstin || '')
-                    .replace(/\s/g, '')
-                    .toUpperCase();
-                if (gst.length === 15) return `gst:${gst}`;
-                const n = String(item.name || '')
-                    .toLowerCase()
-                    .replace(/\s+/g, ' ')
-                    .trim();
-                const src = String(item.source || '').toLowerCase();
-                if (n && (src === 'bookkeeper' || src === 'bookkeeper_service_table')) {
-                    return `bkn:${n}`;
-                }
-            }
-            const id = item.id;
-            if (id === undefined || id === null || id === '') return null;
-            return `id:${String(id)}`;
-        };
+        const mergeKey = (item) => this._financialRecordMergeKey(item, storageKey);
         const take = (item) => {
             const idKey = mergeKey(item);
             if (!idKey) return;
@@ -907,41 +966,48 @@ const DataManager = {
             }
         }
 
-        if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
+        const isWeb = typeof window !== 'undefined' && !window.electronAPI;
+        const cloudAuthoritativeKeys = new Set(['invoices', 'vouchers', 'customers']);
+        const preferCloudOnly =
+            isWeb &&
+            cloudAuthoritativeKeys.has(storageKey) &&
+            Array.isArray(data) && data.length > 0;
+
+        if (preferCloudOnly) {
+            if (Array.isArray(localParsed) && localParsed.length > 0) {
+                try { localStorage.removeItem(storageKey); } catch (_) { /* ignore */ }
+            }
+            const beforeDedupe = data.length;
+            data = this._dedupeFinancialRecords(data.slice(), storageKey);
+            if (data.length !== beforeDedupe) {
+                console.debug(
+                    `[DataManager] Web cloud-only '${storageKey}': deduped ${beforeDedupe} → ${data.length} record(s).`
+                );
+            }
+        } else if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && Array.isArray(data)) {
             let loc = Array.isArray(localParsed) ? localParsed : [];
-            // Electron: disk + RTDB are merged in FileStorage.loadData. Browser localStorage/LS mirrors
-            // for invoices/vouchers are often huge stale snapshots that overwrite newer union rows
-            // (plain bills that exist only in Firebase after sync).
-            if (typeof window !== 'undefined' && window.electronAPI &&
-                (storageKey === 'invoices' || storageKey === 'vouchers')) {
+            const skipStaleLocalUnion =
+                cloudAuthoritativeKeys.has(storageKey) &&
+                Array.isArray(data) && data.length > 0;
+            if (skipStaleLocalUnion && loc.length > 0) {
+                try { localStorage.removeItem(storageKey); } catch (_) { /* ignore */ }
                 loc = [];
             }
             let merged = this._mergeRecordArraysById(loc, data, storageKey);
-            // Critical recovery path:
-            // For large lists we often mirror to IDB only (localStorage removed). If cloud write was
-            // deferred and app closed early, cloud can be stale-but-non-empty. Without this IDB merge,
-            // recent local writes disappear after restart.
-            if (loc.length === 0) {
+            if (!isWeb && loc.length === 0) {
                 try {
                     let idbArr = await this.getFromIDB(storageKey);
                     if ((!idbArr || idbArr.length === 0) && storageKey === this.KEYS.CHALLANS) {
                         idbArr = await this.getFromIDB('challans');
                     }
                     if (Array.isArray(idbArr) && idbArr.length > 0) {
-                        // Prefer freshly merged disk+cloud (`merged`); IDB wins only when strictly newer
-                        // (offline edits). Old order merged idb first and could let stale IDB beat fresh cloud.
                         merged = this._mergeRecordArraysById(merged, idbArr, storageKey);
                     }
                 } catch (e) {
                     console.warn(`[DataManager] IDB merge skipped for '${storageKey}':`, e);
                 }
             }
-            if (merged.length !== data.length || merged.length !== loc.length) {
-                console.debug(
-                    `[DataManager] Merged '${storageKey}': local ${loc.length}, cloud ${data?.length ?? 0} → ${merged.length} record(s). ` +
-                    '(Union by id; vouchers also use bookkeeperId when present — not a login error.)'
-                );
-            }
+            merged = this._dedupeFinancialRecords(merged, storageKey);
             data = merged;
         }
 

@@ -226,13 +226,17 @@ const InvoiceManager = {
      */
     getAllInvoices() {
         const raw = DataManager.getData('invoices');
+        let list = [];
         if (raw == null) return [];
-        if (Array.isArray(raw)) return raw;
-        if (typeof DataManager.coerceJsonArray === 'function') {
+        if (Array.isArray(raw)) list = raw;
+        else if (typeof DataManager.coerceJsonArray === 'function') {
             const arr = DataManager.coerceJsonArray(raw);
-            return Array.isArray(arr) ? arr : [];
+            list = Array.isArray(arr) ? arr : [];
         }
-        return [];
+        if (typeof DataManager._dedupeFinancialRecords === 'function') {
+            return DataManager._dedupeFinancialRecords(list, 'invoices');
+        }
+        return list;
     },
 
     /**
@@ -394,7 +398,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 18; // BK-linked rows: no INV-NB / zero-tax plain guess; use type + billType
+        const logicVersion = 19; // Web cloud-only load + normalized invoice dedupe keys
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&

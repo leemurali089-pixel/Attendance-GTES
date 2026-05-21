@@ -1157,7 +1157,7 @@ const DeliveryUI = {
             this.currentCustomersContainerId = accId;
         }
 
-        const allData = CustomerManager.getAllCustomers();
+        const allData = this._dedupeCustomerListForFilters(CustomerManager.getAllCustomers());
 
         // Separate into buckets for stats
         const counts = {

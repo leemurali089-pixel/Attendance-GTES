@@ -249,15 +249,19 @@ const CustomerManager = {
      */
     getAllCustomers() {
         const raw = DataManager.getData('customers');
+        let list = [];
         if (raw == null) return [];
-        if (Array.isArray(raw)) return raw;
-        if (typeof DataManager.coerceJsonArray === 'function') {
-            return DataManager.coerceJsonArray(raw);
+        if (Array.isArray(raw)) list = raw;
+        else if (typeof DataManager.coerceJsonArray === 'function') {
+            const arr = DataManager.coerceJsonArray(raw);
+            list = Array.isArray(arr) ? arr : [];
+        } else if (typeof raw === 'object') {
+            list = Object.values(raw).filter((x) => x && typeof x === 'object');
         }
-        if (typeof raw === 'object') {
-            return Object.values(raw).filter((x) => x && typeof x === 'object');
+        if (typeof DataManager._dedupeFinancialRecords === 'function') {
+            return DataManager._dedupeFinancialRecords(list, 'customers');
         }
-        return [];
+        return list;
     },
 
     getCustomerByName(name, accountType = null) {
