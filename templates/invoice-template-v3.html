@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GTES Invoice Template V3</title>
+  <style>
+    body { margin: 0; padding: 12px; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; background: #eee; }
+    .inv-v3-page { width: 210mm; min-height: 297mm; margin: 0 auto 16px; background: #fff; border: 1px solid #cfcfcf; box-shadow: 0 4px 20px rgba(0,0,0,.15); box-sizing: border-box; padding: 8mm; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { vertical-align: top; }
+    .inv-v3-hdr-title { font-size: 15px; font-weight: 800; text-transform: uppercase; }
+    .inv-v3-copy { font-size: 11px; font-weight: 700; color: #333; }
+    .inv-v3-box { border: 1px solid #000; padding: 8px; }
+    .inv-v3-items th, .inv-v3-items td { border: 1px solid #64748b; padding: 5px 6px; font-size: 10px; }
+    .inv-v3-items thead th { background: #4a5568; color: #fff; text-align: center; text-transform: uppercase; font-size: 9px; }
+    .inv-v3-total { font-size: 14px; font-weight: 800; border: 2px solid #111; }
+  </style>
+</head>
+<body>
+  <!-- Reference skeleton: rendered at runtime by invoicePreviewV3.js from invoice data -->
+  <div class="inv-v3-page" data-page="1">
+    <table role="presentation" width="100%">
+      <tr>
+        <td width="58%">
+          <!-- Company Logo placeholder -->
+          <div style="font-size: 18px; font-weight: 800;">{{companyName}}</div>
+          <div>{{companyAddress}}</div>
+          <div><strong>GSTIN:</strong> {{gstin}} | <strong>PAN:</strong> {{pan}} | <strong>IEC:</strong> {{iec}}</div>
+        </td>
+        <td width="42%" align="right">
+          <div class="inv-v3-hdr-title">TAX INVOICE</div>
+          <div class="inv-v3-copy">({{copyType}})</div>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" style="margin-top: 12px;">
+      <tr>
+        <td width="50%" class="inv-v3-box">
+          <strong>Invoice No:</strong> {{invoiceNo}}<br>
+          <strong>Date:</strong> {{date}}<br>
+          <strong>PO Number:</strong> {{poNumber}}<br>
+          <strong>Dispatch Through:</strong> {{dispatchVia}}<br>
+          <strong>Vehicle No:</strong> {{vehicleNo}}<br>
+          <strong>LR No:</strong> {{lrNo}}
+        </td>
+        <td width="50%" class="inv-v3-box">
+          <strong>Bill To</strong><br>
+          {{billToName}}<br>
+          {{billToAddress}}<br>
+          <strong>GSTIN:</strong> {{billToGstin}}
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" style="margin-top: 12px;">
+      <tr><td class="inv-v3-box"><strong>Ship To</strong><br>{{shipToAddress}}</td></tr>
+    </table>
+
+    <table class="inv-v3-items" width="100%" style="margin-top: 12px;">
+      <thead>
+        <tr>
+          <th>Sl No</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th>
+          <th>Rate</th><th>Tax %</th><th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>{{itemRows}}</tbody>
+    </table>
+
+    <table role="presentation" width="100%" style="margin-top: 12px;">
+      <tr>
+        <td width="50%" valign="top">
+          <div><strong>Amount In Words:</strong> {{amountInWords}}</div>
+          <div style="margin-top: 12px;"><strong>Terms &amp; Conditions</strong><br>{{terms}}</div>
+          <div style="margin-top: 12px;"><strong>Bank:</strong> {{bankDetails}}</div>
+        </td>
+        <td width="50%" valign="top">
+          <table width="100%">
+            <tr><td align="right">Subtotal</td><td align="right">{{subtotal}}</td></tr>
+            <tr><td align="right">CGST</td><td align="right">{{cgst}}</td></tr>
+            <tr><td align="right">SGST</td><td align="right">{{sgst}}</td></tr>
+            <tr><td align="right">IGST</td><td align="right">{{igst}}</td></tr>
+            <tr><td align="right">Round Off</td><td align="right">{{roundOff}}</td></tr>
+            <tr class="inv-v3-total"><td align="right">Grand Total</td><td align="right">{{grandTotal}}</td></tr>
+          </table>
+          <div style="margin-top: 16px; text-align: right;">
+            <div>For <strong>{{companyName}}</strong></div>
+            <div style="border-top: 1px solid #000; margin-top: 24px; padding-top: 6px; text-align: center;"><strong>Authorized Signatory</strong></div>
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div style="margin-top: 12px; text-align: center; font-size: 9px; color: #666;">{{footerNote}}</div>
+  </div>
+</body>
+</html>

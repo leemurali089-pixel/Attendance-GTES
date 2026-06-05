@@ -4,14 +4,18 @@
  */
 
 const DeliveryUI = {
-    /** html2canvas/jsPDF: keep under ~A4 printable width to avoid horizontal clipping */
-    GTES_PDF_DOCUMENT_WIDTH_PX: 760,
+    /** A4 portrait — must match jsPDF format in buildGtesHtml2PdfOptions */
+    GTES_PDF_PAGE_W_MM: 210,
+    GTES_PDF_PAGE_H_MM: 297,
+    GTES_PDF_MARGIN_MM: 8,
+    /** Fallback; prefer getPdfPrintableWidthPx() (~702px with 8mm margins). */
+    GTES_PDF_DOCUMENT_WIDTH_PX: 702,
     /** html2canvas scale: higher = sharper text (PDF size grows ~× scale²). */
     GTES_HTML2PDF_CANVAS_SCALE: 1.85,
     /** Ledger multi-page: keep moderate for speed */
     GTES_LEDGER_HTML2PDF_SCALE: 1.35,
-    /** Invoice / purchase / challan tables — balance sharpness vs file size */
-    GTES_INVOICE_PURCHASE_HTML2PDF_SCALE: 1.72,
+    /** Invoice / purchase / voucher — 1.55 fits A4 width without right-edge crop */
+    GTES_INVOICE_PURCHASE_HTML2PDF_SCALE: 1.55,
     /** Voucher PDFs — match invoice clarity */
     GTES_VOUCHER_HTML2PDF_SCALE: 1.72,
 
@@ -29,6 +33,8 @@ const DeliveryUI = {
     },
     HISTORY_INITIAL_LIMIT: 200,
     HISTORY_LOAD_MORE_STEP: 200,
+    /** Pending DC row keys for merge-invoice: `challan:<id>` or `dc-invoice:<id>` */
+    historySelectedDcKeys: new Set(),
     /** Once true, we do not auto-seed FY/month from "current" on empty filters (user may have chosen All FY). */
     historyFilterDefaultsApplied: false,
 
@@ -349,6 +355,63 @@ const DeliveryUI = {
                     </div>
                 </div>
 
+                <!-- Delivery challan — dispatch, ship-to, narration -->
+                <div id="deliveryExtraFields">
+                    <hr class="my-3">
+                    <h6 class="text-muted mb-3"><i class="bi bi-truck me-1"></i> Dispatch &amp; Delivery Details</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Purchase Order No</label>
+                            <input type="text" class="form-control" id="challanPoNumber" placeholder="PO / order reference">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Dispatch Document No</label>
+                            <input type="text" class="form-control" id="challanDispatchDocNo">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Dispatch Through</label>
+                            <input type="text" class="form-control" id="challanDispatchVia" placeholder="Courier / vehicle">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Destination (State)</label>
+                            <input type="text" class="form-control" id="challanDestination" placeholder="e.g. Tamil Nadu">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">e-Way Bill No</label>
+                            <input type="text" class="form-control" id="challanEwayBill">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">LR / Track No</label>
+                            <input type="text" class="form-control" id="challanLrNo">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Vehicle No</label>
+                            <input type="text" class="form-control" id="challanVehicleNo">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Dispatch Date</label>
+                            <input type="date" class="form-control" id="challanDispatchDate">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Narration / Remarks</label>
+                            <textarea class="form-control" id="challanNarration" rows="2" placeholder="Delivery instructions, reference DC nos, site details…"></textarea>
+                            <small class="text-muted">Shown on the DC PDF in the Remarks row.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Ship To / Consignee</label>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="challanShipSame" checked>
+                                <label class="form-check-label" for="challanShipSame">Same as billed-to customer</label>
+                            </div>
+                            <textarea class="form-control" id="challanShipToAddress" rows="2" placeholder="Consignee name &amp; delivery address" disabled></textarea>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Service Fields (hidden by default) -->
                 <div id="serviceFields" style="display: none;">
                     <hr class="my-4">
@@ -444,11 +507,12 @@ const DeliveryUI = {
                             <tr>
                                 <th style="width: 25%;">Item Name</th>
                                 <th style="width: 20%;">Description</th>
+                                <th style="width: 10%;">Returnable</th>
                                 <th style="width: 8%;">Qty</th>
                                 <th style="width: 10%;">Unit</th>
-                                <th style="width: 12%;">Rate</th>
-                                <th style="width: 15%;">Amount</th>
-                                <th style="width: 10%;"></th>
+                                <th style="width: 10%;">Rate</th>
+                                <th style="width: 12%;">Amount</th>
+                                <th style="width: 5%;"></th>
                             </tr>
                         </thead>
                         <tbody id="itemsTableBody">
@@ -552,7 +616,17 @@ const DeliveryUI = {
         this.handleInventorySearch('globalServiceSearch', 'challan');
         this.handleCustomerSearch('customerSearch', 'customerId');
 
+        const shipSame = document.getElementById('challanShipSame');
+        const shipAddr = document.getElementById('challanShipToAddress');
+        if (shipSame && shipAddr) {
+            shipSame.addEventListener('change', () => {
+                shipAddr.disabled = shipSame.checked;
+                if (shipSame.checked) shipAddr.value = '';
+            });
+        }
+
         this.setupEventListeners();
+        this.toggleServiceFields();
     },
 
     updateChallanNumber() {
@@ -565,8 +639,12 @@ const DeliveryUI = {
     toggleServiceFields() {
         const type = document.getElementById('challanType')?.value;
         const serviceFields = document.getElementById('serviceFields');
+        const deliveryExtra = document.getElementById('deliveryExtraFields');
         if (serviceFields) {
             serviceFields.style.display = type === 'service' ? 'block' : 'none';
+        }
+        if (deliveryExtra) {
+            deliveryExtra.style.display = type === 'delivery' ? 'block' : 'none';
         }
 
         // Toggle "Material Changed" fields on all rows
@@ -592,10 +670,15 @@ const DeliveryUI = {
         row.id = rowId;
         // Handle both 'name' and 'description' field names
         const itemName = data ? (data.name || data.description || '') : '';
-        const itemDesc = data ? (data.itemDescription || '') : '';
+        const itemDesc = data ? (typeof DcReturnable !== 'undefined'
+            ? DcReturnable.itemLineDescription(data)
+            : (data.itemDescription || data.description || '')) : '';
         const itemQty = data ? (data.quantity || data.qty || 1) : 1;
         const itemRate = data ? (data.rate || 0) : 0;
         const itemAmount = data ? (data.amount || (itemQty * itemRate)) : 0;
+        const retSel = typeof DcReturnable !== 'undefined'
+            ? DcReturnable.returnableSelectHtml(data ? DcReturnable.isReturnable(data) : true)
+            : '<select class="form-select form-select-sm item-returnable"><option value="returnable" selected>Returnable</option><option value="non-returnable">Non Returnable</option></select>';
 
         row.innerHTML = `
             <td>
@@ -615,6 +698,7 @@ const DeliveryUI = {
                         placeholder="Replaced materials" style="flex: 1;" value="${data && data.replacedDescription ? data.replacedDescription : ''}">
                 </div>
             </td>
+            <td>${retSel}</td>
             <td><input type="number" class="form-control form-control-sm item-qty" value="${itemQty}" step="0.01"></td>
             <td>
                 <select class="form-select form-select-sm item-unit">
@@ -841,14 +925,17 @@ const DeliveryUI = {
 
                 items.push({
                     name: name,
-                    description: name, // Keep for backward compatibility
+                    description: row.querySelector('.item-desc')?.value || name,
                     itemDescription: row.querySelector('.item-desc')?.value || '',
                     quantity: parseFloat(row.querySelector('.item-qty').value) || 0,
                     unit: row.querySelector('.item-unit').value,
                     rate: parseFloat(row.querySelector('.item-rate').value) || 0,
                     amount: parseFloat(row.querySelector('.item-amount').value) || 0,
                     materialChanged: row.querySelector('.item-replaced-check').checked,
-                    replacedDescription: row.querySelector('.item-replaced-desc').value.trim()
+                    replacedDescription: row.querySelector('.item-replaced-desc').value.trim(),
+                    ...(typeof DcReturnable !== 'undefined'
+                        ? DcReturnable.readReturnableFromSelect(row.querySelector('.item-returnable'))
+                        : { returnable: false, itemReturnType: 'non-returnable' })
                 });
             });
 
@@ -861,12 +948,40 @@ const DeliveryUI = {
                 throw new Error('Please select a valid customer from the list');
             }
 
+            const shipSame = document.getElementById('challanShipSame')?.checked !== false;
+            const custRow = typeof CustomerManager !== 'undefined' ? CustomerManager.getCustomer(customerId) : null;
+            const custSnap = typeof DocumentBuildCommon !== 'undefined'
+                ? DocumentBuildCommon.resolveCustomerSnapshot({
+                    customerId,
+                    customerName: custRow?.name || document.getElementById('customerSearch')?.value,
+                    snapshot: {}
+                })
+                : null;
             const challanData = {
                 type: document.getElementById('challanType').value,
                 customNumber: document.getElementById('challanNumber').value,
                 date: document.getElementById('challanDate').value,
-                customerId: document.getElementById('customerId').value,
+                customerId,
+                customerName: custSnap?.name || custRow?.name || document.getElementById('customerSearch')?.value || '',
+                customerAddress: custSnap?.address || (typeof DocumentBuildCommon !== 'undefined'
+                    ? DocumentBuildCommon.formatCustomerAddress(custRow)
+                    : (custRow?.address || '')),
+                customerGstin: custSnap?.gstin || custRow?.gstin || '',
+                customerPan: custSnap?.pan || custRow?.pan || '',
+                customerPhone: custSnap?.phone || custRow?.phone || '',
                 referenceNumber: document.getElementById('referenceNumber').value,
+                poNumber: document.getElementById('challanPoNumber')?.value?.trim() || document.getElementById('referenceNumber').value,
+                narration: document.getElementById('challanNarration')?.value?.trim() || '',
+                shipSameAsBilling: shipSame,
+                shipToAddress: shipSame ? '' : (document.getElementById('challanShipToAddress')?.value?.trim() || ''),
+                includeShipToOnPdf: true,
+                destination: document.getElementById('challanDestination')?.value?.trim() || '',
+                dispatchDocumentNo: document.getElementById('challanDispatchDocNo')?.value?.trim() || '',
+                ewayBillNo: document.getElementById('challanEwayBill')?.value?.trim() || '',
+                dispatchVia: document.getElementById('challanDispatchVia')?.value?.trim() || '',
+                lrNo: document.getElementById('challanLrNo')?.value?.trim() || '',
+                vehicleNo: document.getElementById('challanVehicleNo')?.value?.trim() || '',
+                dispatchDate: document.getElementById('challanDispatchDate')?.value || '',
                 serviceLocation: document.getElementById('serviceLocation')?.value,
                 technicianId: document.getElementById('technicianId')?.value,
                 complaint: document.getElementById('complaint')?.value,
@@ -2273,6 +2388,15 @@ const DeliveryUI = {
         filtered.sort((a, b) => (b._ts || 0) - (a._ts || 0));
 
         // 5. Render UI
+        const existingBody = document.getElementById('historyTableBody');
+        if (existingBody) {
+            const table = existingBody.closest('table');
+            const hasSelectCol = !!table?.querySelector('thead th .bi-check2-square');
+            const needsSelectCol = dataType === 'challan-dc';
+            if (hasSelectCol !== needsSelectCol) {
+                container.innerHTML = '';
+            }
+        }
         // Only render the filter skeleton if it's not already there
         const resultsExist = document.getElementById('historyTableBody');
         if (!resultsExist) {
@@ -2284,6 +2408,9 @@ const DeliveryUI = {
                             <div class="d-flex gap-2 flex-wrap align-items-center">
                                 <button type="button" class="btn btn-success btn-sm" id="historyCreateDcBtn" onclick="DeliveryUI.showSection('create')" style="display: none;">
                                     <i class="bi bi-plus-lg me-1"></i> Create DC
+                                </button>
+                                <button type="button" class="btn btn-primary btn-sm" id="historyMergeDcBtn" onclick="DeliveryUI.convertSelectedDcsToInvoice()" style="display: none;" title="Merge selected delivery challans into one tax invoice">
+                                    <i class="bi bi-receipt-cutoff me-1"></i> Invoice from Selected
                                 </button>
                                 <button class="btn btn-outline-warning btn-sm" onclick="RecycleBinUI.open()" title="Recycle Bin">
                                     <i class="bi bi-trash3 me-1"></i> Recycle Bin
@@ -2384,6 +2511,7 @@ const DeliveryUI = {
                     <table class="table table-dark table-hover table-sm border-secondary align-middle">
                         <thead>
                             <tr>
+                                ${dataType === 'challan-dc' ? '<th class="text-center" style="width:2.5rem;" title="Select for merged invoice"><i class="bi bi-check2-square"></i></th>' : ''}
                                 <th>ID / No</th>
                                 <th>Date</th>
                                 <th>Type</th>
@@ -2414,6 +2542,11 @@ const DeliveryUI = {
             resultsExist.innerHTML = '';
         }
 
+        const mergeBtnInit = document.getElementById('historyMergeDcBtn');
+        if (mergeBtnInit) mergeBtnInit.style.display = dataType === 'challan-dc' ? '' : 'none';
+        const cdcBtnInit = document.getElementById('historyCreateDcBtn');
+        if (cdcBtnInit) cdcBtnInit.style.display = dataType === 'challan-dc' ? '' : 'none';
+
         // Chunked Rendering Logic
         const tbody = document.getElementById('historyTableBody');
         const chunkSize = 25;
@@ -2437,12 +2570,15 @@ const DeliveryUI = {
         const renderNextChunk = () => {
             if (currentIndex >= visibleLimit) {
                 if (filtered.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-muted">No matching records found</td></tr>';
+                    const colSpan = this.historyFilters.dataType === 'challan-dc' ? 8 : 7;
+                    tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center p-4 text-muted">No matching records found</td></tr>`;
                 }
                 const loadingStatus = document.getElementById('historyLoadingStatus');
                 if (loadingStatus) loadingStatus.classList.add('d-none');
                 const cdcBtn = document.getElementById('historyCreateDcBtn');
                 if (cdcBtn) cdcBtn.style.display = this.historyFilters.dataType === 'challan-dc' ? '' : 'none';
+                const mergeBtn = document.getElementById('historyMergeDcBtn');
+                if (mergeBtn) mergeBtn.style.display = this.historyFilters.dataType === 'challan-dc' ? '' : 'none';
                 updatePaginationUi();
                 return;
             }
@@ -2476,6 +2612,13 @@ const DeliveryUI = {
                             <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editChallan('${item.id}')" title="Edit">
                                 <i class="bi bi-pencil"></i>
                             </button>
+                            ${!item.invoiceId ? `
+                            <button class="btn btn-sm btn-success" onclick="DeliveryUI.convertToInvoice('${item.id}')" title="Convert to invoice (non-returnable items)">
+                                <i class="bi bi-receipt"></i>
+                            </button>` : `
+                            <button class="btn btn-sm btn-outline-success" onclick="DeliveryUI.viewInvoice('${item.invoiceId}')" title="View linked invoice">
+                                <i class="bi bi-receipt-cutoff"></i>
+                            </button>`}
                             <button class="btn btn-sm btn-outline-primary" onclick="DeliveryUI.printChallan('${item.id}')" title="Download PDF">
                                 <i class="bi bi-download"></i>
                             </button>
@@ -2494,6 +2637,13 @@ const DeliveryUI = {
                             <button class="btn btn-sm btn-outline-warning" onclick="DeliveryUI.editInvoice('${item.id}')" title="Edit">
                                 <i class="bi bi-pencil"></i>
                             </button>
+                            ${!item.linkedTaxInvoiceId ? `
+                            <button class="btn btn-sm btn-success" onclick="DeliveryUI.convertDcToInvoice('${item.id}')" title="Convert to invoice (non-returnable items)">
+                                <i class="bi bi-receipt"></i>
+                            </button>` : `
+                            <button class="btn btn-sm btn-outline-success" onclick="DeliveryUI.viewInvoice('${item.linkedTaxInvoiceId}')" title="View tax invoice">
+                                <i class="bi bi-receipt-cutoff"></i>
+                            </button>`}
                         `;
                     } else if (item._source === 'invoice') {
                         const invType = (item.type || '').toLowerCase();
@@ -2574,9 +2724,21 @@ const DeliveryUI = {
                                     (item._source === 'invoice' ? (invType === 'with-bill' || invType === 'gst-invoice' || invType === 'sales-gst' ? 'GST INV' : 'NON-GST') :
                                         (item._source || '').toUpperCase());
                     const rowId = item._source === 'dc-invoice' ? (item.invoiceNo || item.id) : item.id;
+                    const showDcSelect = dataType === 'challan-dc';
+                    const canSelectDc = showDcSelect && (
+                        (item._source === 'challan' && item.type === 'delivery' && !item.invoiceId) ||
+                        (item._source === 'dc-invoice' && !item.linkedTaxInvoiceId)
+                    );
+                    const dcKey = canSelectDc ? `${item._source}:${item.id}` : '';
+                    const selectCell = showDcSelect
+                        ? (canSelectDc
+                            ? `<td class="text-center"><input type="checkbox" class="form-check-input dc-merge-select" data-dc-key="${dcKey}" onchange="DeliveryUI.toggleDcSelection(this.getAttribute('data-dc-key'), this.checked)"${this.historySelectedDcKeys.has(dcKey) ? ' checked' : ''}></td>`
+                            : '<td></td>')
+                        : '';
 
                     return `
                         <tr>
+                            ${selectCell}
                             <td><span class="fw-bold">${rowId}</span></td>
                             <td>${DataManager.formatDateDisplay(item.date || item.createdAt)}</td>
                             <td><span class="badge ${typeBadge}">${safeTypeStr}</span></td>
@@ -2595,7 +2757,8 @@ const DeliveryUI = {
                     `;
                 } catch(renderErr) {
                     console.error("Error rendering row item:", item, renderErr);
-                    return `<tr><td colspan="7" class="text-danger">Error rendering record ${item.id}</td></tr>`;
+                    const errCol = dataType === 'challan-dc' ? 8 : 7;
+                    return `<tr><td colspan="${errCol}" class="text-danger">Error rendering record ${item.id}</td></tr>`;
                 }
             }).join('');
 
@@ -2706,6 +2869,9 @@ const DeliveryUI = {
 
     setHistoryFilter(key, value) {
         this.historyFilters[key] = value;
+        if (key === 'dataType' && value !== 'challan-dc') {
+            this.historySelectedDcKeys.clear();
+        }
         if (key === 'financialYear') {
             this.historyFilters.month = '';
         }
@@ -2731,6 +2897,19 @@ const DeliveryUI = {
 
     // View Challan Details
     viewChallan(challanId) {
+        const challan = DeliveryManager.getChallan(challanId);
+        if (!challan) {
+            App.showNotification('Challan not found', 'error');
+            return;
+        }
+        const docType = challan.type === 'service' ? 'service-challan' : 'delivery-challan';
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.isNative(docType)) {
+            return DocumentEngine.openPreview({ type: docType, id: challanId });
+        }
+        return this.viewChallanLegacy(challanId);
+    },
+
+    viewChallanLegacy(challanId) {
         const challan = DeliveryManager.getChallan(challanId);
         if (!challan) {
             App.showNotification('Challan not found', 'error');
@@ -2790,7 +2969,7 @@ const DeliveryUI = {
                             </div>
                         </div>
                         <div class="modal-body gtes-pdf-preview-body p-0 overflow-auto" style="max-height: 90vh;">
-                            <div id="challanPrintArea" class="bg-white text-dark mx-auto shadow-sm p-3 gtes-pdf-preview-sheet" style="max-width: 760px; min-height: 400px; margin: 8px auto 16px !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                            <div id="challanPrintArea" class="bg-white text-dark mx-auto shadow-sm p-3 gtes-pdf-preview-sheet" style="max-width: 760px; min-height: 0; margin: 8px auto 16px !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                                 <!-- Header Section -->
                                 <div class="row mb-5 border-bottom border-dark border-2 pb-3">
                                     <div class="col-7">
@@ -2892,12 +3071,17 @@ const DeliveryUI = {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            ${challan.items.map((item, index) => `
+                                            ${challan.items.map((item, index) => {
+                                                const lineDesc = typeof DcReturnable !== 'undefined'
+                                                    ? DcReturnable.itemLineDescription(item)
+                                                    : String(item.itemDescription || item.description || '').trim();
+                                                const showDesc = lineDesc && lineDesc.toLowerCase() !== String(item.name || '').trim().toLowerCase();
+                                                return `
                                             <tr class="small">
                                                 <td class="text-center text-muted">${index + 1}</td>
                                                 <td>
                                                     <div class="fw-bold">${item.name || item.description || ''}</div>
-                                                    <div class="extra-small text-muted">${(item.description || item.itemDescription || '').trim()}</div>
+                                                    ${showDesc ? `<div class="extra-small text-muted fst-italic">${lineDesc}</div>` : ''}
                                                     ${item.materialChanged ? `<div class="extra-small text-danger mt-1 fst-italic"><i class="bi bi-repeat me-1"></i>Replaced: ${item.replacedDescription || 'Replaced'}</div>` : ''}
                                                 </td>
                                                 <td class="text-center font-monospace">${item.quantity}</td>
@@ -2907,7 +3091,8 @@ const DeliveryUI = {
                                                 <td class="text-end font-monospace fw-bold">₹${formatCurrency(item.amount)}</td>
                                                 ` : ''}
                                             </tr>
-                                            `).join('')}
+                                            `;
+                                            }).join('')}
                                         </tbody>
                                         ${challan.type !== 'service' ? `
                                         <tfoot class="border-top-0">
@@ -2940,6 +3125,13 @@ const DeliveryUI = {
                                         `}
                                     </table>
                                 </div>
+
+                                ${String(challan.narration || challan.remarks || '').trim() ? `
+                                <div class="mb-4 p-3 border rounded-3 bg-light bg-opacity-50">
+                                    <h6 class="text-uppercase text-muted extra-small fw-bold mb-2">Remarks</h6>
+                                    <p class="small mb-0">${String(challan.narration || challan.remarks || '').trim()}</p>
+                                </div>
+                                ` : ''}
 
                                 <!-- Signature Section -->
                                 <div class="row mt-auto pt-5">
@@ -3025,7 +3217,8 @@ const DeliveryUI = {
                 const { host: h, clone } = this.beginPdfClone(element, w);
                 host = h;
                 await this.waitPdfImages(clone);
-                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                const fitted = this.fitHtml2PdfOptionsToClone(clone, opt);
+                const blob = await html2pdf().set(fitted).from(clone).output('blob');
                 await this.finishPdfDownload(blob, filename, subfolder);
             } catch (e) {
                 console.error('Challan PDF error:', e);
@@ -3038,41 +3231,256 @@ const DeliveryUI = {
         }
     },
 
-    async convertToInvoice(challanId) {
-        if (!confirm('Convert this challan to an official invoice?')) return;
+    toggleDcSelection(dcKey, checked) {
+        if (!dcKey) return;
+        if (checked) this.historySelectedDcKeys.add(dcKey);
+        else this.historySelectedDcKeys.delete(dcKey);
+    },
 
-        try {
-            const challan = DeliveryManager.getChallan(challanId);
-            if (!challan) throw new Error('Challan not found');
+    _resolveDcSourceEntry(dcKey) {
+        if (!dcKey || typeof dcKey !== 'string') return null;
+        const sep = dcKey.indexOf(':');
+        if (sep < 1) return null;
+        const source = dcKey.slice(0, sep);
+        const id = dcKey.slice(sep + 1);
+        if (source === 'challan') {
+            const challan = DeliveryManager.getChallan(id);
+            if (!challan || challan.type !== 'delivery' || challan.invoiceId) return null;
+            return { source: 'challan', id, entity: challan, customerId: challan.customerId };
+        }
+        if (source === 'dc-invoice') {
+            const dc = InvoiceManager.getInvoice(id);
+            if (!dc || !InvoiceManager.isDcStyleSalesInvoice(dc) || dc.linkedTaxInvoiceId) return null;
+            return { source: 'dc-invoice', id, entity: dc, customerId: dc.customerId };
+        }
+        return null;
+    },
 
-            const invoiceData = {
-                date: new Date().toISOString().split('T')[0],
-                customerId: challan.customerId,
-                customerName: CustomerManager.getCustomer(challan.customerId)?.name || challan.customerName || 'Walk-in Customer',
-                challanId: challan.id,
-                type: challan.gstMode ? 'with-bill' : 'without-bill',
-                items: challan.items,
-                subtotal: challan.subtotal,
-                gst: {
-                    cgst: challan.cgst,
-                    sgst: challan.sgst,
-                    igst: challan.igst
-                },
-                cgstPercent: challan.cgstPercent,
-                sgstPercent: challan.sgstPercent,
-                igstPercent: challan.igstPercent,
-                roundOff: challan.roundOff,
-                total: challan.total,
-                status: 'pending'
+    _extractBillableItemsFromDcSource(entry) {
+        const entity = entry.entity;
+        const billItems = typeof DcReturnable !== 'undefined'
+            ? DcReturnable.filterForInvoice(entity.items)
+            : (entity.items || []);
+        let isGst = false;
+        let gstOpts = { gstMode: false };
+        if (entry.source === 'challan') {
+            isGst = !!entity.gstMode;
+            gstOpts = {
+                gstMode: isGst,
+                cgstPercent: entity.cgstPercent,
+                sgstPercent: entity.sgstPercent,
+                igstPercent: entity.igstPercent
+            };
+        } else {
+            isGst = entity.billType === 'gst' || entity.type === 'gst-invoice' || entity.type === 'with-bill' || entity.type === 'sales-gst';
+            gstOpts = { gstMode: isGst };
+        }
+        const totals = typeof DcReturnable !== 'undefined'
+            ? DcReturnable.recalculateTotals(billItems, gstOpts)
+            : {
+                subtotal: entity.subtotal,
+                roundOff: entity.roundOff || 0,
+                total: entity.total,
+                gst: entity.gst || { cgst: entity.cgst || 0, sgst: entity.sgst || 0, igst: entity.igst || 0 }
+            };
+        const mappedItems = typeof DcReturnable !== 'undefined'
+            ? DcReturnable.mapItemsForInvoice(billItems)
+            : billItems;
+        const label = entry.source === 'challan'
+            ? (entity.id || entity.customNumber)
+            : (entity.invoiceNo || entity.id);
+        return { billItems, mappedItems, totals, isGst, label, gstOpts };
+    },
+
+    async _createTaxInvoiceFromDcSources(entries, { confirmMessage }) {
+        if (!entries.length) throw new Error('No delivery challans selected.');
+        const customerIds = [...new Set(entries.map((e) => e.customerId).filter(Boolean))];
+        if (customerIds.length !== 1) {
+            throw new Error('All selected delivery challans must belong to the same customer.');
+        }
+
+        if (confirmMessage && !confirm(confirmMessage)) return null;
+
+        let allMappedItems = [];
+        let narrationParts = [];
+        let isGst = null;
+        let gstPercents = null;
+        const challanIds = [];
+        const dcInvoiceIds = [];
+        let customerName = '';
+        let customerAddress = null;
+        let partyId = null;
+        let placeOfSupply = null;
+        let taxScheme = null;
+        let taxSupplyType = null;
+        let shipToAddress = null;
+        let includeShipToOnPdf = null;
+
+        for (const entry of entries) {
+            const extracted = this._extractBillableItemsFromDcSource(entry);
+            if (!extracted.billItems.length) {
+                throw new Error(`No non-returnable items on ${extracted.label}. Mark sold items as Non Returnable.`);
+            }
+            if (isGst === null) {
+                isGst = extracted.isGst;
+                if (entry.source === 'challan') {
+                    gstPercents = {
+                        cgstPercent: entry.entity.cgstPercent,
+                        sgstPercent: entry.entity.sgstPercent,
+                        igstPercent: entry.entity.igstPercent
+                    };
+                }
+            } else if (isGst !== extracted.isGst) {
+                throw new Error('Selected DCs must use the same billing type (all GST or all non-GST).');
+            }
+            allMappedItems = allMappedItems.concat(extracted.mappedItems);
+            narrationParts.push(extracted.label);
+            if (entry.source === 'challan') challanIds.push(entry.id);
+            else dcInvoiceIds.push(entry.id);
+
+            const ent = entry.entity;
+            customerName = customerName || ent.customerName || CustomerManager.getCustomer(ent.customerId)?.name || 'Walk-in Customer';
+            customerAddress = customerAddress || ent.customerAddress || null;
+            partyId = partyId || ent.partyId || null;
+            placeOfSupply = placeOfSupply || ent.placeOfSupply || null;
+            taxScheme = taxScheme || ent.taxScheme || null;
+            taxSupplyType = taxSupplyType || ent.taxSupplyType || null;
+            shipToAddress = shipToAddress || ent.shipToAddress || null;
+            includeShipToOnPdf = includeShipToOnPdf ?? ent.includeShipToOnPdf;
+            if (entry.source === 'dc-invoice' && ent.narration) {
+                narrationParts.push(ent.narration);
+            }
+        }
+
+        const totals = typeof DcReturnable !== 'undefined'
+            ? DcReturnable.recalculateTotals(
+                allMappedItems,
+                gstPercents ? { gstMode: isGst, ...gstPercents } : { gstMode: isGst }
+            )
+            : {
+                subtotal: allMappedItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0),
+                roundOff: 0,
+                total: 0,
+                gst: { cgst: 0, sgst: 0, igst: 0 }
             };
 
-            const invoice = await InvoiceManager.createInvoice(invoiceData);
+        const invoiceNo = InvoiceManager.generateInvoiceNumber(isGst ? 'with-bill' : 'without-bill');
+        const dcList = narrationParts.filter((p, i, arr) => arr.indexOf(p) === i).join(', ');
+        const invoiceData = {
+            id: invoiceNo,
+            invoiceNo,
+            date: new Date().toISOString().split('T')[0],
+            customerId: customerIds[0],
+            customerName,
+            customerAddress,
+            partyId,
+            type: isGst ? 'gst-invoice' : 'non-gst-invoice',
+            billType: isGst ? 'gst' : 'plain',
+            challanId: challanIds[0] || null,
+            sourceChallanId: challanIds.length === 1 ? challanIds[0] : null,
+            sourceChallanIds: challanIds.length > 1 ? challanIds : null,
+            sourceDcInvoiceId: dcInvoiceIds.length === 1 ? dcInvoiceIds[0] : null,
+            sourceDcInvoiceIds: dcInvoiceIds.length > 1 ? dcInvoiceIds : null,
+            skipAutoChallan: true,
+            items: allMappedItems,
+            subtotal: totals.subtotal,
+            gst: totals.gst,
+            roundOff: totals.roundOff,
+            total: totals.total,
+            placeOfSupply,
+            taxScheme,
+            taxSupplyType,
+            shipToAddress,
+            includeShipToOnPdf,
+            narration: `Invoiced from DC(s): ${dcList} (non-returnable items only).`,
+            status: 'pending'
+        };
+        if (gstPercents) {
+            invoiceData.cgstPercent = gstPercents.cgstPercent;
+            invoiceData.sgstPercent = gstPercents.sgstPercent;
+            invoiceData.igstPercent = gstPercents.igstPercent;
+        }
 
-            // Link invoice back to challan
-            await DeliveryManager.updateChallan(challanId, { invoiceId: invoice.id });
+        const invoice = await InvoiceManager.createInvoice(invoiceData);
 
-            App.showNotification(`Invoice ${invoice.id} created successfully!`, 'success');
-            this.viewChallan(challanId); // Refresh view
+        for (const cid of challanIds) {
+            if (cid !== invoice.challanId) {
+                await DeliveryManager.updateChallan(cid, { invoiceId: invoice.id, status: 'invoiced' });
+            }
+        }
+        for (const did of dcInvoiceIds) {
+            await InvoiceManager.updateInvoice(did, { linkedTaxInvoiceId: invoice.id });
+        }
+
+        this.historySelectedDcKeys.clear();
+        return { invoice, itemCount: allMappedItems.length };
+    },
+
+    async convertSelectedDcsToInvoice() {
+        const keys = [...this.historySelectedDcKeys];
+        if (!keys.length) {
+            App.showNotification('Select one or more pending delivery challans (same customer).', 'warning');
+            return;
+        }
+        if (keys.length === 1) {
+            const entry = this._resolveDcSourceEntry(keys[0]);
+            if (!entry) {
+                App.showNotification('Selected delivery challan is no longer available.', 'warning');
+                this.historySelectedDcKeys.clear();
+                this.loadHistory();
+                return;
+            }
+            if (entry.source === 'challan') return this.convertToInvoice(entry.id);
+            return this.convertDcToInvoice(entry.id);
+        }
+
+        try {
+            const entries = keys.map((k) => this._resolveDcSourceEntry(k)).filter(Boolean);
+            if (!entries.length) throw new Error('Selected delivery challans are no longer available.');
+            const result = await this._createTaxInvoiceFromDcSources(entries, {
+                confirmMessage: `Create one tax invoice from ${entries.length} delivery challans (non-returnable items only)?`
+            });
+            if (!result) return;
+            App.showNotification(`Tax invoice ${result.invoice.invoiceNo || result.invoice.id} created (${result.itemCount} item(s) from ${entries.length} DC(s)).`, 'success');
+            this.loadHistory();
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.previewInvoice) {
+                InvoicesUI.previewInvoice(result.invoice.id);
+            }
+        } catch (error) {
+            console.error(error);
+            App.showNotification(error.message, 'error');
+        }
+    },
+
+    async convertToInvoice(challanId) {
+        try {
+            const entry = this._resolveDcSourceEntry(`challan:${challanId}`);
+            if (!entry) throw new Error('Challan not found or already invoiced.');
+            const result = await this._createTaxInvoiceFromDcSources([entry], {
+                confirmMessage: 'Create invoice from non-returnable items on this challan?'
+            });
+            if (!result) return;
+            App.showNotification(`Invoice ${result.invoice.id} created from ${result.itemCount} non-returnable item(s).`, 'success');
+            this.viewChallan(challanId);
+        } catch (error) {
+            console.error(error);
+            App.showNotification(error.message, 'error');
+        }
+    },
+
+    async convertDcToInvoice(dcInvoiceId) {
+        try {
+            const entry = this._resolveDcSourceEntry(`dc-invoice:${dcInvoiceId}`);
+            if (!entry) throw new Error('Delivery challan not found or already invoiced.');
+            const result = await this._createTaxInvoiceFromDcSources([entry], {
+                confirmMessage: 'Create tax invoice from non-returnable items on this delivery challan?'
+            });
+            if (!result) return;
+            App.showNotification(`Tax invoice ${result.invoice.invoiceNo || result.invoice.id} created (${result.itemCount} item(s)).`, 'success');
+            this.loadHistory();
+            if (typeof InvoicesUI !== 'undefined' && InvoicesUI.previewInvoice) {
+                InvoicesUI.previewInvoice(result.invoice.id);
+            }
         } catch (error) {
             console.error(error);
             App.showNotification(error.message, 'error');
@@ -4004,12 +4412,21 @@ const DeliveryUI = {
         if (!jobCard) return;
 
         const filename = `JobCard_${id}.pdf`;
-        const opt = this.buildGtesHtml2PdfOptions({ filename, image: { type: 'jpeg', quality: 0.98 } });
+        const opt = this.buildGtesHtml2PdfOptions({ filename, image: { type: 'jpeg', quality: 0.92 } });
 
         if (typeof html2pdf !== 'undefined') {
             try {
-                const blob = await html2pdf().set(opt).from(element).output('blob');
-                await this.finishPdfDownload(blob, filename, 'JobCards');
+                const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
+                const w = Math.min(maxW, Math.max(element.scrollWidth || maxW, 400));
+                const { host, clone } = this.beginPdfClone(element, w);
+                try {
+                    await this.waitPdfImages(clone);
+                    const fitted = this.fitHtml2PdfOptionsToClone(clone, opt);
+                    const blob = await html2pdf().set(fitted).from(clone).output('blob');
+                    await this.finishPdfDownload(blob, filename, 'JobCards');
+                } finally {
+                    this.endPdfClone(host);
+                }
             } catch (e) {
                 console.error('Job card PDF error:', e);
                 App.showNotification('Error generating PDF', 'error');
@@ -4140,6 +4557,9 @@ const DeliveryUI = {
 
     async createAutoChallanFromInvoice(invoice) {
         try {
+            if (typeof InvoiceManager !== 'undefined' && InvoiceManager.shouldSkipAutoChallanSync(invoice)) {
+                return;
+            }
             // Logic: If Job Card is present, it's a Service Challan (SC). Else it's a Delivery Challan (DC).
             const isService = !!invoice.jobCardId;
             const challanType = isService ? 'service' : 'delivery';
@@ -4206,60 +4626,128 @@ const DeliveryUI = {
         }
     },
 
-    async viewInvoice(id) {
-        const invoice = InvoiceManager.getInvoice(id);
-        if (!invoice) {
-            App.showNotification('Invoice not found', 'error');
+    /** Show/hide Convert to Invoice on the shared document preview toolbar. */
+    syncPreviewConvertActions(session) {
+        const convertBtn = document.getElementById('pdfConvertDcBtn');
+        const viewTaxBtn = document.getElementById('pdfViewTaxInvoiceBtn');
+        if (!convertBtn) return;
+
+        const hide = () => {
+            convertBtn.classList.add('d-none');
+            convertBtn.onclick = null;
+            if (viewTaxBtn) {
+                viewTaxBtn.classList.add('d-none');
+                viewTaxBtn.onclick = null;
+            }
+        };
+        hide();
+
+        if (!session?.type || !session.id) return;
+
+        if (session.type === 'delivery-challan') {
+            const challan = session.entity
+                || (typeof DeliveryManager !== 'undefined' ? DeliveryManager.getChallan(session.id) : null);
+            if (!challan || challan.type !== 'delivery') return;
+            if (challan.invoiceId) {
+                if (viewTaxBtn) {
+                    viewTaxBtn.classList.remove('d-none');
+                    viewTaxBtn.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.viewInvoice(challan.invoiceId);
+                    };
+                }
+                return;
+            }
+            convertBtn.classList.remove('d-none');
+            convertBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.convertToInvoice(challan.id);
+            };
             return;
         }
 
-        const isDc = typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(invoice);
-        const typeLabel = isDc
-            ? 'DELIVERY CHALLAN'
-            : (invoice.type === 'with-bill' || invoice.type === 'gst-invoice' || invoice.type === 'sales-gst' ? 'TAX INVOICE' : 'BILL OF SUPPLY');
+        if (session.type !== 'sales-invoice') return;
+        const inv = session.entity
+            || (typeof InvoiceManager !== 'undefined' ? InvoiceManager.getInvoice(session.id) : null);
+        if (!inv || !InvoiceManager.isDcStyleSalesInvoice(inv)) return;
 
-        if (typeof InvoicesUI === 'undefined' || !InvoicesUI.getInvoiceElement) {
-            App.showNotification('Invoice preview unavailable', 'error');
+        if (inv.linkedTaxInvoiceId) {
+            if (viewTaxBtn) {
+                viewTaxBtn.classList.remove('d-none');
+                viewTaxBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.viewInvoice(inv.linkedTaxInvoiceId);
+                };
+            }
             return;
         }
 
-        let el;
-        try {
-            el = await InvoicesUI.getInvoiceElement(id);
-        } catch (e) {
-            console.error(e);
-            App.showNotification('Preview failed', 'error');
-            return;
-        }
-        if (!el) {
-            App.showNotification('Preview failed', 'error');
-            return;
-        }
-
-        this.mountPdfPreview(el, {
-            title: `${typeLabel} — ${invoice.invoiceNo || invoice.id} | ${invoice.customerName || ''}`,
-            kind: 'invoice',
-            id,
-            onDownload: () => this.downloadInvoicePdf(id)
-        });
+        convertBtn.classList.remove('d-none');
+        convertBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.convertDcToInvoice(inv.id);
+        };
     },
 
-    mountPdfPreview(previewEl, { title, kind, id, onDownload }) {
+    async viewInvoice(id) {
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.isNative('sales-invoice')) {
+            return DocumentEngine.openPreview({ type: 'sales-invoice', id });
+        }
+        if (typeof InvoicePdfEngine !== 'undefined' && InvoicePdfEngine.openPreview) {
+            return InvoicePdfEngine.openPreview(id);
+        }
+        App.showNotification('Document engine not loaded', 'error');
+    },
+
+    mountPdfPreview(previewEl, { title, subtitle, kind, id, onDownload, useNativePrintExport }) {
         const container = document.getElementById('pdfPreviewContainer');
         const titleEl = document.getElementById('pdfPreviewTitle');
+        const subtitleEl = document.getElementById('pdfPreviewSubtitle');
         const dl = document.getElementById('pdfDownloadBtn');
         const pr = document.getElementById('pdfPrintBtn');
+        const savePdf = document.getElementById('pdfSaveAsPdfBtn');
         if (!container || !titleEl || !dl || !pr) {
             App.showNotification('PDF preview UI missing', 'error');
             return;
         }
-        container.innerHTML = '';
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.deactivateEngineMode) {
+            DocumentEngine.deactivateEngineMode();
+        }
+        const legacyHost = typeof DocumentPreviewHost !== 'undefined'
+            ? DocumentPreviewHost.prepareLegacy()
+            : container;
+        if (!legacyHost) {
+            App.showNotification('PDF preview UI missing', 'error');
+            return;
+        }
+
         container.dataset.gtesPreviewKind = kind;
         container.dataset.gtesPreviewId = String(id);
         previewEl.style.margin = '0 auto';
         previewEl.style.boxShadow = 'none';
-        container.appendChild(previewEl);
+        legacyHost.appendChild(previewEl);
         titleEl.textContent = title;
+        if (subtitleEl) {
+            if (subtitle) {
+                subtitleEl.textContent = subtitle;
+                subtitleEl.classList.remove('d-none');
+            } else {
+                subtitleEl.classList.add('d-none');
+            }
+        }
+        if (kind === 'invoice' && id && typeof InvoicePdfEngine !== 'undefined') {
+            void InvoicePdfEngine.openPreview(id);
+            return;
+        }
+
+        document.getElementById('pdfPreviewModal')?.classList.remove('gtes-invoice-html-mode');
+        const legacyToolbar = document.getElementById('gtesInvoicePdfLegacyToolbar');
+        if (legacyToolbar) legacyToolbar.classList.remove('d-none');
+        if (savePdf) savePdf.style.display = 'none';
         dl.disabled = false;
         dl.innerHTML = '<i class="bi bi-download me-1"></i> Download PDF';
         dl.onclick = () => {
@@ -4285,8 +4773,10 @@ const DeliveryUI = {
 
     async getPdfCloneSource(kind, id, asyncFactory) {
         const c = document.getElementById('pdfPreviewContainer');
+        const legacy = document.getElementById('gtesPdfLegacyStage');
+        const scope = legacy || c;
         if (c && c.dataset.gtesPreviewKind === kind && c.dataset.gtesPreviewId === String(id)) {
-            const root = c.querySelector('.gtes-pdf-document');
+            const root = scope?.querySelector('.gtes-pdf-document');
             if (root) return root;
         }
         return typeof asyncFactory === 'function' ? await asyncFactory() : null;
@@ -4335,16 +4825,136 @@ const DeliveryUI = {
         App.showNotification('PDF downloaded', 'success');
     },
 
-    nativePrint() {
+    _installPrintRuntimeDebug() {
+        if (this._printRuntimeDebugInstalled) return;
+        this._printRuntimeDebugInstalled = true;
+        const run = () => {
+            if (!window.GTES_PRINT_DEBUG) return;
+            console.log('PRINT START', {
+                innerHtmlLen: document.body.innerHTML.length,
+                nodeCount: document.querySelectorAll('*').length,
+                modalCount: document.querySelectorAll('.modal').length,
+                printTarget: document.body.dataset.gtesPrintTarget || null,
+                openModals: Array.from(document.querySelectorAll('.modal.show')).map((m) => m.id)
+            });
+            document.querySelectorAll('.modal').forEach((el) => {
+                const style = getComputedStyle(el);
+                console.log('[print modal]', el.id, {
+                    display: style.display,
+                    show: el.classList.contains('show'),
+                    height: Math.round(el.getBoundingClientRect().height)
+                });
+            });
+        };
+        window.addEventListener('beforeprint', run);
+    },
+
+    _resolveNativePrintTargetId() {
+        if (document.getElementById('pdfPreviewModal')?.classList.contains('show')) return 'pdfPreviewModal';
+        if (document.getElementById('challanViewModal')?.classList.contains('show')) return 'challanViewModal';
+        if (document.getElementById('jobCardViewModal')?.classList.contains('show')) return 'jobCardViewModal';
+        return null;
+    },
+
+    /**
+     * Browser print engine (Chromium / Electron). Scale, margins, copies, borderless, and
+     * live preview are controlled in the system print dialog — not html2canvas.
+     */
+    nativePrint(opts = {}) {
+        this._installPrintRuntimeDebug();
+        const targetId = this._resolveNativePrintTargetId();
+        const container = document.getElementById('pdfPreviewContainer');
+        const kind = container?.dataset.gtesPreviewKind || '';
+        if (targetId) {
+            document.body.dataset.gtesPrintTarget = targetId;
+        } else {
+            delete document.body.dataset.gtesPrintTarget;
+        }
+        if (kind === 'invoice') {
+            document.body.dataset.gtesPrintKind = 'invoice';
+        } else {
+            delete document.body.dataset.gtesPrintKind;
+        }
+        const clearTarget = () => {
+            delete document.body.dataset.gtesPrintTarget;
+            delete document.body.dataset.gtesPrintKind;
+        };
+        window.addEventListener('afterprint', clearTarget, { once: true });
+        if (opts.saveAsPdf) {
+            App.showNotification(
+                'In the print dialog: choose "Save as PDF" or "Microsoft Print to PDF", then set scale/margins as needed.',
+                'info',
+                8000
+            );
+        }
         window.focus();
         setTimeout(() => {
             window.print();
-        }, 500);
+        }, opts.saveAsPdf ? 400 : 500);
+    },
+
+    async exportInvoiceNative(invoiceId, { action = 'preview' } = {}) {
+        if (typeof InvoicePdfEngine === 'undefined') {
+            App.showNotification('Invoice PDF engine not available', 'error');
+            return;
+        }
+        return InvoicePdfEngine.exportInvoice(invoiceId, { action });
+    },
+
+    /** Printable width inside A4 after margins + invoice padding (prevents right-side crop). */
+    getPdfPrintableWidthPx() {
+        const marginMm = this.GTES_PDF_MARGIN_MM || 8;
+        const pageWmm = this.GTES_PDF_PAGE_W_MM || 210;
+        const padPx = 24;
+        return Math.max(520, Math.floor(((pageWmm - marginMm * 2) / 25.4) * 96) - padPx);
+    },
+
+    getPdfPrintableHeightMm() {
+        const marginMm = this.GTES_PDF_MARGIN_MM || 8;
+        return (this.GTES_PDF_PAGE_H_MM || 297) - marginMm * 2;
+    },
+
+    /**
+     * Short documents: one jsPDF page sized to content (no orphan signature page).
+     * Tall documents: allow CSS breaks only — never use pagebreak.avoid (orphans footer).
+     */
+    fitHtml2PdfOptionsToClone(clone, opt) {
+        const merged = { ...opt };
+        const marginMm = this.GTES_PDF_MARGIN_MM || 8;
+        const pageWmm = this.GTES_PDF_PAGE_W_MM || 210;
+        const pageHmmMax = this.GTES_PDF_PAGE_H_MM || 297;
+        const printableHmm = this.getPdfPrintableHeightMm();
+
+        if (clone) {
+            clone.querySelectorAll('.gtes-pdf-avoid-break, .gtes-pdf-item-row').forEach((el) => {
+                el.classList.remove('gtes-pdf-avoid-break', 'gtes-pdf-item-row');
+                el.style.pageBreakInside = 'auto';
+                el.style.breakInside = 'auto';
+            });
+            void clone.offsetHeight;
+            const hPx = Math.max(clone.scrollHeight || 0, clone.offsetHeight || 0, 1);
+            const contentHmm = (hPx * 25.4) / 96;
+
+            if (contentHmm > 0 && contentHmm <= printableHmm - 2) {
+                const sheetHmm = Math.min(pageHmmMax, Math.ceil(contentHmm + marginMm * 2 + 4));
+                merged.pagebreak = { mode: [] };
+                merged.jsPDF = {
+                    ...(merged.jsPDF || {}),
+                    unit: 'mm',
+                    format: [pageWmm, sheetHmm],
+                    orientation: 'portrait'
+                };
+            } else {
+                merged.pagebreak = { mode: ['css'] };
+            }
+        }
+        return merged;
     },
 
     /** Shared html2pdf options: A4, margins, multi-page via CSS only (legacy mode often adds blank pages). */
     buildGtesHtml2PdfOptions(extra = {}) {
         const scale = this.GTES_HTML2PDF_CANVAS_SCALE || 1.85;
+        const marginMm = this.GTES_PDF_MARGIN_MM || 8;
         const baseHtml2 = {
             scale,
             useCORS: true,
@@ -4353,15 +4963,17 @@ const DeliveryUI = {
             backgroundColor: '#ffffff',
             scrollX: 0,
             scrollY: 0,
-            letterRendering: true
+            letterRendering: true,
+            width: this.getPdfPrintableWidthPx(),
+            windowWidth: this.getPdfPrintableWidthPx()
         };
         const mergedH2c = { ...baseHtml2, ...(extra.html2canvas || {}) };
         const { html2canvas: _drop, ...restExtra } = extra;
         return {
-            margin: [0.15, 0.15, 0.15, 0.15],
-            image: { type: 'jpeg', quality: 0.94 },
+            margin: [marginMm, marginMm, marginMm, marginMm],
+            image: { type: 'jpeg', quality: 0.92 },
             html2canvas: mergedH2c,
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
             pagebreak: { mode: ['css'] },
             ...restExtra
         };
@@ -4371,8 +4983,35 @@ const DeliveryUI = {
      * Clone PDF DOM off-screen at a fixed width so html2canvas does not measure a clipped
      * column width inside scrollable modals (fixes ~75% horizontal cut-off in saved PDFs).
      */
+    /** Strip preview/print CSS that inflates canvas height (blank PDF pages). */
+    normalizePdfRootForCapture(root) {
+        if (!root) return;
+        try {
+            root.style.minHeight = '0';
+            root.style.height = 'auto';
+            root.style.maxHeight = 'none';
+            root.querySelectorAll('.gtes-pdf-break-safe, .gtes-pdf-avoid-break, .gtes-pdf-item-row').forEach((el) => {
+                el.classList.remove('gtes-pdf-break-safe', 'gtes-pdf-avoid-break', 'gtes-pdf-item-row');
+                el.style.pageBreakInside = 'auto';
+                el.style.breakInside = 'auto';
+            });
+            root.querySelectorAll('.gtes-pdf-preview-sheet, [id$="PrintArea"], .gtes-pdf-document').forEach((el) => {
+                el.style.minHeight = '0';
+                el.style.height = 'auto';
+                el.style.maxHeight = 'none';
+            });
+            root.querySelectorAll('.mb-5, .mb-4').forEach((el) => {
+                if (el.classList.contains('row') || el.classList.contains('border-bottom')) {
+                    el.style.marginBottom = '12px';
+                }
+            });
+        } catch (_) { /* ignore */ }
+    },
+
     beginPdfClone(pdfRoot, fixedWidthPx) {
-        const defW = this.GTES_PDF_DOCUMENT_WIDTH_PX || 760;
+        const defW = typeof this.getPdfPrintableWidthPx === 'function'
+            ? this.getPdfPrintableWidthPx()
+            : (this.GTES_PDF_DOCUMENT_WIDTH_PX || 702);
         const px = Math.max(400, Number(fixedWidthPx) || defW);
         const w = `${px}px`;
         const host = document.createElement('div');
@@ -4391,12 +5030,7 @@ const DeliveryUI = {
         clone.style.minHeight = '0';
         clone.style.height = 'auto';
         clone.style.maxHeight = 'none';
-        clone.querySelectorAll('.gtes-pdf-preview-sheet, [id$="PrintArea"]').forEach((el) => {
-            try {
-                el.style.minHeight = '0';
-                el.style.height = 'auto';
-            } catch (_) { /* ignore */ }
-        });
+        this.normalizePdfRootForCapture(clone);
         host.appendChild(clone);
         document.body.appendChild(host);
         void clone.offsetWidth;
@@ -4425,59 +5059,12 @@ const DeliveryUI = {
     },
 
     async printInvoice(id) {
-        return this.downloadInvoicePdf(id);
+        return this.exportInvoiceNative(id, { action: 'print' });
     },
 
+    /** Invoice PDF via Electron printToPDF + PDF.js viewer (not html2pdf). */
     async downloadInvoicePdf(id) {
-        const invoice = InvoiceManager.getInvoice(id);
-        if (!invoice) return;
-
-        const filename = `Invoice_${id}.pdf`;
-        const invScale = this.GTES_INVOICE_PURCHASE_HTML2PDF_SCALE || 1.14;
-        const opt = this.buildGtesHtml2PdfOptions({
-            filename,
-            html2canvas: { scale: invScale }
-        });
-
-        if (typeof html2pdf === 'undefined') {
-            window.print();
-            return;
-        }
-
-        const btn = document.getElementById('pdfDownloadBtn');
-        const originalHtml = btn ? btn.innerHTML : '';
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
-        }
-
-        try {
-            const sourceRoot = await this.getPdfCloneSource('invoice', id, () =>
-                (typeof InvoicesUI !== 'undefined' && InvoicesUI.getInvoiceElement ? InvoicesUI.getInvoiceElement(id) : null));
-            if (!sourceRoot) {
-                App.showNotification('Invoice document not found', 'error');
-                return;
-            }
-
-            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
-            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
-            const { host, clone } = this.beginPdfClone(sourceRoot, w);
-            try {
-                await this.waitPdfImages(clone);
-                const blob = await html2pdf().set(opt).from(clone).output('blob');
-                await this.finishPdfDownload(blob, filename, 'Invoices');
-            } finally {
-                this.endPdfClone(host);
-            }
-        } catch (e) {
-            console.error('PDF Generation Error:', e);
-            App.showNotification('Error generating PDF', 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml || '<i class="bi bi-download me-1"></i> Download PDF';
-            }
-        }
+        return this.exportInvoiceNative(id, { action: 'download' });
     },
 
     /**
@@ -4554,12 +5141,12 @@ const DeliveryUI = {
                 return;
             }
 
-            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
-            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
+            const w = this.getPdfPrintableWidthPx();
             const { host, clone } = this.beginPdfClone(sourceRoot, w);
             try {
                 await this.waitPdfImages(clone);
-                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                const fitted = this.fitHtml2PdfOptionsToClone(clone, opt);
+                const blob = await html2pdf().set(fitted).from(clone).output('blob');
                 await this.finishPdfDownload(blob, filename, 'Vouchers');
             } finally {
                 this.endPdfClone(host);
@@ -4580,6 +5167,10 @@ const DeliveryUI = {
         if (!expense) {
             App.showNotification('Purchase record not found', 'error');
             return;
+        }
+
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.isNative('purchase-invoice')) {
+            return DocumentEngine.openPreview({ type: 'purchase-invoice', id });
         }
 
         if (typeof InvoicesUI === 'undefined' || !InvoicesUI.getPurchaseElement) {
@@ -4647,12 +5238,12 @@ const DeliveryUI = {
                 return;
             }
 
-            const maxW = this.GTES_PDF_DOCUMENT_WIDTH_PX;
-            const w = Math.min(maxW, Math.max(sourceRoot.scrollWidth || maxW, 400));
+            const w = this.getPdfPrintableWidthPx();
             const { host, clone } = this.beginPdfClone(sourceRoot, w);
             try {
                 await this.waitPdfImages(clone);
-                const blob = await html2pdf().set(opt).from(clone).output('blob');
+                const fitted = this.fitHtml2PdfOptionsToClone(clone, opt);
+                const blob = await html2pdf().set(fitted).from(clone).output('blob');
                 await this.finishPdfDownload(blob, filename, 'Purchases');
             } finally {
                 this.endPdfClone(host);
@@ -5322,6 +5913,28 @@ const DeliveryUI = {
             document.getElementById('customerSearch').value = challan.customerName || '';
             document.getElementById('customerId').value = challan.customerId;
 
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.value = val ?? '';
+            };
+            setVal('challanPoNumber', challan.poNumber || challan.referenceNumber);
+            setVal('challanDispatchDocNo', challan.dispatchDocumentNo);
+            setVal('challanDispatchVia', challan.dispatchVia);
+            setVal('challanDestination', challan.destination);
+            setVal('challanEwayBill', challan.ewayBillNo);
+            setVal('challanLrNo', challan.lrNo);
+            setVal('challanVehicleNo', challan.vehicleNo);
+            setVal('challanDispatchDate', challan.dispatchDate);
+            setVal('challanNarration', challan.narration || challan.remarks || '');
+            const shipSameEl = document.getElementById('challanShipSame');
+            const shipAddrEl = document.getElementById('challanShipToAddress');
+            const shipSame = challan.shipSameAsBilling !== false && !challan.shipToAddress;
+            if (shipSameEl) shipSameEl.checked = shipSame;
+            if (shipAddrEl) {
+                shipAddrEl.disabled = shipSame;
+                shipAddrEl.value = challan.shipToAddress || '';
+            }
+
             // Trigger type change to show/hide service fields
             this.toggleServiceFields();
 
@@ -5356,35 +5969,10 @@ const DeliveryUI = {
             App.showNotification('Invoice not found', 'error');
             return;
         }
-
-        // Show invoice form
-        this.showInvoiceForm(invoice.type || 'with-bill');
-        this.editingInvoiceId = invoiceId;
-
-        setTimeout(() => {
-            const elType = document.getElementById('invType');
-            const elNumber = document.getElementById('invNumber');
-            const elDate = document.getElementById('invDate');
-            const elSearch = document.getElementById('invCustomerSearch');
-            const elCust = document.getElementById('invCustomer');
-
-            if (elType) elType.value = invoice.type || 'with-bill';
-            if (elNumber) elNumber.value = invoice.id;
-            if (elDate) elDate.value = invoice.date;
-            if (elSearch) elSearch.value = invoice.customerName || '';
-            if (elCust) elCust.value = invoice.customerId;
-
-            // Populate items
-            const tbody = document.getElementById('invItemsBody');
-            const emptyRow = document.getElementById('invEmptyRow');
-            if (emptyRow) emptyRow.remove();
-
-            (invoice.items || []).forEach(item => this.addInvoiceItemRow(item));
-
-            this.calculateInvoiceTotals();
-            document.querySelector('#deliveryInvoicesSection h4')?.remove();
-            App.showNotification('Editing Invoice: ' + invoiceId, 'info');
-        }, 200);
+        if (typeof InvoicesUI !== 'undefined' && InvoicesUI.showEditModal) {
+            return InvoicesUI.showEditModal(invoiceId);
+        }
+        App.showNotification('Invoice editor not available', 'error');
     },
 
     // Edit Job Card

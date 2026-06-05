@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const nodemailer = require('nodemailer');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs').promises;
 const fssync = require('fs');
 const crypto = require('crypto');
@@ -695,6 +696,319 @@ ipcMain.handle('select-bookkeeper-db', async () => {
         return { success: false, error: error.message };
     }
 });
+/** Off-screen window used only for invoice HTML → PDF (printToPDF). */
+let invoicePdfWindow = null;
+
+function getInvoicePdfWindow() {
+    if (invoicePdfWindow && !invoicePdfWindow.isDestroyed()) {
+        return invoicePdfWindow;
+    }
+    invoicePdfWindow = new BrowserWindow({
+        show: false,
+        width: 794,
+        height: 1123,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true
+        }
+    });
+    invoicePdfWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    return invoicePdfWindow;
+}
+
+/** Match InvoicePreviewLayout margin presets (mm → inches for Electron custom margins). */
+function invoiceMarginMm(preset) {
+    const map = { none: 0, narrow: 5, normal: 8 };
+    return map[preset] ?? 8;
+}
+
+/** Measure layout in a webContents (preview / print / download parity). */
+async function measureInvoiceRender(wc) {
+    return wc.executeJavaScript(`
+        (() => {
+            const h = (el) => el ? Math.max(el.scrollHeight || 0, el.offsetHeight || 0) : 0;
+            const measureRoot = (root) => {
+                if (!root) return null;
+                const lineItems = root.querySelector('.gtes-invoice-line-items');
+                const footer = root.querySelector('.gtes-invoice-footer-block');
+                const totals = root.querySelector('.gtes-invoice-totals-summary');
+                const bank = root.querySelector('.gtes-invoice-bank-details');
+                const signature = root.querySelector('.gtes-pdf-signature-block');
+                let beforeFooter = h(root);
+                if (footer) {
+                    try {
+                        const range = document.createRange();
+                        range.setStart(root, 0);
+                        range.setEndBefore(footer);
+                        beforeFooter = range.getBoundingClientRect().height;
+                    } catch (_) {
+                        beforeFooter = Math.max(footer.offsetTop - root.offsetTop, 0);
+                    }
+                }
+                const footerStyle = footer ? getComputedStyle(footer) : null;
+                return {
+                    rootHeight: h(root),
+                    lineItemsHeight: h(lineItems),
+                    beforeFooterHeight: beforeFooter,
+                    footerHeight: h(footer),
+                    totalsHeight: h(totals),
+                    bankHeight: h(bank),
+                    signatureHeight: h(signature),
+                    footerBreakInside: footerStyle?.breakInside || null,
+                    footerPageBreakInside: footerStyle?.pageBreakInside || null
+                };
+            };
+            const printRoot = document.querySelector('#gtesInvoicePrintSource .gtes-invoice-print-root')
+                || document.querySelector('#pdfPreviewContainer .gtes-invoice-print-root')
+                || document.querySelector('.gtes-invoice-print-root');
+            const previewRoot = document.querySelector('#gtesInvoicePagesStage .gtes-invoice-print-root');
+            const bodyRect = document.body.getBoundingClientRect();
+            const rootRect = printRoot ? printRoot.getBoundingClientRect() : null;
+            const style = printRoot ? window.getComputedStyle(printRoot) : null;
+            const cssZoom = style?.zoom || '1';
+            const transform = style?.transform || 'none';
+            let transformScale = 1;
+            if (transform && transform !== 'none') {
+                const m = transform.match(/^matrix\\(([^,]+),\\s*[^,]+,\\s*[^,]+,\\s*([^,]+)/);
+                if (m) transformScale = Number(m[1]) || 1;
+            }
+            const zoomNumber = Number(cssZoom) || 1;
+            const printDomHeight = measureRoot(printRoot);
+            const previewDomHeight = measureRoot(previewRoot);
+            console.log('[printToPDF:dom-heights]', {
+                previewDomHeight,
+                printDomHeight,
+                printHeightPx: printDomHeight?.rootHeight ?? null
+            });
+            return {
+                bodyRect: { width: bodyRect.width, height: bodyRect.height, top: bodyRect.top, left: bodyRect.left },
+                contentWidthPx: rootRect ? rootRect.width : bodyRect.width,
+                contentHeightPx: rootRect ? rootRect.height : bodyRect.height,
+                printHeightPx: printDomHeight?.rootHeight ?? (rootRect ? rootRect.height : null),
+                previewDomHeight,
+                printDomHeight,
+                renderScale: zoomNumber * transformScale,
+                cssZoom,
+                cssTransform: transform,
+                cssTransformScale: transformScale,
+                devicePixelRatio: window.devicePixelRatio || 1,
+                browserZoom: 1
+            };
+        })()
+    `);
+}
+
+function countPdfPages(buffer) {
+    if (!buffer || !buffer.length) return 0;
+    const text = buffer.toString('latin1');
+    const matches = text.match(/\/Type\s*\/Page\b(?!s)/g);
+    return matches ? matches.length : 1;
+}
+
+async function printInvoiceFromWebContents(wc, { pageSize, marginPreset, metrics, scale, orientation }) {
+    wc.setZoomFactor(1);
+    const measured = await measureInvoiceRender(wc);
+    measured.browserZoom = wc.getZoomFactor();
+    const scaleFactor = Math.min(200, Math.max(50, parseInt(scale, 10) || 100));
+    measured.electronPrintToPdfScaleFactor = scaleFactor;
+
+    const page = pageSize === 'Letter' ? 'Letter' : 'A4';
+    const marginMm = metrics?.marginTopMm ?? invoiceMarginMm(marginPreset);
+    const landscape = orientation === 'landscape';
+
+    const pdfBuffer = await wc.printToPDF({
+        printBackground: true,
+        margins: { marginType: 'none' },
+        pageSize: page,
+        scaleFactor,
+        preferCSSPageSize: true,
+        landscape
+    });
+
+    const pdfPageCount = countPdfPages(pdfBuffer);
+
+    return {
+        pdfBase64: pdfBuffer.toString('base64'),
+        measured,
+        marginMm,
+        pageSize: page,
+        pdfPageCount,
+        scaleFactor,
+        landscape
+    };
+}
+
+/** Download PDF from the same DOM + print CSS as window.print (fixes scale mismatch). */
+ipcMain.handle('invoice-preview-to-pdf', async (_event, { pageSize, marginPreset, metrics, scale, orientation }) => {
+    try {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return { success: false, error: 'Main window not available' };
+        }
+        const result = await printInvoiceFromWebContents(mainWindow.webContents, {
+            pageSize,
+            marginPreset,
+            metrics,
+            scale,
+            orientation
+        });
+        console.log('[invoice-preview-to-pdf:render-measure]', result.measured, 'pdfPages:', result.pdfPageCount);
+        return {
+            success: true,
+            pdfBase64: result.pdfBase64,
+            metrics: {
+                layout: metrics || null,
+                measured: result.measured,
+                marginMm: result.marginMm,
+                pageSize: result.pageSize,
+                pdfPageCount: result.pdfPageCount,
+                scaleFactor: result.scaleFactor,
+                landscape: result.landscape,
+                source: 'mainWindow.printToPDF'
+            }
+        };
+    } catch (error) {
+        console.error('[invoice-preview-to-pdf]', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('invoice-html-to-pdf', async (_event, { html, pageSize, marginPreset, scale, metrics }) => {
+    try {
+        if (!html || typeof html !== 'string') {
+            return { success: false, error: 'Missing HTML' };
+        }
+        const win = getInvoicePdfWindow();
+        const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+        await win.loadURL(dataUrl);
+        await win.webContents.executeJavaScript(`
+            (async () => {
+                if (document.fonts && document.fonts.ready) await document.fonts.ready;
+                await Promise.all([...document.images].map((img) => new Promise((res) => {
+                    if (img.complete) { res(); return; }
+                    const t = setTimeout(res, 4000);
+                    img.onload = img.onerror = () => { clearTimeout(t); res(); };
+                })));
+            })()
+        `);
+
+        const result = await printInvoiceFromWebContents(win.webContents, {
+            pageSize,
+            marginPreset,
+            metrics,
+            scale,
+            orientation: metrics?.orientation
+        });
+        console.log('[invoice-html-to-pdf:render-measure]', result.measured, 'pdfPages:', result.pdfPageCount);
+
+        return {
+            success: true,
+            pdfBase64: result.pdfBase64,
+            metrics: {
+                layout: metrics || null,
+                measured: result.measured,
+                marginMm: result.marginMm,
+                pageSize: result.pageSize,
+                pdfPageCount: result.pdfPageCount,
+                scaleFactor: result.scaleFactor,
+                source: 'offscreen.printToPDF'
+            }
+        };
+    } catch (error) {
+        console.error('[invoice-html-to-pdf]', error);
+        return { success: false, error: error.message };
+    }
+});
+
+function pdfMediaBoxLandscape(pdfBuffer) {
+    try {
+        const text = pdfBuffer.toString('latin1');
+        const m = text.match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/);
+        if (!m) return null;
+        const w = parseFloat(m[1]);
+        const h = parseFloat(m[2]);
+        if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+        return w > h;
+    } catch (_) {
+        return null;
+    }
+}
+
+ipcMain.handle('print-pdf-buffer', async (_event, { pdfBase64, filename, landscape, pageSize }) => {
+    let printWin;
+    try {
+        if (!pdfBase64) return { success: false, error: 'Missing PDF data' };
+        const tmpDir = app.getPath('temp');
+        const safeName = (filename || `gtes-invoice-${Date.now()}.pdf`).replace(/[^\w.-]+/g, '_');
+        const tmpPath = path.join(tmpDir, safeName);
+        const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+        await fs.writeFile(tmpPath, pdfBuffer);
+
+        const detectedLandscape = pdfMediaBoxLandscape(pdfBuffer);
+        const useLandscape = detectedLandscape != null ? detectedLandscape : !!landscape;
+        const page = pageSize === 'Letter' ? 'Letter' : 'A4';
+        const winW = useLandscape ? 1280 : 900;
+        const winH = useLandscape ? 900 : 1200;
+
+        printWin = new BrowserWindow({
+            show: false,
+            width: winW,
+            height: winH,
+            useContentSize: true,
+            webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+        });
+        printWin.setContentSize(winW, winH);
+
+        await printWin.loadURL(pathToFileURL(tmpPath).href);
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, 8000);
+            printWin.webContents.once('did-finish-load', () => {
+                clearTimeout(timer);
+                setTimeout(resolve, 350);
+            });
+            printWin.webContents.once('did-fail-load', (_e, _code, desc) => {
+                clearTimeout(timer);
+                reject(new Error(desc || 'PDF load failed'));
+            });
+        });
+
+        console.log('[print-pdf-buffer]', {
+            tmpPath,
+            detectedLandscape,
+            useLandscape,
+            page,
+            winW,
+            winH
+        });
+
+        const printResult = await new Promise((resolve) => {
+            printWin.webContents.print(
+                {
+                    silent: false,
+                    printBackground: true,
+                    landscape: useLandscape,
+                    pageSize: page
+                },
+                (success, failureReason) => {
+                    if (!printWin.isDestroyed()) printWin.close();
+                    resolve({ success: !!success, error: failureReason || null });
+                }
+            );
+        });
+        return {
+            ...printResult,
+            path: tmpPath,
+            landscape: useLandscape,
+            pageSize: page,
+            detectedLandscape
+        };
+    } catch (error) {
+        if (printWin && !printWin.isDestroyed()) printWin.close();
+        console.error('[print-pdf-buffer]', error);
+        return { success: false, error: error.message };
+    }
+});
+
 // Save PDF to specific folder (PRD Requirement)
 ipcMain.handle('save-pdf', async (event, { blobBase64, filename, subfolder }) => {
     try {

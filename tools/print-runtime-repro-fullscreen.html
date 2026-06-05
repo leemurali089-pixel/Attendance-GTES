@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GTES print repro — fullscreen PDF modal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css?v=3.0">
+</head>
+<body class="modal-open" style="min-height:100vh;">
+  <div id="mainApp" style="min-height:100vh;">hidden in print</div>
+  <!-- 10 index modals (empty bodies) -->
+  <div class="modal fade" id="passwordModal"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="customerModal"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="inventoryModal"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="exportImportModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="gtesDashKpiModal"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="updateModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade show" id="pdfPreviewModal" style="display:block;padding-right:0;" aria-hidden="false">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen">
+      <div class="modal-content bg-dark text-white border-secondary">
+        <div class="modal-header border-secondary"><h5 class="modal-title">Invoice</h5></div>
+        <div class="modal-body gtes-pdf-preview-body">
+          <div id="pdfPreviewContainer" class="gtes-pdf-preview-sheet">
+            <div class="gtes-pdf-document" style="width:702px;max-width:702px;padding:10px;box-sizing:border-box;background:#fff;color:#000;">
+              <!-- ~900px tall fake invoice -->
+              <div id="invoiceContent" style="height:900px;background:linear-gradient(#fff 0,#eee 100%);">INVOICE BODY</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="upToDateModal"><div class="modal-dialog modal-sm"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="syncReportModal"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="employeeDetailsModal"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+</body>
+</html>

@@ -686,6 +686,18 @@ const VouchersUI = {
                         <button class="btn btn-outline-info btn-sm me-2" onclick="ExportImportHelper.openImportExport('vouchers')">
                             <i class="bi bi-arrow-left-right me-1"></i> Export/Import
                         </button>
+                        <button class="btn btn-primary btn-sm me-2 ${this.currentMode === 'credit-note' ? '' : 'd-none'}" onclick="InvoicesUI.showCreateModal('credit-note-gst')">
+                            <i class="bi bi-plus-lg"></i> New Credit Note
+                        </button>
+                        <button class="btn btn-outline-info btn-sm me-2 ${this.currentMode === 'credit-note' ? '' : 'd-none'}" onclick="InvoicesUI.showCreateModal('credit-note-plain')">
+                            Plain CN
+                        </button>
+                        <button class="btn btn-primary btn-sm me-2 ${this.currentMode === 'debit-note' ? '' : 'd-none'}" onclick="InvoicesUI.showCreateModal('debit-note-gst')">
+                            <i class="bi bi-plus-lg"></i> New Debit Note
+                        </button>
+                        <button class="btn btn-outline-info btn-sm me-2 ${this.currentMode === 'debit-note' ? '' : 'd-none'}" onclick="InvoicesUI.showCreateModal('debit-note-plain')">
+                            Plain DN
+                        </button>
                         <button class="btn btn-primary btn-sm me-2 ${this.currentMode === 'credit-note' || this.currentMode === 'debit-note' ? 'd-none' : ''}" onclick="VouchersUI.showCreateModal('${this.currentMode === 'purchase' ? 'payment' : 'receipt'}')">
                             <i class="bi bi-plus-lg"></i> New ${this.currentMode === 'purchase' ? 'Purchase' : 'Voucher'}
                         </button>
@@ -1910,6 +1922,19 @@ const VouchersUI = {
                     dateField.value = tx.date.toISOString().split('T')[0];
                 }
 
+                // Voucher No: restore saved session id or advance from last custom serial in this import
+                const idField = document.getElementById('voucherIdField');
+                if (idField) {
+                    if (tx.mappedVoucher?.id) {
+                        idField.value = tx.mappedVoucher.id;
+                    } else {
+                        const dateField = form.querySelector('[name="date"]');
+                        const d = dateField?.value ? new Date(dateField.value) : (tx.date || new Date());
+                        const vchType = tx.type === 'debit' ? 'payment' : 'receipt';
+                        idField.value = VoucherManager.getNextVoucherNumber(vchType, d, VouchersUI.currentMode);
+                    }
+                }
+
                 // Restore persistent fields if already mapped in session
                 if (tx.mappedVoucher) {
                     const mv = tx.mappedVoucher;
@@ -3093,7 +3118,10 @@ const VouchersUI = {
                     
                     // Record this serial locally to ensure immediate auto-increment correctness for the next row
                     if (typeof VoucherManager.recordUsedSerial === 'function') {
-                        VoucherManager.recordUsedSerial(data.type, data.id);
+                        VoucherManager.recordUsedSerial(data.type, data.id, this.currentMode);
+                    }
+                    if (typeof VoucherManager.invalidateAllocationsCache === 'function') {
+                        VoucherManager.invalidateAllocationsCache();
                     }
 
                     // --- Learning Mapping ---
@@ -3121,7 +3149,10 @@ const VouchersUI = {
 
             // Record this serial locally to ensure immediate auto-increment correctness for the next row
             if (typeof VoucherManager.recordUsedSerial === 'function') {
-                VoucherManager.recordUsedSerial(data.type, data.id);
+                VoucherManager.recordUsedSerial(data.type, data.id, this.currentMode);
+            }
+            if (typeof VoucherManager.invalidateAllocationsCache === 'function') {
+                VoucherManager.invalidateAllocationsCache();
             }
 
             const modalEl = document.getElementById('createVoucherModal');
@@ -3456,11 +3487,14 @@ const VouchersUI = {
         const includeQr = !options.skipQr && upiId;
         const qrUrl = includeQr ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(company.name)}&am=${amt}&cu=INR`)}` : '';
 
-        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
+        const pdfW = (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.getPdfPrintableWidthPx === 'function')
+            ? DeliveryUI.getPdfPrintableWidthPx()
+            : ((typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 702);
         const element = document.createElement('div');
         element.className = 'gtes-pdf-document';
         element.style.width = `${pdfW}px`;
-        element.style.padding = '14px';
+        element.style.maxWidth = `${pdfW}px`;
+        element.style.padding = '10px';
         element.style.background = 'white';
         element.style.color = '#000';
         element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
@@ -3480,7 +3514,7 @@ const VouchersUI = {
         const narr = (voucher.remarks || voucher.narration || '').trim();
 
         element.innerHTML = `
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
+            <table style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
                 <tr>
                     <td style="width: 62%; vertical-align: top; padding: 0 12px 12px 0;">
                         <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${esc(company.name)}</h1>
@@ -3502,7 +3536,7 @@ const VouchersUI = {
                 </tr>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
                         <div style="border: 1px solid #000; padding: 10px;">
@@ -3523,7 +3557,7 @@ const VouchersUI = {
                 </tr>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
                         ${narr ? `
@@ -3574,17 +3608,16 @@ const VouchersUI = {
 
             ${this.renderLinkedDocuments(voucher, settlement)}
 
-            <table style="width: 100%; margin-top: 36px; border-collapse: collapse;"><tr><td style="text-align: right;">
-                <div style="display: inline-block; text-align: right; width: 280px; max-width: 100%;">
-                    <div style="font-size: 11px; margin-bottom: 44px;">For <strong style="font-weight: 800;">${esc(company.name)}</strong></div>
-                    <div style="border-top: 1px solid #000; padding-top: 8px; text-align: center;">
-                        <span style="font-weight: bold; font-size: 12px; text-transform: uppercase;">Authorized Signatory</span>
+            <div class="gtes-voucher-signature-footer" style="margin-top: 16px;">
+                <div class="gtes-pdf-signature-block" style="text-align: right;">
+                    <div style="font-size: 11px; margin-bottom: 18px;">For <strong style="font-weight: 800;">${esc(company.name)}</strong></div>
+                    <div style="display: inline-block; min-width: 200px; max-width: 100%; border-top: 1px solid #000; padding-top: 6px; text-align: center;">
+                        <span style="font-weight: bold; font-size: 11px; text-transform: uppercase;">Authorized Signatory</span>
                     </div>
                 </div>
-            </td></tr></table>
-
-            <div style="margin-top: 24px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #e5e7eb; padding-top: 10px;">
-                This is a computer generated document and does not require a physical signature.
+                <div style="margin-top: 8px; text-align: center; font-size: 9px; color: #94a3b8; line-height: 1.35;">
+                    This is a computer generated document and does not require a physical signature.
+                </div>
             </div>
         `;
         return element;
@@ -3710,7 +3743,7 @@ const VouchersUI = {
         const thLinked = 'padding: 8px; text-align: left; border: 1px solid #64748b; font-size: 10px; text-transform: uppercase; color: #fff;';
 
         return `
-            <div class="gtes-pdf-break-safe" style="margin-top: 24px;">
+            <div style="margin-top: 16px;">
                 <h4 style="font-size: 11px; text-transform: uppercase; color: #000; margin-bottom: 8px; font-weight: bold; letter-spacing: 0.02em;">Remittance details</h4>
                 <table style="width: 100%; border-collapse: collapse; border: 1px solid #000;">
                     <thead>
@@ -3778,12 +3811,19 @@ const VouchersUI = {
         const title = document.getElementById('pdfPreviewTitle');
         const downloadBtn = document.getElementById('pdfDownloadBtn');
 
-        container.innerHTML = '';
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.deactivateEngineMode) {
+            DocumentEngine.deactivateEngineMode();
+        }
+        const legacyHost = typeof DocumentPreviewHost !== 'undefined'
+            ? DocumentPreviewHost.prepareLegacy()
+            : container;
+        if (!legacyHost) return;
+
         container.dataset.gtesPreviewKind = 'voucher';
         container.dataset.gtesPreviewId = String(voucherId);
         element.style.margin = '0 auto';
         element.style.boxShadow = 'none';
-        container.appendChild(element);
+        legacyHost.appendChild(element);
         title.textContent = 'Voucher Preview';
 
         downloadBtn.onclick = () => {

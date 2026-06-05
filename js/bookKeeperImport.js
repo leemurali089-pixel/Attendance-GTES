@@ -6,7 +6,7 @@
 
 const BookKeeperImport = {
     /** Bump with index.html ?v= when changing import/display logic (helps verify Electron loaded this file). */
-    BUILD_VERSION: '3.8',
+    BUILD_VERSION: '3.9',
 
     /**
      * Receipt vouchers from Book Keeper do not carry hasGst. Derive it from linked / allocated
@@ -708,6 +708,48 @@ const BookKeeperImport = {
             }
         }
         return '';
+    },
+
+    _pickSaleSqlColumn(voucherTable, aliases, alias) {
+        for (const col of aliases) {
+            if (this.hasColumn(voucherTable, col)) {
+                return `TRIM(CAST(v.${col} AS TEXT)) as ${alias}`;
+            }
+        }
+        return `'' as ${alias}`;
+    },
+
+    buildSaleDispatchSelect(voucherTable) {
+        return [
+            this._pickSaleSqlColumn(voucherTable, ['dispatch_doc_no', 'dispatch_document_no', 'doc_no', 'dispatch_no'], 'bk_dispatch_doc'),
+            this._pickSaleSqlColumn(voucherTable, ['transport', 'transport_name', 'dispatch_through', 'transporter', 'via'], 'bk_dispatch_through'),
+            this._pickSaleSqlColumn(voucherTable, ['vehicle_no', 'veh_no', 'vehicle_number', 'vehicle'], 'bk_vehicle_no'),
+            this._pickSaleSqlColumn(voucherTable, ['destination', 'dest_place', 'place_of_supply', 'ship_to_place', 'delivery_place'], 'bk_destination'),
+            this._pickSaleSqlColumn(voucherTable, ['eway_bill_no', 'eway_bill', 'e_way_bill', 'e_way_bill_no', 'ewaybill', 'eway_no'], 'bk_eway_bill'),
+            this._pickSaleSqlColumn(voucherTable, ['lr_no', 'lrno', 'lr_number', 'tracking_no'], 'bk_lr_no')
+        ].join(', ');
+    },
+
+    mapSaleDispatchFields(sale) {
+        if (!sale) return null;
+        const docNo = this.getStr(sale, ['bk_dispatch_doc', 'dispatch_doc_no', 'dispatch_document_no', 'doc_no']);
+        const through = this.getStr(sale, ['bk_dispatch_through', 'transport', 'transport_name', 'dispatch_through', 'transporter', 'via']);
+        const vehicleNo = this.getStr(sale, ['bk_vehicle_no', 'vehicle_no', 'veh_no', 'vehicle_number', 'vehicle']);
+        const destination = this.getStr(sale, ['bk_destination', 'destination', 'dest_place', 'place_of_supply', 'ship_to_place']);
+        const eway = this.getStr(sale, ['bk_eway_bill', 'eway_bill_no', 'eway_bill', 'e_way_bill', 'e_way_bill_no', 'ewaybill', 'eway_no']);
+        const lrNo = this.getStr(sale, ['bk_lr_no', 'lr_no', 'lrno', 'lr_number', 'tracking_no']);
+        const dispatchThrough = through || vehicleNo;
+        const ewayBillNo = eway || lrNo;
+        if (!docNo && !dispatchThrough && !destination && !ewayBillNo) return null;
+        return {
+            documentNo: docNo,
+            via: dispatchThrough,
+            vehicleNo,
+            destination,
+            ewayBillNo,
+            lrNo: lrNo || ewayBillNo,
+            date: this.getStr(sale, ['dispatch_date', 'lr_date', 'transport_date'])
+        };
     },
 
     normalizeName(name) {
@@ -1976,7 +2018,8 @@ const BookKeeperImport = {
         const saleAuxSelect = [
             hasVRefNo ? `TRIM(CAST(v.ref_no AS TEXT)) as bk_raw_ref_no` : `'' as bk_raw_ref_no`,
             hasSaleReferenceNo ? `TRIM(CAST(v.reference_no AS TEXT)) as bk_raw_reference_no` : `'' as bk_raw_reference_no`,
-            hasSalePaymentRef ? `TRIM(CAST(v.payment_reference AS TEXT)) as bk_raw_payment_ref` : `'' as bk_raw_payment_ref`
+            hasSalePaymentRef ? `TRIM(CAST(v.payment_reference AS TEXT)) as bk_raw_payment_ref` : `'' as bk_raw_payment_ref`,
+            this.buildSaleDispatchSelect(voucherTable)
         ].join(', ');
         const saleRefSelect = `, ${saleAuxSelect}`;
 
@@ -2622,6 +2665,17 @@ const BookKeeperImport = {
             }
             invoice.billType = 'gst';
             invoice.hasGst = true;
+
+            const bkDispatch = this.mapSaleDispatchFields(sale);
+            if (bkDispatch) {
+                invoice.dispatchDetails = bkDispatch;
+                invoice.dispatchDocumentNo = bkDispatch.documentNo;
+                invoice.dispatchThrough = bkDispatch.via;
+                invoice.destination = bkDispatch.destination;
+                invoice.ewayBillNo = bkDispatch.ewayBillNo;
+                if (bkDispatch.vehicleNo) invoice.vehicleNo = bkDispatch.vehicleNo;
+                if (bkDispatch.lrNo) invoice.lrNo = bkDispatch.lrNo;
+            }
 
             if (invoice.isCreditNote && typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef) {
                 const rr = String(VoucherManager.resolveCreditNoteSalesRef(invoice) || '').trim();

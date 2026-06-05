@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GTES print runtime repro</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css?v=3.0">
+</head>
+<body>
+  <div id="mainApp" style="min-height:100vh;padding:2rem;">
+    <p>Main app shell (hidden in print)</p>
+  </div>
+
+  <!-- Mirror index.html: 10 static modals -->
+  <div class="modal fade" id="passwordModal"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body">password</div></div></div></div>
+  <div class="modal fade" id="customerModal"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-body">customer</div></div></div></div>
+  <div class="modal fade" id="inventoryModal"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-body">inventory</div></div></div></div>
+  <div class="modal fade" id="exportImportModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">export</div></div></div></div>
+  <div class="modal fade" id="gtesDashKpiModal"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-body">kpi</div></div></div></div>
+  <div class="modal fade" id="updateModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">update</div></div></div></div>
+  <div class="modal fade show" id="pdfPreviewModal" style="display:block;" aria-hidden="false">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen">
+      <div class="modal-content bg-dark text-white border-secondary">
+        <div class="modal-header border-secondary no-print-target"><h5>Preview</h5></div>
+        <div class="modal-body gtes-pdf-preview-body">
+          <div id="pdfPreviewContainer" class="gtes-pdf-preview-sheet">
+            <div class="gtes-pdf-document" style="width:702px;padding:10px;box-sizing:border-box;background:#fff;color:#000;">
+              <table style="width:100%;"><tr><td><strong>GTES INVOICE REPRO</strong></td><td style="text-align:right;">TAX INVOICE</td></tr></table>
+              <p>Short invoice body for single-page test.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="upToDateModal"><div class="modal-dialog modal-sm"><div class="modal-content"><div class="modal-body">uptodate</div></div></div></div>
+  <div class="modal fade" id="syncReportModal"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body">sync</div></div></div></div>
+  <div class="modal fade" id="employeeDetailsModal"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-body">employee</div></div></div></div>
+
+  <!-- Simulated post-navigation dynamic modals (often left in DOM) -->
+  <div class="modal fade" id="challanViewModal"><div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+  <div class="modal fade" id="createInvoiceModal"><div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-body"></div></div></div></div>
+
+  <script>
+    window.__printMetrics = () => {
+      const mq = window.matchMedia('print');
+      const nodes = [];
+      document.querySelectorAll('*').forEach(el => {
+        const s = getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden') return;
+        const r = el.getBoundingClientRect();
+        if (r.height < 1 && r.width < 1) return;
+        nodes.push({
+          tag: el.tagName,
+          id: el.id || '',
+          cls: (el.className && String(el.className).slice(0, 80)) || '',
+          top: Math.round(r.top),
+          h: Math.round(r.height),
+          pb: s.pageBreakAfter,
+          pbi: s.pageBreakInside,
+          pbb: s.pageBreakBefore,
+          ba: s.breakAfter,
+          bi: s.breakInside,
+          bb: s.breakBefore,
+          minH: s.minHeight,
+          disp: s.display
+        });
+      });
+      return {
+        modalCount: document.querySelectorAll('.modal').length,
+        bodyChildren: document.body.children.length,
+        innerHtmlLen: document.body.innerHTML.length,
+        nodeCount: document.querySelectorAll('*').length,
+        visibleBlocks: nodes.filter(n => n.h > 50).sort((a, b) => a.top - b.top)
+      };
+    };
+  </script>
+</body>
+</html>

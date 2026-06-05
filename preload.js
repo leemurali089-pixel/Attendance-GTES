@@ -93,6 +93,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // PDF operations
     savePdf: (data) => ipcRenderer.invoke('save-pdf', data),
+    invoicePreviewToPdf: (opts) => ipcRenderer.invoke('invoice-preview-to-pdf', opts),
+    invoiceHtmlToPdf: (opts) => ipcRenderer.invoke('invoice-html-to-pdf', opts),
+    printPdfBuffer: (opts) => ipcRenderer.invoke('print-pdf-buffer', opts),
 
     // Deep Sync operations (New in v1.1.5)
     syncToCloud: (key, data) => ipcRenderer.invoke('sync-to-cloud', key, data),

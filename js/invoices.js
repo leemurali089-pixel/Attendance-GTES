@@ -72,6 +72,43 @@ const InvoiceManager = {
         return `${prefix}-${next.toString().padStart(4, '0')}`;
     },
 
+    _fyShortLabel(fyKey) {
+        const m = String(fyKey || '').match(/^(\d{4})-(\d{2})$/);
+        if (!m) return '26-27';
+        return `${m[1].slice(-2)}-${m[2]}`;
+    },
+
+    generateCreditNoteNumber() {
+        const invoices = DataManager.getData('invoices') || [];
+        const fy = (typeof DataManager !== 'undefined' && DataManager.getFinancialYear)
+            ? DataManager.getFinancialYear(new Date())
+            : '2026-27';
+        const fyTag = this._fyShortLabel(fy);
+        let maxNum = 0;
+        invoices.forEach((inv) => {
+            const no = String(inv.invoiceNo || inv.id || '');
+            const m = no.match(new RegExp(`GTES/${fyTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/CR(\\d+)`, 'i'));
+            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+            const m2 = no.match(/\/CR(\d+)(\b|\/|$)/i);
+            if (m2) maxNum = Math.max(maxNum, parseInt(m2[1], 10));
+        });
+        return `GTES/${fyTag}/CR${String(maxNum + 1).padStart(2, '0')}`;
+    },
+
+    generateDebitNoteNumber() {
+        const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+        let maxNum = 0;
+        expenses.forEach((exp) => {
+            const t = String(exp.type || '').toLowerCase();
+            const isDn = exp?.isDebitNote === true || (t.includes('debit') && t.includes('note'));
+            if (!isDn) return;
+            const b = String(exp.billNo || exp.id || '');
+            const m = b.match(/^PRR(\d+)$/i);
+            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+        });
+        return `PRR${maxNum + 1}`;
+    },
+
     /**
      * Create new invoice
      */
@@ -134,6 +171,11 @@ const InvoiceManager = {
             type: normalizedType,
             billType: normalizedType === 'with-bill' ? 'gst' : 'plain',
             challanId: invoiceData.challanId || null,
+            sourceChallanId: invoiceData.sourceChallanId || null,
+            sourceChallanIds: Array.isArray(invoiceData.sourceChallanIds) ? invoiceData.sourceChallanIds : null,
+            sourceDcInvoiceId: invoiceData.sourceDcInvoiceId || null,
+            sourceDcInvoiceIds: Array.isArray(invoiceData.sourceDcInvoiceIds) ? invoiceData.sourceDcInvoiceIds : null,
+            skipAutoChallan: invoiceData.skipAutoChallan === true,
             jobCardId: invoiceData.jobCardId || null,
             date: invoiceData.date || new Date().toISOString().split('T')[0],
             customerId: invoiceData.customerId,
@@ -253,10 +295,12 @@ const InvoiceManager = {
     isGSTType(type) {
         if (!type) return true; // Default to GST for safety if unknown
         const t = (type || '').toString().toLowerCase();
-        if (t.includes('non-gst') || t === 'without-bill' || t === 'non-gst-invoice' || t === 'purchase-non-gst') {
+        if (t.includes('non-gst') || t === 'without-bill' || t === 'non-gst-invoice' || t === 'purchase-non-gst'
+            || t === 'credit-note' || t === 'credit-note-plain' || t === 'debit-note' || t === 'debit-note-plain') {
             return false;
         }
-        return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst';
+        return t === 'sales-gst' || t === 'gst-invoice' || t === 'with-bill' || t === 'purchase-gst'
+            || t === 'credit-note-gst' || t === 'debit-note-gst';
     },
 
     /** Sum of CGST/SGST/IGST on header, nested gst, and line items. */
@@ -383,6 +427,18 @@ const InvoiceManager = {
         const no = (inv.invoiceNo || inv.id || '').toString().trim();
         if (/^DC\d+$/i.test(no)) return true;
         return /\bDC\d+\b/i.test(no);
+    },
+
+    /** Tax invoice created from DC/challan — stock already deducted; do not auto-create another challan. */
+    shouldSkipAutoChallanSync(inv) {
+        if (!inv) return true;
+        if (inv.skipAutoChallan) return true;
+        if (inv.challanId) return true;
+        if (inv.sourceChallanId) return true;
+        if (Array.isArray(inv.sourceChallanIds) && inv.sourceChallanIds.length) return true;
+        if (inv.sourceDcInvoiceId) return true;
+        if (Array.isArray(inv.sourceDcInvoiceIds) && inv.sourceDcInvoiceIds.length) return true;
+        return false;
     },
 
     /**

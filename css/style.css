@@ -2907,8 +2907,16 @@ footer p {
     color: var(--text-secondary) !important;
 }
 
+/* Invoice @page / print metrics: js/invoicePreviewLayout.js (injected #gtes-invoice-layout-print) */
+
+@page {
+    size: A4 portrait;
+    margin: 8mm;
+}
+
 /* Print Styles - Ensure only the document area is printed */
 @media print {
+
     /* Critical: Hide EVERYTHING first */
     body > *:not(.modal) {
         display: none !important;
@@ -2918,12 +2926,24 @@ footer p {
         display: none !important;
     }
 
-    /* Modal Reset */
+    /* Only the modal targeted by DeliveryUI.nativePrint() (see data-gtes-print-target).
+       Do NOT use .modal { display:block } — hidden session modals (createInvoiceModal, challanViewModal, …)
+       stay in the DOM and each become a full printed page (verified: 5 pages → 1 page in tools/measure-print-layout.mjs). */
     .modal {
+        display: none !important;
         position: static !important;
-        display: block !important;
         background: white !important;
         overflow: visible !important;
+    }
+
+    body[data-gtes-print-target="pdfPreviewModal"] #pdfPreviewModal,
+    body[data-gtes-print-target="challanViewModal"] #challanViewModal,
+    body[data-gtes-print-target="jobCardViewModal"] #jobCardViewModal {
+        display: block !important;
+    }
+
+    body:not([data-gtes-print-target]) .modal.show {
+        display: block !important;
     }
     
     .modal-dialog {
@@ -2941,12 +2961,15 @@ footer p {
     /* The target area - force it to the top */
     #invoicePrintArea, 
     #purchasePrintArea, 
-    #challanPrintArea {
+    #challanPrintArea,
+    #jobCardPrintArea {
         display: block !important;
         width: 100% !important;
         max-width: 100% !important;
         margin: 0 auto !important;
-        padding: 5mm !important;
+        padding: 4mm !important;
+        min-height: 0 !important;
+        height: auto !important;
         border: none !important;
         box-shadow: none !important;
         background: white !important;
@@ -2973,6 +2996,8 @@ footer p {
         color: black !important;
         margin: 0 !important;
         padding: 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
     }
 
     /* Table Fixes */
@@ -2992,6 +3017,8 @@ footer p {
         width: 100% !important;
         max-width: 100% !important;
     }
+
+    /* Invoice print layout: #gtes-invoice-layout-print from invoicePreviewLayout.js */
 }
 
 /* PDF preview / html2canvas: table-based sections avoid flex–grid overlap (“collaged” PDFs) */
@@ -3014,9 +3041,10 @@ footer p {
     box-sizing: border-box;
 }
 
-.gtes-pdf-break-safe {
-    page-break-inside: avoid;
-    break-inside: avoid;
+/* Signature sits under totals in-flow; do not use page-break-inside:avoid (html2pdf orphans block). */
+.gtes-pdf-signature-block {
+    page-break-inside: auto;
+    break-inside: auto;
 }
 
 #invoicePrintArea,
@@ -3039,10 +3067,17 @@ footer p {
     overflow-y: auto !important;
 }
 
-#pdfPreviewModal #pdfPreviewContainer.gtes-pdf-preview-sheet {
+#pdfPreviewModal.gtes-invoice-html-mode #pdfPreviewContainer.gtes-pdf-preview-sheet {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+#pdfPreviewModal #pdfPreviewContainer.gtes-pdf-preview-sheet:not(.gtes-invoice-paginated-preview) {
     background: #fff !important;
     margin: 8px auto 16px !important;
     padding: 0 !important;
+    border: 1px solid #111 !important;
+    box-sizing: border-box !important;
     box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
     transform-origin: top center;
     max-width: calc(100% - 16px);
@@ -3057,18 +3092,235 @@ footer p {
 
 #invoicePrintArea .gtes-pdf-document,
 #purchasePrintArea .gtes-pdf-document,
-#pdfPreviewContainer .gtes-pdf-document {
+#pdfPreviewContainer .gtes-pdf-document,
+#pdfPreviewContainer .gtes-invoice-print-root {
     margin-left: auto;
     margin-right: auto;
     text-align: left;
-    width: 760px !important;
-    min-width: 760px !important;
-    max-width: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+    overflow: visible !important;
 }
 
 #pdfPreviewContainer {
     overflow-x: auto;
     max-width: 100%;
+}
+
+/* Invoice HTML preview — Chrome / Tally / Zoho style paginated A4 workspace */
+#pdfPreviewModal.gtes-invoice-html-mode .gtes-pdf-preview-body {
+    background: #525659 !important;
+    padding: 0 !important;
+    justify-content: flex-start;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+
+#gtesInvoicePreviewNav.gtes-invoice-preview-nav {
+    background: #3d4043;
+    color: #e8eaed;
+}
+
+#pdfPreviewModal.gtes-invoice-html-mode #pdfPreviewContainer.gtes-invoice-paginated-preview {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 24px 16px 32px !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #525659 !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.gtes-invoice-measure-host {
+    position: absolute;
+    left: -99999px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+    height: 0;
+}
+
+.gtes-invoice-print-source {
+    position: absolute;
+    left: -99999px;
+    top: 0;
+    width: 794px;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.gtes-invoice-pages-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 28px;
+    width: 100%;
+}
+
+.gtes-a4-page-frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    scroll-margin-top: 12px;
+}
+
+.gtes-a4-page-frame.gtes-a4-page-frame-active .gtes-a4-page-sheet {
+    box-shadow: 0 4px 20px rgba(66, 133, 244, 0.35), 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.gtes-a4-page-separator-label {
+    width: 100%;
+    max-width: 820px;
+    margin: 0 auto 10px;
+    padding: 0 4px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #e8eaed;
+    text-align: left;
+}
+
+.gtes-a4-page-sheet {
+    position: relative;
+    background: #fff;
+    border: 1px solid #9aa0a6;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.25);
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.gtes-a4-printable-guide {
+    position: absolute;
+    border: 1px dashed rgba(66, 133, 244, 0.55);
+    pointer-events: none;
+    z-index: 2;
+    box-sizing: border-box;
+}
+
+.gtes-a4-page-viewport {
+    position: absolute;
+    overflow: hidden;
+    z-index: 1;
+    background: #fff;
+}
+
+.gtes-a4-page-content-strip {
+    position: relative;
+    width: 100%;
+}
+
+.gtes-a4-page-content-scaled {
+    width: 100%;
+}
+
+#pdfPreviewModal.gtes-invoice-html-mode #pdfPreviewContainer .gtes-invoice-print-root {
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #fff;
+    color: #000;
+}
+
+body.gtes-invoice-pdf-capture {
+    background: #fff !important;
+}
+
+body.gtes-invoice-pdf-capture #pdfPreviewModal,
+body.gtes-invoice-pdf-capture #pdfPreviewModal .modal-content,
+body.gtes-invoice-pdf-capture #pdfPreviewModal .modal-dialog,
+body.gtes-invoice-pdf-capture #pdfPreviewModal .modal-body,
+body.gtes-invoice-pdf-capture #pdfPreviewContainer,
+body.gtes-invoice-pdf-capture #pdfPreviewContainer.gtes-pdf-preview-sheet {
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+body.gtes-invoice-pdf-capture #gtesInvoicePreviewNav,
+body.gtes-invoice-pdf-capture #gtesInvoicePagesStage,
+body.gtes-invoice-pdf-capture #gtesInvoiceMeasureHost,
+body.gtes-invoice-pdf-capture #pdfPreviewModal .modal-header {
+    display: none !important;
+}
+
+body.gtes-invoice-pdf-capture #gtesInvoicePrintSource {
+    position: static !important;
+    left: auto !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    pointer-events: auto !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+@media print {
+    body[data-gtes-print-kind="invoice"] #pdfPreviewModal,
+    body[data-gtes-print-kind="invoice"] #pdfPreviewModal .modal-content,
+    body[data-gtes-print-kind="invoice"] #pdfPreviewModal .modal-dialog,
+    body[data-gtes-print-kind="invoice"] #pdfPreviewContainer.gtes-pdf-preview-sheet {
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    body[data-gtes-print-kind="invoice"] #gtesInvoicePagesStage,
+    body[data-gtes-print-kind="invoice"] #gtesInvoiceMeasureHost,
+    body[data-gtes-print-kind="invoice"] #gtesInvoicePreviewNav,
+    body[data-gtes-print-kind="invoice"] .gtes-a4-page-separator-label,
+    body[data-gtes-print-kind="invoice"] .gtes-a4-page-sheet,
+    body[data-gtes-print-kind="invoice"] .gtes-a4-printable-guide {
+        display: none !important;
+    }
+
+    body[data-gtes-print-kind="invoice"] #gtesInvoicePrintSource {
+        position: static !important;
+        left: auto !important;
+        visibility: visible !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        pointer-events: auto !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    body[data-gtes-print-kind="invoice"] #pdfPreviewContainer.gtes-invoice-paginated-preview,
+    body[data-gtes-print-kind="invoice"] #pdfPreviewContainer .gtes-invoice-print-root,
+    body[data-gtes-print-kind="invoice"] #pdfPreviewContainer .gtes-pdf-document {
+        background: #fff !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }
+}
+
+#gtesInvoicePdfSettingsBar.d-none {
+    display: none !important;
+}
+
+#gtesInvoicePdfSettingsBar.d-flex {
+    display: flex !important;
 }
 
 /* =========================================================================

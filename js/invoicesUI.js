@@ -120,11 +120,15 @@ const InvoicesUI = {
         dl.innerHTML = this._buildInvPartyDatalistOptionsHtml(isSales, customers, query, null);
     },
 
-    _buildLedgerAccountSelectOptions(isPurchase) {
+    _buildLedgerAccountSelectOptions(isPurchase, isCreditNote = false, isDebitNote = false) {
         const esc = (str) => String(str || '').replace(/"/g, '&quot;');
-        const presets = isPurchase
-            ? ['Purchase A/C', 'Direct Expenses', 'Indirect Expenses', 'Import Purchase', 'Local Purchase @ 18%']
-            : ['Sales A/C', 'Direct Income', 'Indirect Income', 'Service Income'];
+        const presets = isCreditNote
+            ? ['Sales Return', 'Sales A/C', 'Direct Income', 'Indirect Income']
+            : isDebitNote
+                ? ['Purchases Return', 'Purchase A/C', 'Direct Expenses', 'Indirect Expenses']
+                : isPurchase
+                    ? ['Purchase A/C', 'Direct Expenses', 'Indirect Expenses', 'Import Purchase', 'Local Purchase @ 18%']
+                    : ['Sales A/C', 'Direct Income', 'Indirect Income', 'Service Income'];
         const gtes = DataManager.getData(DataManager.KEYS.ACCOUNTS) || DataManager.getData('gtes_accounts') || [];
         const cust = DataManager.getData('customers') || [];
         const extra = cust.filter((c) => {
@@ -1239,18 +1243,27 @@ const InvoicesUI = {
 
     showCreateModal(type = 'sales-gst') {
         const UI = InvoicesUI;
-        const isPurchase = String(type).includes('purchase');
-        const isSales = !isPurchase;
+        const isCreditNote = String(type).startsWith('credit-note');
+        const isDebitNote = String(type).startsWith('debit-note');
+        const isPurchase = String(type).includes('purchase') || isDebitNote;
+        const isSales = !isPurchase || isCreditNote;
         UI._createInvoicePartyIsSales = isSales;
-        const isGST = type === 'sales-gst' || type === 'purchase-gst';
-        const title = isPurchase
-            ? (isGST ? 'Purchase (GST)' : 'Purchase (Non-GST)')
-            : (isGST ? 'Tax Invoice (GST)' : 'Plain Invoice (Non-GST)');
+        UI._createInvoiceIsReturnNote = isCreditNote || isDebitNote;
+        UI._createInvoiceReturnKind = isCreditNote ? 'sales' : (isDebitNote ? 'purchase' : '');
+        const isGST = type === 'sales-gst' || type === 'purchase-gst'
+            || type === 'credit-note-gst' || type === 'debit-note-gst';
+        const title = isCreditNote
+            ? (isGST ? 'Create Credit Note (GST)' : 'Create Credit Note (Non-GST)')
+            : isDebitNote
+                ? (isGST ? 'Create Debit Note (GST)' : 'Create Debit Note (Non-GST)')
+                : isPurchase
+                    ? (isGST ? 'Purchase (GST)' : 'Purchase (Non-GST)')
+                    : (isGST ? 'Tax Invoice (GST)' : 'Plain Invoice (Non-GST)');
         const partyLabel = isSales ? 'Customer/Cash' : 'Supplier/Cash';
-        const accountLabel = isSales ? 'Sales Account' : 'Purchase Account';
-        const showLedgerAccount = isPurchase || isGST;
-        const docNoLabel = isPurchase ? 'Purchase No' : 'Invoice #';
-        const submitBtnText = isPurchase ? 'CREATE PURCHASE' : 'CREATE INVOICE';
+        const accountLabel = isCreditNote ? 'Debit Account' : (isDebitNote ? 'Credit Account' : (isSales ? 'Sales Account' : 'Purchase Account'));
+        const showLedgerAccount = isPurchase || isGST || isCreditNote || isDebitNote;
+        const docNoLabel = isCreditNote ? 'Credit Note No' : (isDebitNote ? 'Debit Note No' : (isPurchase ? 'Purchase No' : 'Invoice #'));
+        const submitBtnText = isCreditNote ? 'CREATE CREDIT NOTE' : (isDebitNote ? 'CREATE DEBIT NOTE' : (isPurchase ? 'CREATE PURCHASE' : 'CREATE INVOICE'));
 
         const customers = CustomerManager ? CustomerManager.getAllCustomers() : (DataManager.getData('customers') || []);
         const inventory = InventoryManager ? InventoryManager.getAllMaterials() : (DataManager.getData('inventory') || []);
@@ -1265,7 +1278,7 @@ const InvoicesUI = {
         const esc = (str) => String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
         const ledgerSelOpts = typeof UI._buildLedgerAccountSelectOptions === 'function'
-            ? UI._buildLedgerAccountSelectOptions(isPurchase)
+            ? UI._buildLedgerAccountSelectOptions(isPurchase, isCreditNote, isDebitNote)
             : '<option value="">— Select ledger —</option>';
         const otherChargesOpts = typeof UI._buildOtherChargesAccountSelectOptions === 'function'
             ? UI._buildOtherChargesAccountSelectOptions('')
@@ -1295,14 +1308,23 @@ const InvoicesUI = {
         const allItemOptions = inventoryOptions + serviceOptions;
 
         // Generate next document number
-        const nextNo = isPurchase
-            ? (InvoiceManager && InvoiceManager.generatePurchaseBillNumber
-                ? InvoiceManager.generatePurchaseBillNumber(isGST)
-                : (isGST ? 'PUR-WB-0001' : 'PUR-NB-0001'))
-            : (InvoiceManager ? InvoiceManager.generateInvoiceNumber(isGST ? 'with-bill' : 'without-bill') : '00001');
-        const dcLabel = isPurchase
+        const nextNo = isCreditNote
+            ? (InvoiceManager && InvoiceManager.generateCreditNoteNumber
+                ? InvoiceManager.generateCreditNoteNumber()
+                : 'GTES/26-27/CR01')
+            : isDebitNote
+                ? (InvoiceManager && InvoiceManager.generateDebitNoteNumber
+                    ? InvoiceManager.generateDebitNoteNumber()
+                    : 'PRR1')
+                : isPurchase
+                    ? (InvoiceManager && InvoiceManager.generatePurchaseBillNumber
+                        ? InvoiceManager.generatePurchaseBillNumber(isGST)
+                        : (isGST ? 'PUR-WB-0001' : 'PUR-NB-0001'))
+                    : (InvoiceManager ? InvoiceManager.generateInvoiceNumber(isGST ? 'with-bill' : 'without-bill') : '00001');
+        const dcLabel = isPurchase || isDebitNote
             ? 'Supplier Invoice No'
             : (isSales ? 'Customer DC / Ref No' : 'Supplier Bill No / Ref');
+        const setOffBtnLabel = isDebitNote ? 'Set off against purchase' : 'Set off against invoice';
         const today = new Date().toISOString().split('T')[0];
         const posOpts = typeof UI._getPlaceOfSupplyOptionsHtml === 'function'
             ? UI._getPlaceOfSupplyOptionsHtml(settings.defaultPlaceOfSupply || 'Tamil Nadu')
@@ -1524,8 +1546,9 @@ const InvoicesUI = {
                                     <table class="table table-dark table-hover table-sm mb-0" id="invoiceItemsTable">
                                         <thead>
                                             <tr class="bg-black">
-                                                <th class="ps-3 py-2" width="${isGST ? '25%' : '30%'}">ITEM</th>
-                                                <th width="${isGST ? '20%' : '25%'}">DESCRIPTION</th>
+                                                <th class="ps-3 py-2" width="${isGST ? '22%' : '26%'}">ITEM</th>
+                                                <th width="${isGST ? '18%' : '22%'}">DESCRIPTION</th>
+                                                <th id="invReturnableCol" class="d-none" width="10%">RETURNABLE</th>
                                                 ${isGST ? '<th width="10%">HSN</th>' : ''}
                                                 <th width="8%">QTY</th>
                                                 <th width="8%">UNIT</th>
@@ -1541,6 +1564,24 @@ const InvoicesUI = {
                                     </table>
                                 </div>
                                 </div>
+
+                                ${(isCreditNote || isDebitNote) ? `
+                                <div class="row g-2 mb-3 p-3 rounded border border-info" id="setOffSection" style="background:rgba(13,202,240,0.06);">
+                                    <div class="col-md-12 d-flex flex-wrap align-items-center gap-2">
+                                        <button type="button" class="btn btn-sm btn-outline-info" onclick="InvoicesUI.openSetOffAgainstBill()">
+                                            <i class="bi bi-link-45deg"></i> ${setOffBtnLabel}
+                                        </button>
+                                        <span class="small text-white-50" id="setOffSummary">No bill selected for set-off</span>
+                                    </div>
+                                    <input type="hidden" name="setOffRefId" id="setOffRefId" value="">
+                                    <input type="hidden" name="setOffRefNo" id="setOffRefNo" value="">
+                                    <input type="hidden" name="setOffRefDate" id="setOffRefDate" value="">
+                                    <input type="hidden" name="setOffSupplierBillNo" id="setOffSupplierBillNo" value="">
+                                    <div class="col-md-3">
+                                        <div class="bk-form-label">Set-off Amount</div>
+                                        <input type="number" class="bk-form-control w-100 text-end" name="setOffAmount" id="setOffAmount" value="0" step="0.01" readonly>
+                                    </div>
+                                </div>` : ''}
 
                                 <!-- Footer: dispatch, narration, totals (pinned to bottom of form) -->
                                 <div class="row g-4 flex-shrink-0 mt-auto gtes-invoice-form-footer">
@@ -1682,6 +1723,9 @@ const InvoicesUI = {
         // Add first row (use UI so this works if showCreateModal is ever called unbound)
         if (typeof UI.addItemRow === 'function') UI.addItemRow();
         if (typeof UI.activateCustomDatalists === 'function') UI.activateCustomDatalists();
+        const ledgerSel = document.querySelector('#createInvoiceForm [name="ledgerAccount"]');
+        if (ledgerSel && isCreditNote) ledgerSel.value = 'Sales Return';
+        if (ledgerSel && isDebitNote) ledgerSel.value = 'Purchases Return';
         const cn = document.querySelector('#createInvoiceForm [name="customerName"]');
         if (cn) {
             cn.addEventListener('input', () => {
@@ -1988,6 +2032,15 @@ const InvoicesUI = {
         }
     },
 
+    _isDcChallanForm() {
+        const form = document.getElementById('createInvoiceForm');
+        if (!form) return false;
+        if (form.dataset.dcChallan === '1') return true;
+        const no = (form.querySelector('[name="invoiceNo"]')?.value || '').trim();
+        return typeof InvoiceManager !== 'undefined'
+            && InvoiceManager.isDcStyleSalesInvoice?.({ invoiceNo: no, id: no });
+    },
+
     addItemRow(data = null) {
         const tbody = document.getElementById('invoiceItemsBody');
         if (!tbody) return;
@@ -1999,6 +2052,11 @@ const InvoicesUI = {
             ? InvoiceManager.isGSTType(typeInput.value)
             : (String(typeInput.value).includes('gst') && !String(typeInput.value).includes('non'))) : false;
         
+        const isDcForm = this._isDcChallanForm();
+        const retSel = isDcForm && typeof DcReturnable !== 'undefined'
+            ? DcReturnable.returnableSelectHtml(data ? DcReturnable.isReturnable(data) : true)
+            : '';
+
         row.innerHTML = `
             <td class="ps-3 py-2">
                 <input type="text" name="item[]" list="invItemList" class="bk-form-control w-100 highlight-input" 
@@ -2006,8 +2064,9 @@ const InvoicesUI = {
             </td>
             <td>
                 <input type="text" name="desc[]" class="bk-form-control w-100" 
-                    value="${data ? (data.description || data.itemDescription || '') : ''}" placeholder="Details">
+                    value="${data ? (typeof DcReturnable !== 'undefined' ? DcReturnable.itemLineDescription(data) : (data.description || data.itemDescription || '')) : ''}" placeholder="Details">
             </td>
+            ${isDcForm ? `<td>${retSel}</td>` : ''}
             ${isGST ? `
             <td>
                 <input type="text" name="hsn[]" class="bk-form-control w-100 text-center" value="${data ? (data.hsn || '') : ''}">
@@ -2244,6 +2303,116 @@ const InvoicesUI = {
         }
 
         if (totalAmountEl) totalAmountEl.textContent = grandTotal.toFixed(2);
+
+        const setOffAmt = document.getElementById('setOffAmount');
+        const setOffRef = document.getElementById('setOffRefNo');
+        if (setOffAmt && setOffRef?.value) {
+            setOffAmt.value = grandTotal.toFixed(2);
+        }
+    },
+
+    _buildSetOffAllocationsFromForm(formData, total) {
+        const refNo = (formData.get('setOffRefNo') || '').trim();
+        if (!refNo) return [];
+        return [{
+            invoiceNo: refNo,
+            date: formData.get('setOffRefDate') || '',
+            supplierInvoiceNo: (formData.get('setOffSupplierBillNo') || '').trim(),
+            amount: Math.abs(parseFloat(formData.get('setOffAmount')) || parseFloat(total) || 0)
+        }];
+    },
+
+    openSetOffAgainstBill() {
+        const form = document.getElementById('createInvoiceForm');
+        if (!form) return;
+        const kind = this._createInvoiceReturnKind || 'sales';
+        const nameInp = form.querySelector('[name="customerName"]');
+        if (nameInp) this.onCustomerSelect(nameInp);
+        const partyName = (nameInp?.value || '').trim().toLowerCase();
+        const partyId = (form.querySelector('[name="customerId"]')?.value || '').trim();
+        if (!partyName) {
+            if (typeof App !== 'undefined') App.showNotification('Select customer or supplier first.', 'warning');
+            return;
+        }
+
+        const voucherDate = form.querySelector('[name="date"]')?.value || '';
+        const vDateMs = new Date(voucherDate || 0).getTime() || Date.now();
+        const fmtBal = (n) => (parseFloat(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        let bills = [];
+        if (kind === 'sales') {
+            bills = (DataManager.getData('invoices') || []).filter((inv) => {
+                if (!inv || this._isCreditNoteSalesDoc(inv)) return false;
+                if (typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice?.(inv)) return false;
+                const same = (partyId && String(inv.customerId || '') === partyId)
+                    || (partyName && String(inv.customerName || '').toLowerCase().trim() === partyName);
+                if (!same) return false;
+                const d = new Date(inv.date || 0).getTime() || 0;
+                return d <= vDateMs;
+            }).sort((a, b) => (new Date(b.date || 0) - new Date(a.date || 0)));
+        } else {
+            bills = (DataManager.getData(DataManager.KEYS.EXPENSES) || []).filter((exp) => {
+                if (!exp || this._isDebitNotePurchaseDoc(exp)) return false;
+                const same = (partyId && String(exp.vendorId || exp.customerId || '') === partyId)
+                    || (partyName && String(exp.vendor || exp.vendorName || '').toLowerCase().trim() === partyName);
+                if (!same) return false;
+                const d = new Date(exp.date || 0).getTime() || 0;
+                return d <= vDateMs;
+            }).sort((a, b) => (new Date(b.date || 0) - new Date(a.date || 0)));
+        }
+
+        const esc = (s) => String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const rows = bills.length
+            ? bills.map((b) => {
+                const id = esc(b.id);
+                const no = esc(b.invoiceNo || b.billNo || b.id);
+                const dt = esc(b.date || '');
+                const sup = esc(b.supplierBillNo || b.supplierInvoiceNo || '');
+                const bal = fmtBal(b.balance != null ? b.balance : (b.total ?? b.amount));
+                return `<tr>
+                    <td>${no}</td><td>${dt}</td><td>${sup || '—'}</td><td class="text-end">${bal}</td>
+                    <td class="text-end"><button type="button" class="btn btn-sm btn-outline-info"
+                        onclick="InvoicesUI._applySetOffBill('${id}','${no}','${dt}','${sup}')">Select</button></td>
+                </tr>`;
+            }).join('')
+            : `<tr><td colspan="5" class="text-center text-muted py-4">No matching bills found for this party.</td></tr>`;
+
+        const title = kind === 'sales' ? 'Set off against sales invoice' : 'Set off against purchase bill';
+        const existing = document.getElementById('setOffPickerModal');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', `
+            <div class="modal fade" id="setOffPickerModal" tabindex="-1">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content bg-dark text-white border-secondary">
+                        <div class="modal-header border-secondary">
+                            <h5 class="modal-title">${title}</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body p-0">
+                            <table class="table table-dark table-hover table-sm mb-0">
+                                <thead><tr><th>Bill No</th><th>Date</th><th>Supplier Inv</th><th class="text-end">Balance</th><th></th></tr></thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>`);
+        new bootstrap.Modal(document.getElementById('setOffPickerModal')).show();
+    },
+
+    _applySetOffBill(id, no, date, supplierBillNo) {
+        const refId = document.getElementById('setOffRefId');
+        const refNo = document.getElementById('setOffRefNo');
+        const refDate = document.getElementById('setOffRefDate');
+        const sup = document.getElementById('setOffSupplierBillNo');
+        const summary = document.getElementById('setOffSummary');
+        if (refId) refId.value = id || '';
+        if (refNo) refNo.value = no || '';
+        if (refDate) refDate.value = date || '';
+        if (sup) sup.value = supplierBillNo || '';
+        if (summary) summary.textContent = `Set off against ${no}${date ? ` (${date})` : ''}`;
+        bootstrap.Modal.getInstance(document.getElementById('setOffPickerModal'))?.hide();
+        this.calculateTotals();
     },
 
     async saveInvoice(e) {
@@ -2302,7 +2471,10 @@ const InvoicesUI = {
                     unit: row.querySelector('[name="unit[]"]').value,
                     rate: rate,
                     gstRate: gst,
-                    amount: finalAmt
+                    amount: finalAmt,
+                    ...(this._isDcChallanForm() && typeof DcReturnable !== 'undefined'
+                        ? DcReturnable.readReturnableFromSelect(row.querySelector('.item-returnable'))
+                        : {})
                 });
             }
         });
@@ -2320,8 +2492,12 @@ const InvoicesUI = {
             }
         }
 
-        const isPurchaseFlow = String(type).includes('purchase');
+        const isCreditNote = String(type).startsWith('credit-note');
+        const isDebitNote = String(type).startsWith('debit-note');
+        const isPurchaseFlow = String(type).includes('purchase') || isDebitNote;
         const enteredLedgerAccount = (formData.get('ledgerAccount') || '').trim();
+        const setOffAllocations = this._buildSetOffAllocationsFromForm(formData, total);
+        const setOffRefNo = (formData.get('setOffRefNo') || '').trim();
         const salesLedgerForType = isPurchaseFlow ? enteredLedgerAccount : (isGST ? enteredLedgerAccount : null);
         const hId = party.id;
         const acctType = isPurchaseFlow ? 'Supplier' : 'Customer';
@@ -2340,10 +2516,17 @@ const InvoicesUI = {
                 vendorId: party.id,
                 customerId: party.id,
                 partyId: resolvedPartyId || '',
-                category: 'Purchase Material',
-                description: ((formData.get('narration') || '').trim() || 'Purchase'),
+                category: isDebitNote ? 'Purchase Return' : 'Purchase Material',
+                description: ((formData.get('narration') || '').trim() || (isDebitNote ? 'Debit Note' : 'Purchase')),
                 poNumber: formData.get('poNumber') || '',
                 supplierBillNo: formData.get('poNumber') || '',
+                isDebitNote: isDebitNote || undefined,
+                type: isDebitNote ? 'debit-note' : undefined,
+                referenceNo: setOffRefNo || undefined,
+                purchaseInvoiceRef: setOffRefNo || undefined,
+                setOffRefDate: formData.get('setOffRefDate') || undefined,
+                setOffSupplierBillNo: (formData.get('setOffSupplierBillNo') || '').trim() || undefined,
+                setOffAllocations: setOffAllocations.length ? setOffAllocations : undefined,
                 amount: total,
                 total: total,
                 subtotal: parseFloat(document.getElementById('subTotal').textContent),
@@ -2379,10 +2562,13 @@ const InvoicesUI = {
             try {
                 await ExpenseManager.saveExpense(purchaseData);
                 bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal'))?.hide();
-                App.showNotification('Purchase recorded successfully.', 'success');
+                App.showNotification(isDebitNote ? 'Debit note recorded successfully.' : 'Purchase recorded successfully.', 'success');
                 queueMicrotask(() => {
                     if (App.currentView === 'purchases' && typeof this.updatePurchasesTable === 'function') {
                         this.updatePurchasesTable();
+                    }
+                    if (typeof VouchersUI !== 'undefined' && VouchersUI.currentMode === 'debit-note' && typeof VouchersUI.updateDebitNotesTable === 'function') {
+                        VouchersUI.updateDebitNotesTable();
                     }
                 });
             } catch (err) {
@@ -2398,7 +2584,15 @@ const InvoicesUI = {
         const invoiceData = {
             id: formData.get('invoiceNo'),
             invoiceNo: formData.get('invoiceNo'), // Also store explicitly for table display
-            type: isGST ? 'gst-invoice' : 'non-gst-invoice',
+            type: isCreditNote
+                ? (isGST ? 'credit-note-gst' : 'credit-note')
+                : (isGST ? 'gst-invoice' : 'non-gst-invoice'),
+            isCreditNote: isCreditNote || undefined,
+            referenceNo: setOffRefNo || undefined,
+            salesInvoiceRef: setOffRefNo || undefined,
+            setOffRefDate: formData.get('setOffRefDate') || undefined,
+            setOffSupplierBillNo: (formData.get('setOffSupplierBillNo') || '').trim() || undefined,
+            setOffAllocations: setOffAllocations.length ? setOffAllocations : undefined,
             customerName: party.name,
             customerAddress: addrFromForm || party.address || '',
             customerId: hId,
@@ -2446,11 +2640,16 @@ const InvoicesUI = {
 
             // Immediate feedback — do not block on challan sync, PDF, or heavy list refreshes
             bootstrap.Modal.getInstance(document.getElementById('createInvoiceModal'))?.hide();
-            if (typeof App !== 'undefined') App.showNotification('Invoice created successfully!', 'success');
+            if (typeof App !== 'undefined') {
+                App.showNotification(isCreditNote ? 'Credit note created successfully!' : 'Invoice created successfully!', 'success');
+            }
 
             queueMicrotask(() => {
                 try {
                     this.updateTable();
+                    if (isCreditNote && typeof VouchersUI !== 'undefined' && VouchersUI.currentMode === 'credit-note' && typeof VouchersUI.updateCreditNotesTable === 'function') {
+                        VouchersUI.updateCreditNotesTable();
+                    }
                 } catch (err) {
                     console.error(err);
                 }
@@ -2515,9 +2714,18 @@ const InvoicesUI = {
         const form = document.getElementById('createInvoiceForm');
         if (!form) return;
 
-        // Update modal title to indicate editing
         const modalTitle = document.querySelector('#createInvoiceModal .modal-title');
-        if (modalTitle) modalTitle.innerHTML = `<i class="bi bi-pencil-square me-2"></i>Edit Invoice`;
+        const isDcEdit = typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(invoice);
+        if (form) {
+            if (isDcEdit) form.dataset.dcChallan = '1';
+            else delete form.dataset.dcChallan;
+        }
+        document.getElementById('invReturnableCol')?.classList.toggle('d-none', !isDcEdit);
+        if (modalTitle) {
+            modalTitle.innerHTML = isDcEdit
+                ? `<i class="bi bi-pencil-square me-2"></i>Edit Delivery Challan`
+                : `<i class="bi bi-pencil-square me-2"></i>Edit Invoice`;
+        }
 
         // Pre-fill header fields
         const setField = (name, val) => { const el = form.querySelector(`[name="${name}"]`); if (el) el.value = val || ''; };
@@ -2653,7 +2861,10 @@ const InvoicesUI = {
                     unit: row.querySelector('[name="unit[]"]').value,
                     rate,
                     gstRate: taxSelect ? parseFloat(taxSelect.value) : 0,
-                    amount: finalAmt
+                    amount: finalAmt,
+                    ...(this._isDcChallanForm() && typeof DcReturnable !== 'undefined'
+                        ? DcReturnable.readReturnableFromSelect(row.querySelector('.item-returnable'))
+                        : {})
                 });
             }
         });
@@ -2785,14 +2996,17 @@ const InvoicesUI = {
             pan: invoice.customerPan || ''
         };
 
-        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
         const element = document.createElement('div');
-        element.className = 'gtes-pdf-document';
-        element.style.width = `${pdfW}px`;
-        element.style.padding = '14px';
+        element.className = 'gtes-pdf-document gtes-invoice-print-root';
+        element.setAttribute('data-gtes-invoice-id', String(invoiceId));
+        element.style.width = '100%';
+        element.style.maxWidth = '100%';
+        element.style.padding = '0';
         element.style.background = 'white';
         element.style.color = '#000';
         element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
+        element.style.overflow = 'visible';
+        element.style.boxSizing = 'border-box';
 
         const isPlainPdf = invoice && typeof InvoiceManager !== 'undefined' && InvoiceManager.isPlainSalesListRow
             ? InvoiceManager.isPlainSalesListRow(invoice)
@@ -2817,7 +3031,7 @@ const InvoicesUI = {
 
             if (isPlainPdf || details.isPlain) {
                 return `
-                <tr style="page-break-inside: avoid;">
+                <tr>
                     <td style="${cell} text-align: center;">${idx + 1}</td>
                     <td style="${cell} vertical-align: top;">
                         <div style="font-weight: 700;">${nm}</div>
@@ -2834,7 +3048,7 @@ const InvoicesUI = {
             if (isInterstateGst) {
                 const { igstA, igstR } = this._resolveInterstateLineIgst(item, details);
                 return `
-                <tr style="page-break-inside: avoid;">
+                <tr>
                     <td style="${cell} text-align: center;">${idx + 1}</td>
                     <td style="${cell} vertical-align: top;">
                         <div style="font-weight: 700;">${nm}</div>
@@ -2865,7 +3079,7 @@ const InvoicesUI = {
                 sgstR = halfRate;
             }
             return `
-                <tr style="page-break-inside: avoid;">
+                <tr>
                     <td style="${cell} text-align: center;">${idx + 1}</td>
                     <td style="${cell} vertical-align: top;">
                         <div style="font-weight: 700;">${nm}</div>
@@ -2921,10 +3135,24 @@ const InvoicesUI = {
         const isCreditNote = this._isCreditNoteSalesDoc(invoice);
         const isDcDoc = typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice(invoice);
         const docTitle = isCreditNote ? 'Credit Note / Sales Return' : (isDcDoc ? 'Delivery Challan' : (isPlainPdf ? 'Invoice' : 'Tax Invoice'));
+        const copyType = typeof InvoicePdfEngine !== 'undefined'
+            ? InvoicePdfEngine.getCopyType(invoiceId)
+            : (invoice.copyType || 'original');
+        const copyTypeHtml = (!isCreditNote && !isDcDoc && typeof InvoicePdfEngine !== 'undefined')
+            ? `<div class="gtes-invoice-copy-type" style="font-size: 11px; font-weight: 700; color: #333; letter-spacing: 0.05em; margin-top: 3px;">${InvoicePdfEngine.formatCopyTypeLine(copyType)}</div>`
+            : '';
         const docNoLabel = isCreditNote ? 'Credit Note No' : (isDcDoc ? 'Delivery Challan No' : 'Invoice No');
         const shipToAddr = (invoice.shipToAddress || '').trim();
         const showShipToPdf = !!shipToAddr && invoice.includeShipToOnPdf !== false;
         const detailsRightTitle = isDcDoc ? 'Challan Details' : 'Invoice Details';
+        const dcRemarksText = String(invoice.narration || invoice.remarks || '').trim();
+        const dcRemarksRow = isDcDoc && dcRemarksText ? `
+                <tr style="font-size: 10px;">
+                    <td style="padding: 5px 6px; border: 1px solid #000;"></td>
+                    <td colspan="11" style="padding: 5px 6px; border: 1px solid #000; vertical-align: top;">
+                        <strong>Remarks:</strong> ${this.escapePdfHtml(dcRemarksText)}
+                    </td>
+                </tr>` : '';
         const salesRefNo = this._inferSalesReferenceNo(invoice);
         const emailLine = [company.emails].flat().filter(Boolean).join(', ') || '';
         const phoneLine = [company.phones].flat().filter(Boolean).join(', ') || '';
@@ -3035,10 +3263,10 @@ const InvoicesUI = {
                     <div style="font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">Total Qty: ${totalQty.toFixed(2)}</div>`;
 
         element.innerHTML = `
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
+            <table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
                 <tr>
-                    <td style="width: 62%; vertical-align: top; padding: 0 12px 12px 0;">
-                        <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${this.escapePdfHtml(company.name)}</h1>
+                    <td style="width: 58%; vertical-align: top; padding: 0 10px 12px 0; word-wrap: break-word; overflow-wrap: anywhere;">
+                        <h1 style="margin: 0; color: #000; font-size: 22px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${this.escapePdfHtml(company.name)}</h1>
                         <div style="font-size: 10px; color: #222; margin-top: 6px; line-height: 1.45;">
                             ${this.escapePdfHtml(company.address)}<br>
                             <strong>Work:</strong> ${this.escapePdfHtml(company.workAddress)}<br>
@@ -3048,9 +3276,10 @@ const InvoicesUI = {
                             ${company.iec ? ` | <strong>IEC:</strong> ${this.escapePdfHtml(company.iec)}` : ''}
                         </div>
                     </td>
-                    <td style="width: 38%; vertical-align: top; text-align: right; padding: 0 0 12px 0;">
-                        <div style="font-size: 18px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 8px;">${docTitle}</div>
-                        <div style="font-size: 10px; color: #222; line-height: 1.5;">
+                    <td style="width: 42%; vertical-align: top; text-align: right; padding: 0 0 12px 4px; word-wrap: break-word; overflow-wrap: anywhere;">
+                        <div style="font-size: 15px; font-weight: 800; color: #000; text-transform: uppercase; margin-bottom: 2px; line-height: 1.25;">${docTitle}</div>
+                        ${copyTypeHtml}
+                        <div style="font-size: 10px; color: #222; line-height: 1.5; margin-top: 6px;">
                             <strong>${docNoLabel}:</strong> ${this.escapePdfHtml(invoice.invoiceNo || invoice.id)}<br>
                             <strong>Date:</strong> ${this.escapePdfHtml(invoice.date)}
                         </div>
@@ -3058,10 +3287,10 @@ const InvoicesUI = {
                 </tr>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
-                        <div style="border: 1px solid #000; padding: 10px; height: 100%;">
+                        <div style="border: 1px solid #000; padding: 10px;">
                             <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">Details of Receiver (Billed To)</div>
                             <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: #111;">${this.escapePdfHtml(customer.name)}</div>
                             <div style="font-size: 10px; line-height: 1.4; white-space: pre-wrap;">${this.escapePdfHtml(customer.address)}</div>
@@ -3069,7 +3298,7 @@ const InvoicesUI = {
                         </div>
                     </td>
                     <td style="width: 50%; vertical-align: top; padding: 0 0 0 7px;">
-                        <div style="border: 1px solid #000; padding: 10px; height: 100%;">
+                        <div style="border: 1px solid #000; padding: 10px;">
                             <div style="text-transform: uppercase; font-size: 9px; font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px;">${detailsRightTitle}</div>
                             <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
                                 <tr><td style="padding: 2px 8px 2px 0; vertical-align: top; width: 110px; color: #444;">PO / Ref No:</td><td style="padding: 2px 0; vertical-align: top;"><strong>${this.escapePdfHtml(invoice.poNumber || '-')}</strong></td></tr>
@@ -3087,7 +3316,7 @@ const InvoicesUI = {
             </table>
 
             ${showShipToPdf ? `
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 100%; vertical-align: top; padding: 0;">
                         <div style="border: 1px solid #000; padding: 10px;">
@@ -3099,26 +3328,28 @@ const InvoicesUI = {
                 </tr>
             </table>` : ''}
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
+            <table class="gtes-invoice-line-items" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
                 <thead>${gstTableHead}</thead>
-                <tbody>${itemsHtml}</tbody>
+                <tbody>${itemsHtml}${dcRemarksRow}</tbody>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin: 0;">
-                <tr>
-                    <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
+            ${isCreditNote ? this._renderSetOffReferenceTableHtml(invoice, total, 'sales') : ''}
+
+            <div class="gtes-invoice-footer-block" style="margin: 0;">
+                <div class="gtes-invoice-footer-left" style="font-size: 11px;">
                         ${taxLeftBlock}
                         <div style="margin-top: 16px; font-size: 10px; line-height: 1.45;">
                             <strong>Terms &amp; Conditions:</strong><br>
                             1. Goods once sold will not be taken back.<br>
                             2. Subject to Chennai Jurisdiction.
                         </div>
+                        ${isDcDoc ? `<div style="margin-top: 12px; font-size: 10px; font-weight: 700;">Received in Good Condition</div>` : ''}
                         <div style="margin-top: 12px; font-size: 10px; color: #666; font-style: italic; line-height: 1.4;">
                             ${isDcDoc
                 ? 'We declare that this delivery challan shows the actual quantity and description of goods and that all particulars are true and correct.'
                 : 'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.'}
                         </div>
-                        ${invoice.narration ? `
+                        ${!isDcDoc && invoice.narration ? `
                         <div style="margin-top: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;">
                             <span style="text-transform: uppercase; font-size: 9px; font-weight: bold; color: #64748b;">Narration</span><br>
                             <span style="font-size: 10px; color: #111;">${this.escapePdfHtml(invoice.narration)}</span>
@@ -3138,33 +3369,30 @@ const InvoicesUI = {
                                 <div style="font-size: 10px; font-weight: bold;">${this.escapePdfHtml(upiId)}</div>
                             </td>
                         </tr></table>` : ''}
-                        <div style="margin-top: 14px; font-size: 10px;">
+                        <div class="gtes-invoice-bank-details" style="margin-top: 14px; font-size: 10px;">
                             <strong>Bank:</strong> ${this.escapePdfHtml(company.bank?.bankName || '-')}
                             &nbsp;|&nbsp; <strong>A/c:</strong> ${this.escapePdfHtml(company.bank?.accountNo || '-')}
                             &nbsp;|&nbsp; <strong>IFSC:</strong> ${this.escapePdfHtml(company.bank?.ifsc || '-')}
                         </div>
-                    </td>
-                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
-                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                </div>
+                <div class="gtes-invoice-footer-right">
+                        <div class="gtes-invoice-totals-summary" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
                             ${summaryBox}
                         </div>
-                    </td>
-                </tr>
-            </table>
-
-            <table style="width: 100%; margin-top: 36px; border-collapse: collapse;"><tr><td style="text-align: right;">
-                <div style="display: inline-block; text-align: right; width: 280px; max-width: 100%;">
-                    <div style="font-size: 11px; margin-bottom: 44px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(company.name)}</strong></div>
-                    <div style="border-top: 1px solid #000; padding-top: 8px; text-align: center;">
-                        <span style="font-weight: bold; font-size: 12px; text-transform: uppercase;">Authorized Signatory</span>
-                    </div>
-                </div>
-            </td></tr></table>
-
-            <div style="margin-top: 24px; text-align: center; font-size: 9px; color: #64748b; border-top: 1px solid #e5e7eb; padding-top: 10px;">
-                ${isDcDoc
+                        <div class="gtes-invoice-totals-signature-keep">
+                        <div class="gtes-pdf-signature-block" style="margin-top: 12px; text-align: right;">
+                            <div style="font-size: 11px; margin-bottom: 18px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(company.name)}</strong></div>
+                            <div style="display: inline-block; min-width: 200px; max-width: 100%; border-top: 1px solid #000; padding-top: 6px; text-align: center;">
+                                <span style="font-weight: bold; font-size: 11px; text-transform: uppercase;">Authorized Signatory</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; text-align: center; font-size: 9px; color: #64748b; line-height: 1.35;">
+                            ${isDcDoc
             ? 'This is a computer generated delivery challan and does not require a physical signature.'
             : 'This is a computer generated invoice and does not require a physical signature.'}
+                        </div>
+                        </div>
+                </div>
             </div>
         `;
         return element;
@@ -3173,10 +3401,10 @@ const InvoicesUI = {
     generatePDF(invoiceId) {
         if (typeof DeliveryUI !== 'undefined' && DeliveryUI.downloadInvoicePdf) {
             void DeliveryUI.downloadInvoicePdf(invoiceId);
-        } else if (typeof DeliveryUI !== 'undefined' && DeliveryUI.printInvoice) {
-            void DeliveryUI.printInvoice(invoiceId);
+        } else if (typeof InvoicePdfEngine !== 'undefined') {
+            void InvoicePdfEngine.exportInvoice(invoiceId, { action: 'download' });
         } else {
-            App.showNotification('PDF generation not available', 'error');
+            App.showNotification('Invoice export not available', 'error');
         }
     },
 
@@ -3219,10 +3447,11 @@ const InvoicesUI = {
         const unit = masterItem?.unit || item.unit || 'nos';
 
         let displayDesc = '';
-        const itemDesc = (item.description || item.desc || item.details || item.itemDescription || '').trim();
+        const dcLineDesc = typeof DcReturnable !== 'undefined' ? DcReturnable.itemLineDescription(item) : '';
+        const itemDesc = (dcLineDesc || item.description || item.desc || item.details || item.itemDescription || '').trim();
         const mstrDesc = (masterItem?.description || masterItem?.desc || masterItem?.details || '').trim();
 
-        if (itemDesc && itemDesc.toLowerCase().trim() !== item.name.toLowerCase().trim()) {
+        if (itemDesc && itemDesc.toLowerCase().trim() !== (item.name || '').toLowerCase().trim()) {
             displayDesc = itemDesc;
         }
 
@@ -3664,14 +3893,18 @@ const InvoicesUI = {
             ? pdfLineTaxes.taxable
             : (parseFloat(p.subtotal) || (dnDocTotal - pdfCgst - pdfSgst - pdfIgst));
 
-        const pdfW = (typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 760;
+        const pdfW = (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.getPdfPrintableWidthPx === 'function')
+            ? DeliveryUI.getPdfPrintableWidthPx()
+            : ((typeof DeliveryUI !== 'undefined' && DeliveryUI.GTES_PDF_DOCUMENT_WIDTH_PX) || 702);
         const element = document.createElement('div');
         element.className = 'gtes-pdf-document';
         element.style.width = `${pdfW}px`;
-        element.style.padding = '14px';
+        element.style.maxWidth = `${pdfW}px`;
+        element.style.padding = '10px';
         element.style.background = 'white';
         element.style.color = '#000';
         element.style.fontFamily = 'Arial, Helvetica, "Liberation Sans", sans-serif';
+        element.style.overflow = 'visible';
 
         const itemsHtml = (pdfItems && pdfItems.length > 0) ? pdfItems.map((item, idx) => {
             const details = this.getItemDisplayDetails(item, allMasterItems, false);
@@ -3694,7 +3927,7 @@ const InvoicesUI = {
             }
 
             return `
-            <tr style="font-size: 10px; page-break-inside: avoid;">
+            <tr style="font-size: 10px;">
                 <td style="padding: 5px 6px; text-align: center; border: 1px solid #000;">${idx + 1}</td>
                 <td style="padding: 5px 6px; border: 1px solid #000; vertical-align: top;">
                     <div style="font-weight: 700;">${nm}</div>
@@ -3731,7 +3964,7 @@ const InvoicesUI = {
             </tr>`;
 
         element.innerHTML = `
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
+            <table style="width: 100%; border-collapse: collapse; margin: 0 0 16px 0; border-bottom: 2px solid #000;">
                 <tr>
                     <td style="width: 65%; vertical-align: top; padding: 0 12px 12px 0;">
                         <h1 style="margin: 0; color: #000; font-size: 24px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;">${this.escapePdfHtml(companyData.name)}</h1>
@@ -3751,7 +3984,7 @@ const InvoicesUI = {
                 </tr>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 50%; vertical-align: top; padding: 0 7px 0 0;">
                         <div style="border: 1px solid #000; padding: 10px;">
@@ -3778,7 +4011,7 @@ const InvoicesUI = {
             </table>
 
             ${showPurchaseShipPdf ? `
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px;">
                 <tr>
                     <td style="width: 100%; vertical-align: top; padding: 0;">
                         <div style="border: 1px solid #000; padding: 10px;">
@@ -3790,7 +4023,7 @@ const InvoicesUI = {
                 </tr>
             </table>` : ''}
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
+            <table class="gtes-invoice-line-items" style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000; table-layout: auto;">
                 <thead>
                     <tr style="background: #4a5568; color: #fff; font-size: 10px; text-transform: uppercase; text-align: center;">
                         <th rowspan="2" style="padding: 8px; border: 1px solid #64748b; vertical-align: middle; width: 30px;">#</th>
@@ -3816,9 +4049,10 @@ const InvoicesUI = {
                 </tbody>
             </table>
 
-            <table class="gtes-pdf-break-safe" style="width: 100%; border-collapse: separate; border-spacing: 0;">
-                <tr>
-                    <td style="width: 50%; vertical-align: top; padding: 0 8px 0 0; font-size: 11px;">
+            ${isDebitNote ? this._renderSetOffReferenceTableHtml(p, dnDocTotal, 'purchase') : ''}
+
+            <div class="gtes-invoice-footer-block" style="margin: 0;">
+                <div class="gtes-invoice-footer-left" style="font-size: 11px;">
                         <div style="margin-bottom: 5px;"><strong>CGST Amt:</strong> ${pdfCgst.toFixed(2)}</div>
                         <div style="margin-bottom: 5px;"><strong>SGST Amt:</strong> ${pdfSgst.toFixed(2)}</div>
                         ${pdfIgst > 0 ? `<div style="margin-bottom: 5px;"><strong>IGST Amt:</strong> ${pdfIgst.toFixed(2)}</div>` : ''}
@@ -3832,9 +4066,9 @@ const InvoicesUI = {
                 ? `Debit (Vendor A/c) ₹${Math.abs(parseFloat(p.amount) || 0).toFixed(2)}`
                 : `Credit (Vendor A/c) ₹${Math.abs(parseFloat(p.amount) || 0).toFixed(2)}`}
                         </div>
-                    </td>
-                    <td style="width: 50%; vertical-align: top; padding: 0 0 0 8px;">
-                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                </div>
+                <div class="gtes-invoice-footer-right">
+                        <div class="gtes-invoice-totals-summary" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #f1f3f5;">
                                 <tr>
                                     <td style="padding: 6px 8px; text-align: right; color: #334155;">Subtotal</td>
@@ -3870,21 +4104,18 @@ const InvoicesUI = {
                                 </td></tr>
                             </table>
                         </div>
-                    </td>
-                </tr>
-            </table>
-
-            <table style="width: 100%; margin-top: 40px; border-collapse: collapse;"><tr><td style="text-align: right;">
-                <div style="display: inline-block; text-align: right; width: 300px; max-width: 100%;">
-                    <div style="font-size: 11px; margin-bottom: 50px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(companyData.name)}</strong></div>
-                    <div style="border-top: 1px solid #000; padding-top: 10px; text-align: center;">
-                        <span style="font-weight: bold; font-size: 13px; text-transform: uppercase;">Authorized Signatory</span>
-                    </div>
+                        <div class="gtes-invoice-totals-signature-keep">
+                        <div class="gtes-pdf-signature-block" style="margin-top: 12px; text-align: right;">
+                            <div style="font-size: 11px; margin-bottom: 18px;">For <strong style="font-weight: 800;">${this.escapePdfHtml(companyData.name)}</strong></div>
+                            <div style="display: inline-block; min-width: 200px; max-width: 100%; border-top: 1px solid #000; padding-top: 6px; text-align: center;">
+                                <span style="font-weight: bold; font-size: 11px; text-transform: uppercase;">Authorized Signatory</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; text-align: center; font-size: 9px; color: #64748b; line-height: 1.35;">
+                            This is a computer generated invoice and does not require a physical signature.
+                        </div>
+                        </div>
                 </div>
-            </td></tr></table>
-
-            <div style="margin-top: 30px; text-align: center; font-size: 10px; color: #64748b; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-                This is a computer generated invoice and does not require a physical signature.
             </div>
         `;
         return element;
@@ -3998,6 +4229,86 @@ const InvoicesUI = {
             if (docAmt > 0 && Math.abs(lineAmt - docAmt) < Math.max(1, docAmt * 0.02)) return true;
         }
         return false;
+    },
+
+    _findBaseInvoiceForCreditNote(inv, allInvoices) {
+        if (!inv || !Array.isArray(allInvoices)) return null;
+        const variants = (raw) => (typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.billRefVariants(raw)
+            : this._purchaseBillRefVariants(raw));
+        const refSet = new Set();
+        for (const r of [inv.referenceNo, inv.refNo, inv.salesInvoiceRef, inv.baseInvoiceNo, inv.originalInvoiceNo]) {
+            variants(r).forEach((x) => refSet.add(x));
+        }
+        if (refSet.size === 0 && typeof VoucherManager !== 'undefined' && VoucherManager.resolveCreditNoteSalesRef) {
+            const parsed = String(VoucherManager.resolveCreditNoteSalesRef(inv) || '').trim();
+            if (parsed) variants(parsed).forEach((x) => refSet.add(x));
+        }
+        if (refSet.size === 0) {
+            const inf = this._inferSalesReferenceNo(inv);
+            if (inf && inf !== '-') variants(inf).forEach((x) => refSet.add(x));
+        }
+        if (refSet.size === 0) return null;
+        const custWant = String(inv.customerName || '').toLowerCase().trim();
+        const partyId = inv.partyId || inv.customerId || '';
+        const pool = allInvoices.filter((x) =>
+            x &&
+            x.id !== inv.id &&
+            !this._isCreditNoteSalesDoc(x) &&
+            !(typeof InvoiceManager !== 'undefined' && InvoiceManager.isDcStyleSalesInvoice?.(x))
+        );
+        const billMatchesRef = (x) => {
+            const keys = [x.invoiceNo, x.id, x.bookkeeperVchNo, x.vch_no];
+            for (const k of keys) {
+                if (k == null || k === '') continue;
+                for (const v of variants(k)) {
+                    if (refSet.has(v)) return true;
+                }
+            }
+            return false;
+        };
+        let partyHit = null;
+        let anyHit = null;
+        for (const x of pool) {
+            if (!billMatchesRef(x)) continue;
+            if (!anyHit) anyHit = x;
+            const sameParty = (partyId && (x.partyId === partyId || x.customerId === partyId))
+                || (custWant && String(x.customerName || '').toLowerCase().trim() === custWant);
+            if (sameParty) {
+                partyHit = x;
+                break;
+            }
+        }
+        return partyHit || anyHit;
+    },
+
+    _renderSetOffReferenceTableHtml(noteDoc, grandTotal, kind) {
+        const refs = typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.buildSetOffReferences({ noteDoc, grandTotal, kind })
+            : null;
+        if (!refs?.rows?.length) return '';
+        const fmt = (n) => DocumentBuildCommon.formatMoney(n);
+        const rows = refs.rows.map((r) => `
+            <tr style="font-size:10px;">
+                <td style="border:1px solid #000;padding:5px 6px;text-align:center;">${this.escapePdfHtml(r.invoiceNo)}</td>
+                <td style="border:1px solid #000;padding:5px 6px;text-align:center;">${this.escapePdfHtml(r.date)}</td>
+                <td style="border:1px solid #000;padding:5px 6px;text-align:center;">${this.escapePdfHtml(r.supplierInvoiceNo)}</td>
+                <td style="border:1px solid #000;padding:5px 6px;text-align:right;white-space:nowrap;">${fmt(r.amount)}</td>
+            </tr>`).join('');
+        return `
+            <table style="width:100%;border-collapse:collapse;margin:12px 0 16px;">
+                <tr style="background:#e8e8e8;font-size:9px;font-weight:700;text-align:center;">
+                    <th style="border:1px solid #000;padding:5px 6px;">Invoice No. Reference</th>
+                    <th style="border:1px solid #000;padding:5px 6px;">Date</th>
+                    <th style="border:1px solid #000;padding:5px 6px;">Supplier Invoice No</th>
+                    <th style="border:1px solid #000;padding:5px 6px;">Amount</th>
+                </tr>
+                ${rows}
+                <tr style="font-size:10px;font-weight:700;">
+                    <td colspan="3" style="border:1px solid #000;padding:5px 6px;">Total</td>
+                    <td style="border:1px solid #000;padding:5px 6px;text-align:right;white-space:nowrap;">Rs.${fmt(refs.total)}</td>
+                </tr>
+            </table>`;
     },
 
     _findBasePurchaseForDebitNote(p, allExpenses) {

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GTES print repro — post-session DOM</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css?v=3.1">
+</head>
+<body class="modal-open">
+  <div id="loginOverlay" class="login-overlay hidden">login</div>
+  <div id="appShell" style="min-height:100vh;">app</div>
+
+  <!-- index.html static modals (minimal) -->
+  <div class="modal fade" id="passwordModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">p</div></div></div></div>
+  <div class="modal fade" id="customerModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">c</div></div></div></div>
+  <div class="modal fade" id="inventoryModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">i</div></div></div></div>
+  <div class="modal fade" id="exportImportModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">e</div></div></div></div>
+  <div class="modal fade" id="gtesDashKpiModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">k</div></div></div></div>
+  <div class="modal fade" id="updateModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">u</div></div></div></div>
+
+  <!-- OPEN: pdf preview (like DeliveryUI.mountPdfPreview) -->
+  <div class="modal fade show" id="pdfPreviewModal" style="display:block;" aria-hidden="false">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen">
+      <div class="modal-content bg-dark text-white">
+        <div class="modal-header"><h5>Invoice PDF Preview</h5></div>
+        <div class="modal-body gtes-pdf-preview-body">
+          <div id="pdfPreviewContainer" class="gtes-pdf-preview-sheet">
+            <div class="gtes-pdf-document" style="width:702px;padding:10px;background:#fff;color:#000;">
+              <div style="height:320px;">SHORT INVOICE (one screen)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="upToDateModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">x</div></div></div></div>
+  <div class="modal fade" id="syncReportModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">x</div></div></div></div>
+  <div class="modal fade" id="employeeDetailsModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">x</div></div></div></div>
+
+  <!-- LEFT IN DOM after user closed create invoice (InvoicesUI — not removed on hidden) -->
+  <div class="modal fade" id="createInvoiceModal" tabindex="-1" style="display:none;" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen" style="max-width:100vw;margin:0;">
+      <div class="modal-content bg-dark text-white d-flex flex-column h-100">
+        <div class="modal-header border-secondary"><span class="fw-bold">Create Invoice</span></div>
+        <div class="modal-body p-4 bg-dark overflow-auto gtes-create-invoice-body">
+          <form id="createInvoiceForm">
+            <div style="height:1800px;background:#1a1d21;">FULL INVOICE FORM PLACEHOLDER</div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEFT IN DOM: challan preview modal (if user visited challans) -->
+  <div class="modal fade" id="challanViewModal" style="display:none;" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content bg-dark">
+        <div class="modal-body gtes-pdf-preview-body p-0" style="max-height:90vh;">
+          <div id="challanPrintArea" class="gtes-pdf-preview-sheet" style="max-width:760px;min-height:0;">
+            <div style="height:600px;background:#fff;color:#000;">CHALLAN</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="ledgerModal" style="display:none;" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-fullscreen">
+      <div class="modal-content"><div class="modal-body"><div style="height:1200px;">LEDGER</div></div></div>
+    </div>
+  </div>
+</body>
+</html>

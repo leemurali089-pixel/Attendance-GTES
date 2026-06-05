@@ -570,7 +570,8 @@ const BonusModule = {
 
         let html = `
             <style>
-                .payslip-container { font-family: Arial, sans-serif; padding: 20px; page-break-after: always; border: 1px solid #ccc; margin-bottom: 20px; }
+                .payslip-container { font-family: Arial, sans-serif; padding: 16px; page-break-after: always; border: 1px solid #ccc; margin-bottom: 12px; }
+                .payslip-container:last-child { page-break-after: auto; margin-bottom: 0; }
                 .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
                 .company-name { font-size: 24px; font-weight: bold; text-transform: uppercase; }
                 .doc-title { font-size: 18px; font-weight: bold; margin-top: 10px; text-decoration: underline; }

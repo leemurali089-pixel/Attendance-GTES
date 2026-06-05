@@ -1,0 +1,96 @@
+/* Invoice Engine V3 — preview workspace (not exported to PDF) */
+#pdfPreviewModal.gtes-invoice-v3-mode .gtes-pdf-preview-body {
+    background: #525659 !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+#gtesInvoiceV3Diagnostics {
+    background: #2d3136;
+    color: #e8eaed;
+    padding: 8px 12px;
+    border-bottom: 1px solid #444;
+    font-size: 11px;
+}
+
+#gtesInvoiceV3Stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    padding: 20px 16px 32px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inv-v3-page-frame {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    scroll-margin-top: 12px;
+}
+
+.inv-v3-page-label {
+    width: 210mm;
+    max-width: 100%;
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e8eaed;
+    text-align: left;
+}
+
+.inv-v3-page {
+    width: 210mm;
+    min-height: 297mm;
+    max-width: calc(100vw - 48px);
+    background: #fff;
+    border: 1px solid #cfcfcf;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    box-sizing: border-box;
+    padding: 8mm;
+    color: #111;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+}
+
+.inv-v3-page-frame.inv-v3-page-active .inv-v3-page {
+    box-shadow: 0 4px 20px rgba(66, 133, 244, 0.35), 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.inv-v3-page table.inv-v3-box td {
+    border: 1px solid #000;
+}
+
+.inv-v3-items {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.inv-v3-items th,
+.inv-v3-items td {
+    border: 1px solid #64748b;
+    font-size: 9px;
+    padding: 4px 5px;
+}
+
+.inv-v3-items th {
+    background: #4a5568;
+    color: #fff;
+    text-transform: uppercase;
+    font-size: 8px;
+    text-align: center;
+}
+
+.inv-v3-items th:first-child,
+.inv-v3-items td:first-child {
+    width: 14px;
+    max-width: 16px;
+    min-width: 12px;
+    padding: 2px 3px;
+    font-size: 6px;
+    text-align: center;
+}

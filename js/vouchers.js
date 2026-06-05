@@ -26,6 +26,14 @@ const VoucherManager = {
         return `${type}::${mode}`;
     },
 
+    /** Bank statement rows use credit/debit; voucher logic uses receipt/payment. */
+    _bankTxVoucherType(tx) {
+        const t = (tx?.type || '').toString().toLowerCase();
+        if (t === 'debit') return 'payment';
+        if (t === 'credit') return 'receipt';
+        return t;
+    },
+
     /** Whether a voucher belongs to the same Plain/GST/Purchase bucket as the UI mode. */
     _voucherMatchesMode(v, type, mode) {
         if (!v || v.type !== type || !v.id) return false;
@@ -1144,20 +1152,42 @@ const VoucherManager = {
         // 3. Pending Bank Transactions (Session-Aware Balance)
         if (extraTransactions && Array.isArray(extraTransactions)) {
             extraTransactions.forEach(tx => {
-                // Filter extra transactions by type too
-                if (filterType && tx.type !== filterType) return;
+                const txVchType = this._bankTxVoucherType(tx);
+                if (filterType && txVchType !== filterType) return;
 
-                // If it's linked but not yet imported
                 if ((tx.isReady || tx.converted) && !tx.imported) {
                     if (tx.linkedVoucherId) {
                         const lvid = tx.linkedVoucherId.toString().trim();
                         map.set(lvid, (map.get(lvid) || 0) + parseFloat(tx.amount || 0));
                     }
                     const mv = tx.mappedVoucher || tx.mappedData;
-                    if (mv && mv.linkedInvoices) {
+                    if (!mv) return;
+
+                    if (mv.allocations && mv.allocations.length > 0) {
+                        const vTds = parseFloat(mv.tdsAmount) || 0;
+                        const vDisc = parseFloat(mv.discountAmount) || 0;
+                        const totalAllocAmt = mv.allocations.reduce((s, a) => s + (parseFloat(a?.amount) || 0), 0);
+                        const hasAnyAllocTds = mv.allocations.some(a => (parseFloat(a?.tdsAmount) || 0) > 0);
+                        const hasAnyAllocDisc = mv.allocations.some(a => (parseFloat(a?.discountAmount) || 0) > 0);
+
+                        mv.allocations.forEach(a => {
+                            const baseAmt = parseFloat(a.amount) || 0;
+                            const ratio = totalAllocAmt > 0 ? (baseAmt / totalAllocAmt) : 0;
+                            const tdsAmt = (parseFloat(a.tdsAmount) || 0) + ((!hasAnyAllocTds && vTds > 0) ? (vTds * ratio) : 0);
+                            const discAmt = (parseFloat(a.discountAmount) || 0) + ((!hasAnyAllocDisc && vDisc > 0) ? (vDisc * ratio) : 0);
+                            const amount = baseAmt + tdsAmt + discAmt;
+                            if (amount <= 0) return;
+                            [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
+                                const k = (raw || '').toString().trim();
+                                if (k) map.set(k, (map.get(k) || 0) + amount);
+                            });
+                        });
+                    } else if (mv.linkedInvoices && mv.linkedInvoices.length > 0) {
+                        const totalSettlement = (parseFloat(mv.amount) || 0) + (parseFloat(mv.tdsAmount) || 0) + (parseFloat(mv.discountAmount) || 0);
                         mv.linkedInvoices.forEach(id => {
                             const cleanId = id.toString().trim();
-                            const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount || (tx.amount / mv.linkedInvoices.length);
+                            const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount
+                                || (totalSettlement / mv.linkedInvoices.length);
                             map.set(cleanId, (map.get(cleanId) || 0) + parseFloat(amt));
                         });
                     }
