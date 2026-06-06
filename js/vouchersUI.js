@@ -1301,8 +1301,37 @@ const VouchersUI = {
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
-                        <div class="modal-body p-0 bg-dark text-white d-flex flex-column" style="max-height: calc(100vh - 120px); overflow: hidden;">
+                        <div class="modal-body p-0 bg-dark text-white d-flex flex-column vch-modal-body">
                             <style>
+                                .vch-modal-body {
+                                    max-height: calc(100vh - 120px);
+                                    overflow: hidden;
+                                    min-height: 0;
+                                }
+                                #createVoucherForm {
+                                    min-height: 0;
+                                }
+                                #invoiceLinkingSection {
+                                    flex: 1 1 auto;
+                                    min-height: 0;
+                                    display: flex;
+                                    flex-direction: column;
+                                }
+                                #invoiceLinkingSection.d-none {
+                                    display: none !important;
+                                }
+                                .vch-pending-scroll {
+                                    flex: 1 1 auto;
+                                    min-height: 160px;
+                                    max-height: min(48vh, 440px);
+                                    overflow-y: auto;
+                                    overflow-x: auto;
+                                    -webkit-overflow-scrolling: touch;
+                                }
+                                .vch-settlement-summary {
+                                    flex-shrink: 0;
+                                    background: rgba(0, 0, 0, 0.35);
+                                }
                                 .vch-form-control {
                                     background: #1a1d20 !important;
                                     border: 1px solid #373b3e !important;
@@ -1391,13 +1420,13 @@ const VouchersUI = {
                                 </div>
                                 
                                 <!-- Scrollable Invoice Linking Section -->
-                                <div id="invoiceLinkingSection" class="p-4 pt-1 d-none" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                                    <label class="form-label fw-bold text-info flex-shrink-0"><i class="bi bi-link-45deg"></i> Select Pending Invoices:</label>
-                                    <div class="table-responsive border border-secondary rounded" style="background: rgba(0,0,0,0.2); flex: 1; overflow-y: auto;">
-                                        <table class="table table-dark table-sm table-bordered border-secondary" id="pendingInvoicesTable">
-                                            <thead class="sticky-top bg-secondary">
+                                <div id="invoiceLinkingSection" class="px-4 pb-2 pt-1 d-none">
+                                    <label class="form-label fw-bold text-info flex-shrink-0 mb-2"><i class="bi bi-link-45deg"></i> Select Pending Invoices:</label>
+                                    <div class="vch-pending-scroll table-responsive border border-secondary rounded" style="background: rgba(0,0,0,0.2);">
+                                        <table class="table table-dark table-sm table-bordered border-secondary mb-0" id="pendingInvoicesTable">
+                                            <thead class="sticky-top bg-secondary" style="z-index: 2;">
                                                 <tr>
-                                                    <th width="30"></th> <!-- Checkbox -->
+                                                    <th width="30"></th>
                                                     <th>Invoice No / Date</th>
                                                     <th class="text-end">Total</th>
                                                     <th class="text-end">Pending</th>
@@ -1407,21 +1436,25 @@ const VouchersUI = {
                                             <tbody id="pendingInvoicesBody">
                                                 <!-- Rows injected via JS -->
                                             </tbody>
-                                            <tfoot>
-                                                <tr class="fw-bold">
-                                                    <td colspan="4" class="text-end pe-3">
-                                                        Advance Payment / On Account:
-                                                        <div class="small fw-normal text-muted">Auto: unallocated balance</div>
-                                                    </td>
-                                                    <td class="p-0"><input type="number" class="form-control form-control-sm bg-dark text-white border-0 text-end" id="advanceAmount" value="0.00" readonly tabindex="-1" title="Unallocated balance (updates when amount or invoices change)" /></td>
-                                                </tr>
-                                                <tr class="fw-bold table-active">
-                                                    <td colspan="4" class="text-end pe-3">Total Voucher Amount:</td>
-                                                    <td class="text-end" id="totalVoucherAmount">0.00</td>
-                                                </tr>
-                                            </tfoot>
                                         </table>
-                                     </div>
+                                    </div>
+                                    <div class="vch-settlement-summary border border-secondary border-top-0 rounded-bottom px-3 py-2">
+                                        <div class="row g-2 align-items-center small">
+                                            <div class="col-md-4 text-md-end text-muted">Assigned to bills:</div>
+                                            <div class="col-md-2 text-end fw-semibold text-info" id="assignedToBillsAmount">₹0.00</div>
+                                            <div class="col-md-4 text-md-end text-muted">
+                                                Advance / On Account:
+                                                <div class="fw-normal" style="font-size: 0.75rem;">Unallocated balance</div>
+                                            </div>
+                                            <div class="col-md-2 text-end">
+                                                <input type="number" class="form-control form-control-sm bg-dark text-warning border-secondary text-end fw-bold" id="advanceAmount" value="0.00" readonly tabindex="-1" title="Unallocated balance (updates when amount or invoices change)" />
+                                            </div>
+                                        </div>
+                                        <div class="row g-2 align-items-center small mt-1 pt-1 border-top border-secondary">
+                                            <div class="col-md-10 text-md-end fw-bold">Total Voucher Amount:</div>
+                                            <div class="col-md-2 text-end fw-bold text-white" id="totalVoucherAmount">0.00</div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <!-- Hidden Fields -->
                                 <input type="hidden" name="bankDescription" id="bankDescription">
@@ -1431,9 +1464,12 @@ const VouchersUI = {
 
                             </form>
                         </div>
-                        <div class="modal-footer border-secondary mt-auto">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" onclick="VouchersUI.saveVoucher()">Save Voucher</button>
+                        <div class="modal-footer border-secondary mt-auto flex-column align-items-stretch gap-2 py-2">
+                            <div id="voucherBalanceBanner" class="alert alert-secondary py-2 px-3 mb-0 small d-none"></div>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary" onclick="VouchersUI.saveVoucher()">Save Voucher</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2982,26 +3018,41 @@ const VouchersUI = {
         const totalDisplay = document.getElementById('totalVoucherAmount');
         if (totalDisplay) totalDisplay.textContent = allocated.toFixed(2);
 
-        // Show/update balance summary banner
-        let banner = document.getElementById('voucherBalanceBanner');
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = 'voucherBalanceBanner';
-            const section = document.getElementById('invoiceLinkingSection');
-            if (section) section.appendChild(banner);
+        const assignedDisplay = document.getElementById('assignedToBillsAmount');
+        if (assignedDisplay) {
+            assignedDisplay.textContent = `₹${invoiceAllocated.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
-        banner.className = balance < 0 
-            ? 'alert alert-danger py-1 px-2 mt-2 mb-0 small d-flex justify-content-between'
-            : balance === 0 
-                ? 'alert alert-success py-1 px-2 mt-2 mb-0 small d-flex justify-content-between'
-                : 'alert alert-info py-1 px-2 mt-2 mb-0 small d-flex justify-content-between';
-        banner.innerHTML = `
-            <span><i class="bi bi-wallet2 me-1"></i>Bank/Cash: <strong>₹${bankAmount.toFixed(2)}</strong></span>
-            <span>Total Settlement: <strong>₹${totalSettlement.toFixed(2)}</strong> (TDS: ₹${tds.toFixed(2)}, Disc: ₹${discount.toFixed(2)})</span>
-            <span ${balance < 0 ? 'class="text-danger fw-bold"' : balance === 0 ? 'class="text-success fw-bold"' : ''}>
-                ${balance < 0 ? '⚠️ Over by' : 'Balance'}: <strong>₹${Math.abs(balance).toFixed(2)}</strong>
-            </span>
-        `;
+
+        // Fixed footer banner — always visible (bank import / minimal modal)
+        const banner = document.getElementById('voucherBalanceBanner');
+        const linkingVisible = document.getElementById('invoiceLinkingSection') && !document.getElementById('invoiceLinkingSection').classList.contains('d-none');
+        if (banner) {
+            if (!linkingVisible && totalSettlement <= 0) {
+                banner.classList.add('d-none');
+            } else {
+                banner.classList.remove('d-none');
+                banner.className = balance < 0
+                    ? 'alert alert-danger py-2 px-3 mb-0 small d-flex flex-wrap justify-content-between align-items-center gap-2'
+                    : balance === 0
+                        ? 'alert alert-success py-2 px-3 mb-0 small d-flex flex-wrap justify-content-between align-items-center gap-2'
+                        : 'alert alert-warning py-2 px-3 mb-0 small d-flex flex-wrap justify-content-between align-items-center gap-2';
+                const advanceNote = advance > 0.005
+                    ? `<span class="text-warning fw-bold">Advance / Unallocated: <strong>₹${advance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>`
+                    : '';
+                const assignedNote = invoiceAllocated > 0.005
+                    ? `<span class="text-info">Assigned to bills: <strong>₹${invoiceAllocated.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>`
+                    : '';
+                banner.innerHTML = `
+                    <span><i class="bi bi-wallet2 me-1"></i>Bank/Cash: <strong>₹${bankAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                    <span>Settlement: <strong>₹${totalSettlement.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> <span class="text-muted">(TDS ₹${tds.toFixed(2)}, Disc ₹${discount.toFixed(2)})</span></span>
+                    ${assignedNote}
+                    ${advanceNote}
+                    <span ${balance < 0 ? 'class="text-danger fw-bold"' : balance === 0 ? 'class="text-success fw-bold"' : 'class="text-warning fw-bold"'}>
+                        ${balance < 0 ? '⚠️ Over by' : balance === 0 ? '✓ Fully allocated' : 'Remaining to assign'}: <strong>₹${Math.abs(balance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    </span>
+                `;
+            }
+        }
 
         // Update hidden fields
         const finalAmt = document.getElementById('finalAmount');
