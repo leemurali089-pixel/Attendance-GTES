@@ -94,22 +94,36 @@ const UserManager = {
         }
     },
 
-    // Get all users
-    async getUsers() {
-        // Fast path for login UX: prefer already-cached users first.
-        const cached = DataManager.getData(this.STORAGE_KEY);
-        const cachedNorm = typeof DataManager._normalizeGtesUsersPayload === 'function'
-            ? DataManager._normalizeGtesUsersPayload(cached)
-            : cached;
-        if (Array.isArray(cachedNorm) && cachedNorm.length > 0) {
-            return cachedNorm;
-        }
-
-        const data = await DataManager.loadData(this.STORAGE_KEY);
+    _normalizeUsers(data) {
         const norm = typeof DataManager._normalizeGtesUsersPayload === 'function'
             ? DataManager._normalizeGtesUsersPayload(data)
             : data;
         return Array.isArray(norm) ? norm : [];
+    },
+
+    _isBootstrapOnlyUsers(users) {
+        return Array.isArray(users) &&
+            users.length === 1 &&
+            String(users[0] && users[0].username || '').toLowerCase() === 'admin';
+    },
+
+    // Get all users
+    async getUsers(options = {}) {
+        const force = options && options.force === true;
+        if (!force) {
+            const cachedNorm = this._normalizeUsers(DataManager.getData(this.STORAGE_KEY));
+            // Do not trust a lone bootstrap admin — disk may still have real accounts when Firebase rules block cloud.
+            if (cachedNorm.length > 0 && !this._isBootstrapOnlyUsers(cachedNorm)) {
+                return cachedNorm;
+            }
+        }
+
+        if (force && typeof DataManager !== 'undefined' && DataManager.invalidateDataCache) {
+            DataManager.invalidateDataCache(this.STORAGE_KEY);
+        }
+
+        const data = await DataManager.loadData(this.STORAGE_KEY, force ? { forceRefresh: true } : undefined);
+        return this._normalizeUsers(data);
     },
 
     // Save users
@@ -157,17 +171,8 @@ const UserManager = {
         return newUser;
     },
 
-    // Authenticate user
-    async authenticate(username, password) {
-        const users = await this.getUsers();
-        const uq = (username || '').trim();
-        const user = users.find(u =>
-            u &&
-            (u.username || '').trim().toLowerCase() === uq.toLowerCase() &&
-            u.isActive !== false
-        );
-
-        if (user) {
+    async _validateUserCredentials(user, username, password, users) {
+        if (!user) return null;
             let isValid = false;
             const storedPass = user.password != null && user.password !== undefined
                 ? String(user.password)
@@ -237,21 +242,40 @@ const UserManager = {
                 }
             }
 
-            if (isValid) {
-                // Store session
-                await this.setCurrentUser(user);
-                return {
-                    success: true,
-                    user: {
-                        id: user.id,
-                        username: user.username,
-                        role: user.role,
-                        fullName: user.fullName,
-                        permissions: user.permissions || []
-                    }
-                };
-            }
+        if (isValid) {
+            await this.setCurrentUser(user);
+            return {
+                success: true,
+                user: {
+                    id: user.id,
+                    username: user.username,
+                    role: user.role,
+                    fullName: user.fullName,
+                    permissions: user.permissions || []
+                }
+            };
         }
+        return null;
+    },
+
+    // Authenticate user
+    async authenticate(username, password) {
+        const uq = (username || '').trim();
+        const findUser = (users) => users.find(u =>
+            u &&
+            (u.username || '').trim().toLowerCase() === uq.toLowerCase() &&
+            u.isActive !== false
+        );
+
+        let users = await this.getUsers();
+        let hit = await this._validateUserCredentials(findUser(users), username, password, users);
+        if (hit && hit.success === false) return hit;
+        if (hit) return hit;
+
+        users = await this.getUsers({ force: true });
+        hit = await this._validateUserCredentials(findUser(users), username, password, users);
+        if (hit && hit.success === false) return hit;
+        if (hit) return hit;
 
         return {
             success: false,

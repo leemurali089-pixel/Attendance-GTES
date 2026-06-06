@@ -1241,19 +1241,36 @@ const DataManager = {
         }
 
         if (storageKey === 'gtes_users') {
+            let diskUsers = null;
+            if (window.electronAPI) {
+                try {
+                    const diskRes = await window.electronAPI.loadData('gtes_users');
+                    if (diskRes && diskRes.success && diskRes.data) {
+                        diskUsers = this._normalizeGtesUsersPayload(diskRes.data);
+                    }
+                } catch (diskErr) {
+                    console.debug('[DataManager] gtes_users disk preload:', diskErr && diskErr.message);
+                }
+            }
+
             data = this._normalizeGtesUsersPayload(data);
-            if (Array.isArray(localParsed) && localParsed.length > 0) {
-                const merged = this._mergeRecordArraysById(
-                    localParsed,
-                    Array.isArray(data) ? data : [],
-                    'gtes_users'
-                );
+            const layers = [
+                Array.isArray(diskUsers) ? diskUsers : null,
+                Array.isArray(localParsed) && localParsed.length ? localParsed : null,
+                Array.isArray(data) && data.length ? data : null
+            ].filter(Boolean);
+
+            if (layers.length > 0) {
+                let merged = [];
+                layers.forEach((layer) => {
+                    merged = this._mergeRecordArraysById(merged, layer, 'gtes_users');
+                });
                 if (merged.length > (Array.isArray(data) ? data.length : 0)) {
                     console.warn(
-                        `[DataManager] Merged ${merged.length} gtes_users (disk/cache had more than cloud-only snapshot).`
+                        `[DataManager] Merged ${merged.length} gtes_users from disk/cache/cloud sources.`
                     );
-                    data = merged;
                 }
+                data = merged;
             }
         }
 
