@@ -973,7 +973,7 @@ const InvoicesUI = {
         this.searchTimeout = setTimeout(() => {
             if (document.getElementById('invoiceSearch')) this.updateTable();
             if (document.getElementById('purchaseSearch')) this.updatePurchasesTable();
-        }, 300);
+        }, 400);
     },
 
     updateTable() {
@@ -1060,7 +1060,7 @@ const InvoicesUI = {
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
         const BA = this._ba();
         const canComputeLedgerSummary = BA && BA.getAccountLedger
-            && filteredAll.length <= 220;
+            && filteredAll.length <= 80;
         if (canComputeLedgerSummary) {
             const partyMap = new Map();
             filteredAll.forEach(inv => {
@@ -1119,7 +1119,7 @@ const InvoicesUI = {
 
         // Per-row ledger due: cached by party (one getAccountLedger per customer, not per row).
         const canComputeRowLedgerDue = BA && BA.getAccountLedger
-            && forTable.length <= 220;
+            && forTable.length <= 80;
         const ledgerCache = new Map();
         const getLedgerDueForInv = (inv) => {
             if (!canComputeRowLedgerDue) return null;

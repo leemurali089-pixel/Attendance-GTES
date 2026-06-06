@@ -968,26 +968,40 @@ const DataManager = {
         
         // Asynchronous Second Phase: Heavy data loads (don't block UI boot)
         // This is deferred so the Login/Dashboard can appear immediately.
+        const heavyPrefetchKeys = new Set([
+            'invoices', 'vouchers', 'purchases', 'gtes_expenses', 'customers', 'inventory', 'inventoryTransactions'
+        ]);
+        const prefetchOrder = [
+            ...dataKeys.filter((k) => !heavyPrefetchKeys.has(k)),
+            ...dataKeys.filter((k) => heavyPrefetchKeys.has(k))
+        ];
         const runPrefetch = async () => {
             if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
-                await new Promise((r) => setTimeout(r, 1500));
+                await new Promise((r) => setTimeout(r, 3500));
             }
             console.log("[DataManager]: Prefetching transaction modules in background...");
-            const prefetchBatch = 2;
-            for (let i = 0; i < dataKeys.length; i += prefetchBatch) {
-                const chunk = dataKeys.slice(i, i + prefetchBatch);
-                await Promise.all(chunk.map((key) =>
-                    this.loadData(key).catch((err) => {
-                        console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
-                    })
-                ));
-                await new Promise((r) => setTimeout(r, 60));
+            for (let i = 0; i < prefetchOrder.length; i++) {
+                const key = prefetchOrder[i];
+                if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
+                    await new Promise((r) => setTimeout(r, 120));
+                }
+                await this.loadData(key).catch((err) => {
+                    console.error(`[DataManager] Background prefetch failed for '${key}':`, err);
+                });
+                await new Promise((r) => setTimeout(r, heavyPrefetchKeys.has(key) ? 180 : 90));
             }
             console.log("[DataManager]: Background data prefetch complete.");
             this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
             this.scheduleSundayHolidayCheck();
         };
-        setTimeout(() => { void runPrefetch(); }, 2500);
+        const schedulePrefetch = () => {
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(() => { void runPrefetch(); }, { timeout: 12000 });
+            } else {
+                setTimeout(() => { void runPrefetch(); }, 4000);
+            }
+        };
+        schedulePrefetch();
         })();
     },
 

@@ -2846,13 +2846,16 @@ const VouchersUI = {
         if (pendingDocs.length === 0) {
             tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">No pending ${isPayment ? 'bills' : 'invoices'} — the full amount will be posted as Advance Payment / On Account.</td></tr>`;
         } else {
+            const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
+                ? VoucherManager.getVoucherAllocationsMap(otherPendingTx, isPayment ? 'payment' : 'receipt')
+                : new Map();
+            const frag = document.createDocumentFragment();
             pendingDocs.forEach(doc => {
                 const tr = document.createElement('tr');
                 const docNo = doc.invoiceNo || doc.billNo || doc.vch_no || doc.id;
                 const totalAmountNum = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
                 const total = totalAmountNum.toFixed(2);
-                
-                const allocMap = VoucherManager.getVoucherAllocationsMap(otherPendingTx, isPayment ? 'payment' : 'receipt');
+
                 const pendingNum = VoucherManager.getDocumentBalance(
                     doc.id,
                     totalAmountNum,
@@ -2910,12 +2913,17 @@ const VouchersUI = {
                                oninput="VouchersUI.calculateTotal()" ${isAssigned ? '' : 'disabled'}>
                     </td>
                 `;
-                tbody.appendChild(tr);
+                frag.appendChild(tr);
             });
+            tbody.appendChild(frag);
         }
 
         // Recalculate totals (advance auto-fills from unallocated balance)
-        setTimeout(() => this.calculateTotal(), 100);
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => this.calculateTotal());
+        } else {
+            setTimeout(() => this.calculateTotal(), 0);
+        }
     },
 
     calculateTotal(checkbox) {

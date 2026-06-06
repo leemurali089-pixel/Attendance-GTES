@@ -342,8 +342,16 @@ const App = {
         this._startupGraceEndsAt = Date.now() + Math.max(5000, Number(ms) || 30000);
     },
 
+    /** Yield one frame so clicks/paints stay responsive during heavy work. */
+    _yieldFrame() {
+        return new Promise((r) => {
+            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => r());
+            else setTimeout(r, 0);
+        });
+    },
+
     async init() {
-        this._markStartupGrace(35000);
+        this._markStartupGrace(45000);
         // Initialize state
         this.currentView = 'landing';
         this.previousView = 'landing';
@@ -361,7 +369,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.46';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.47';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -406,12 +414,10 @@ const App = {
                     setTimeout(() => this._initDeferredModules(), 15000);
                 }
             } else {
-                this._setInitialBootProgress(100, 'Ready');
-                this.hideLoader(0);
                 loginScreenReady = true;
                 void UserManager.init().then(() => this.updateCompanyBranding().catch((e) =>
                     console.warn('[App] updateCompanyBranding:', e && e.message)));
-                setTimeout(() => this._initDeferredModules(), 12000);
+                setTimeout(() => this._initDeferredModules(), 20000);
             }
         } catch (error) {
             bootFailed = true;
@@ -661,7 +667,9 @@ const App = {
     },
 
     async checkLoginStatus() {
-        const isLoggedIn = await UserManager.isLoggedIn();
+        const permCtx = await UserManager.getPermissionContext();
+        const user = permCtx.user;
+        const isLoggedIn = !!user;
         const loginOverlay = document.getElementById('loginOverlay');
         const userInfo = document.getElementById('userInfo');
         const userNameDisplay = document.getElementById('userNameDisplay');
@@ -670,8 +678,6 @@ const App = {
         console.log('Checking login status:', isLoggedIn);
 
         if (isLoggedIn) {
-            const user = await UserManager.getCurrentUser();
-            const permCtx = await UserManager.getPermissionContext();
             const hasPerm = (p) => permCtx.has(p);
             if (loginOverlay) {
                 loginOverlay.classList.add('hidden');
@@ -826,9 +832,9 @@ const App = {
                 landingThemeToggle.checked = savedTheme === 'light';
             }
 
-            this._setInitialBootProgress(88, 'Opening dashboard…');
-            await this.showView('dashboard', {}, { suppressLoader: true, fastBoot: true });
             this._setInitialBootProgress(100, 'Ready');
+            this.hideLoader(0);
+            void this.showView('dashboard', {}, { suppressLoader: true, fastBoot: true });
             if (typeof window.__gtesSyncShellVisibility === 'function') {
                 window.__gtesSyncShellVisibility();
             }
@@ -1038,6 +1044,7 @@ const App = {
                     K.SETTINGS, K.EMPLOYEES, 'gtes_tasks', 'orders'
                 ]);
                 if (v === 'dashboard' && dashDataKeys.has(d.key)) {
+                    if (this.isInStartupGrace && this.isInStartupGrace()) return;
                     this._refreshUIFromDataKey(d.key).catch(() => {});
                     return;
                 }
@@ -1857,16 +1864,17 @@ const App = {
 
     async _hydrateDashboardInBackground() {
         try {
+            await this._yieldFrame();
             const keys = [
-                'invoices',
-                'vouchers',
                 DataManager.KEYS.ATTENDANCE,
-                DataManager.KEYS.EMPLOYEES
+                DataManager.KEYS.EMPLOYEES,
+                'invoices',
+                'vouchers'
             ].filter(Boolean);
-            for (let i = 0; i < keys.length; i += 2) {
-                await Promise.all(keys.slice(i, i + 2).map((k) =>
-                    DataManager.loadData(k).catch((e) => console.warn(`[App] dashboard ${k}:`, e && e.message))
-                ));
+            for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                await DataManager.loadData(k).catch((e) => console.warn(`[App] dashboard ${k}:`, e && e.message));
+                if (i % 2 === 1) await this._yieldFrame();
             }
             await this.loadDashboard({ allowHeavyFetch: true });
             this._refreshPremiumDashboardShell();
@@ -2516,7 +2524,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.46';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.47';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');
