@@ -18,28 +18,27 @@ const PdfMakeInit = {
     ensureReady() {
         if (typeof pdfMake === 'undefined') {
             throw new Error(
-                'pdfmake not loaded. Ensure index.html includes node_modules/pdfmake/build/pdfmake.min.js'
+                'pdfmake not loaded. Ensure index.html includes vendor/pdfmake/build/pdfmake.min.js'
             );
         }
         if (!this._hasRoboto()) {
             throw new Error(
                 'pdfmake Roboto fonts not loaded. Add after vfs_fonts.js:\n'
-                + '  <script src="node_modules/pdfmake/build/fonts/Roboto.js"></script>'
+                + '  <script src="vendor/pdfmake/build/fonts/Roboto.js"></script>'
             );
         }
         return pdfMake;
     },
 
     logStatus() {
+        const hasPdfMake = typeof pdfMake !== 'undefined';
         const ready = this.isReady();
         console.log('[PdfMakeInit]', {
             ready,
-            pdfMake: typeof pdfMake !== 'undefined',
-            fonts: typeof pdfMake !== 'undefined' && pdfMake.fonts
-                ? Object.keys(pdfMake.fonts)
-                : [],
-            addVirtualFileSystem: typeof pdfMake?.addVirtualFileSystem,
-            addFontContainer: typeof pdfMake?.addFontContainer
+            pdfMake: hasPdfMake,
+            fonts: hasPdfMake && pdfMake.fonts ? Object.keys(pdfMake.fonts) : [],
+            addVirtualFileSystem: hasPdfMake ? typeof pdfMake.addVirtualFileSystem : 'missing',
+            addFontContainer: hasPdfMake ? typeof pdfMake.addFontContainer : 'missing'
         });
         return ready;
     }
