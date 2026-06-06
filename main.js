@@ -260,11 +260,7 @@ app.whenReady().then(async () => {
         autoUpdater.on('update-available', (info) => send('update-available', { info }));
         autoUpdater.on('update-not-available', (info) => send('update-not-available', { info }));
         autoUpdater.on('error', (err) => {
-            let msg = String(err && err.message || err);
-            if (/404|status code 404/i.test(msg) && /github\.com.*releases\/download/i.test(msg)) {
-                msg += ' The release file name must match latest.yml (e.g. MJS-PrimeLogic-Setup-<version>.exe from dist/ after build).';
-            }
-            send('error', { message: msg });
+            send('error', { message: formatUpdaterError(err) });
         });
         autoUpdater.on('download-progress', (p) => send('download-progress', { progress: p }));
         autoUpdater.on('update-downloaded', (info) => send('update-downloaded', { info }));
@@ -272,10 +268,12 @@ app.whenReady().then(async () => {
         // First background check a few seconds after startup so splash/
         // initial render is not blocked by network.
         setTimeout(() => {
-            autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-                console.warn('[updater] initial check failed:', err && err.message);
+            checkForUpdatesWithRetry(3, 10000).then(() => {
+                // checkForUpdatesAndNotify also shows OS notification; retry path uses checkForUpdates only.
+            }).catch((err) => {
+                console.warn('[updater] initial check failed:', formatUpdaterError(err));
             });
-        }, 15000);
+        }, 20000);
     } else if (!app.isPackaged) {
         console.log('[updater] skipped (dev mode / not packaged)');
     }
@@ -303,7 +301,7 @@ ipcMain.handle('updater:check', async () => {
         // even when it is equal to the current one. Compare versions so
         // the renderer can display the right message without waiting
         // for the async update-available / update-not-available event.
-        const r = await autoUpdater.checkForUpdates();
+        const r = await checkForUpdatesWithRetry(4, 8000);
         const remote = r && r.updateInfo && r.updateInfo.version;
         const current = app.getVersion();
         const updateAvailable = !!(remote && compareSemver(remote, current) > 0);
@@ -317,9 +315,42 @@ ipcMain.handle('updater:check', async () => {
             }
         };
     } catch (e) {
-        return { success: false, error: e && e.message ? e.message : String(e) };
+        return { success: false, error: formatUpdaterError(e) };
     }
 });
+
+/** GitHub Actions may publish Setup.exe before latest.yml — transient 404. */
+function isUpdaterPublishRace404(err) {
+    const msg = String(err && err.message || err || '');
+    return /404/i.test(msg) && /latest\.yml/i.test(msg) && /releases\/download/i.test(msg);
+}
+
+function formatUpdaterError(err) {
+    let msg = String(err && err.message || err || 'unknown');
+    if (isUpdaterPublishRace404(err)) {
+        return 'The release is still publishing on GitHub (latest.yml not ready yet). Wait 1–2 minutes and click Check for Updates again.';
+    }
+    if (/404/i.test(msg) && /github\.com.*releases\/download/i.test(msg)) {
+        msg += ' The release must include latest.yml and MJS-PrimeLogic-Setup-<version>.exe (from electron-builder publish).';
+    }
+    return msg;
+}
+
+async function checkForUpdatesWithRetry(maxAttempts = 4, delayMs = 8000) {
+    if (!autoUpdater) throw new Error('updater unavailable');
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await autoUpdater.checkForUpdates();
+        } catch (e) {
+            lastErr = e;
+            if (!isUpdaterPublishRace404(e) || attempt >= maxAttempts) throw e;
+            console.warn(`[updater] latest.yml not ready (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms…`);
+            await new Promise((r) => setTimeout(r, delayMs));
+        }
+    }
+    throw lastErr;
+}
 
 function compareSemver(a, b) {
     const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);

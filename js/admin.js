@@ -1177,7 +1177,12 @@ const AdminModule = {
             try {
                 const r = await api.check();
                 if (!r || !r.success) {
-                    setStatus('Could not check: ' + ((r && r.error) || 'unknown'), 'text-warning');
+                    const err = (r && r.error) || 'unknown';
+                    const isPublishWait = /still publishing|latest\.yml not ready/i.test(err);
+                    setStatus(
+                        isPublishWait ? err : ('Could not check: ' + err),
+                        isPublishWait ? 'text-info' : 'text-warning'
+                    );
                 }
                 // On success, `update-available` or `update-not-available`
                 // events will drive the status/button visibility. Do not
