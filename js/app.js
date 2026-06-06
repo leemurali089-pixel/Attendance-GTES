@@ -365,11 +365,19 @@ const App = {
         const nav = document.querySelector('.navbar');
         if (nav) nav.style.display = 'none';
 
+        const _hasSession = (() => {
+            try { return !!sessionStorage.getItem('gtes_current_user'); } catch (_) { return false; }
+        })();
+
         this._bootSequenceActive = true;
-        this.showLoader();
+        if (_hasSession) {
+            this.showLoader();
+        } else {
+            this.presentLoginOverlay();
+        }
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.48';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.49';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -1609,6 +1617,11 @@ const App = {
             targetView.classList.remove('d-none');
             targetView.style.display = '';
 
+            const fastShellViews = ['attendance', 'invoices', 'vouchers', 'challans', 'jobcard', 'customers', 'inventory', 'services'];
+            if (!suppressLoader && fastShellViews.includes(viewName)) {
+                this.hideLoader(0);
+            }
+
             // Update active nav (main navbar only — do not strip .active from Analytics sub-tabs, dropdowns, etc.)
             document.querySelectorAll('a.nav-link[data-view]').forEach(link => {
                 link.classList.remove('active');
@@ -2420,8 +2433,242 @@ const App = {
         }, 3000);
     },
 
-    confirmAction(message) {
-        return confirm(message);
+    _lastFocusedBeforeDialog: null,
+    _confirmDialogZ: 1270,
+
+    /**
+     * Ensure a modal (e.g. document preview) appears above bank import / voucher / other stacked modals.
+     * Bootstrap 5 assigns z-index by DOM order among .modal.show nodes; #pdfPreviewModal lives early in
+     * index.html while bank/voucher modals are appended last — relocate preview before/at show time.
+     */
+    raiseModalAboveStack(modalEl) {
+        if (!modalEl) return;
+
+        const otherOpenCount = () =>
+            [...document.querySelectorAll('.modal.show')].filter((m) => m !== modalEl).length;
+
+        const boost = () => {
+            const stacking = otherOpenCount() > 0
+                || (modalEl.classList.contains('show') && document.querySelectorAll('.modal.show').length > 1);
+            if (!stacking) return;
+
+            document.body.appendChild(modalEl);
+
+            let maxZ = 1040;
+            document.querySelectorAll('.modal.show').forEach((node) => {
+                const z = parseInt(window.getComputedStyle(node).zIndex, 10);
+                if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+            });
+            document.querySelectorAll('.modal-backdrop.show').forEach((node) => {
+                const z = parseInt(window.getComputedStyle(node).zIndex, 10);
+                if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+            });
+
+            const modalZ = Math.max(maxZ + 20, 2060);
+            const backdropZ = modalZ - 5;
+            modalEl.style.zIndex = String(modalZ);
+            const backs = document.querySelectorAll('.modal-backdrop.show');
+            if (backs.length) backs[backs.length - 1].style.zIndex = String(backdropZ);
+        };
+
+        if (otherOpenCount() > 0) {
+            document.body.appendChild(modalEl);
+        }
+
+        modalEl.addEventListener('shown.bs.modal', boost, { once: true });
+        setTimeout(boost, 0);
+        requestAnimationFrame(() => setTimeout(boost, 0));
+        setTimeout(boost, 80);
+        setTimeout(boost, 200);
+    },
+
+    _escapeDialogHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/\n/g, '<br>');
+    },
+
+    /**
+     * Restore keyboard focus after in-app dialogs. Native alert/confirm breaks typing in Electron.
+     */
+    restoreRendererKeyboardFocus(preferredEl = null) {
+        const pick = (el) => {
+            if (!el || !el.isConnected || typeof el.focus !== 'function') return false;
+            if (el.disabled || el.readOnly) return false;
+            const tag = (el.tagName || '').toLowerCase();
+            if (el.isContentEditable) return true;
+            if (tag === 'textarea' || tag === 'select') return true;
+            if (tag === 'input') {
+                const type = (el.type || '').toLowerCase();
+                return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden'].includes(type);
+            }
+            return el.getAttribute('tabindex') != null && el.getAttribute('tabindex') !== '-1';
+        };
+
+        const target = pick(preferredEl) ? preferredEl
+            : (pick(this._lastFocusedBeforeDialog) ? this._lastFocusedBeforeDialog : null);
+
+        requestAnimationFrame(() => {
+            if (target) {
+                try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+                return;
+            }
+            const modal = document.querySelector('.modal.show');
+            if (modal) {
+                const first = modal.querySelector('input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled])');
+                if (pick(first)) {
+                    try { first.focus({ preventScroll: true }); } catch (_) { first.focus(); }
+                }
+            }
+        });
+    },
+
+    /**
+     * In-app confirm — replaces window.confirm() (breaks keyboard input in Electron after dismiss).
+     * @returns {Promise<boolean>}
+     */
+    confirmAction(message, {
+        title = 'Confirm',
+        confirmLabel = 'OK',
+        cancelLabel = 'Cancel',
+        danger = false,
+        restoreFocus = true,
+        focusAfterClose = null
+    } = {}) {
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+            console.warn('[App.confirmAction] Bootstrap unavailable; using native confirm');
+            return Promise.resolve(confirm(message));
+        }
+
+        const active = document.activeElement;
+        if (active && active !== document.body && active !== document.documentElement) {
+            this._lastFocusedBeforeDialog = active;
+        }
+
+        return new Promise((resolve) => {
+            const id = 'gtesAppConfirmModal';
+            document.getElementById(id)?.remove();
+
+            const z = (this._confirmDialogZ += 2);
+            const btnClass = danger ? 'btn-danger' : 'btn-primary';
+            const safeMsg = this._escapeDialogHtml(message);
+            const safeTitle = this._escapeDialogHtml(title);
+
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="modal fade" id="${id}" tabindex="-1" data-bs-backdrop="static" style="z-index:${z}">
+                    <div class="modal-dialog modal-dialog-centered modal-sm">
+                        <div class="modal-content bg-dark text-white border-secondary">
+                            <div class="modal-header border-secondary py-2">
+                                <h6 class="modal-title">${safeTitle}</h6>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" data-gtes-action="no" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body small">${safeMsg}</div>
+                            <div class="modal-footer border-secondary py-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-gtes-action="no">${this._escapeDialogHtml(cancelLabel)}</button>
+                                <button type="button" class="btn btn-sm ${btnClass}" data-gtes-action="yes">${this._escapeDialogHtml(confirmLabel)}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`);
+
+            const el = document.getElementById(id);
+            const settle = (ok) => {
+                if (restoreFocus) {
+                    this.restoreRendererKeyboardFocus(focusAfterClose);
+                }
+                resolve(ok);
+            };
+            const finish = (ok) => {
+                const inst = bootstrap.Modal.getInstance(el);
+                if (!inst) {
+                    el.remove();
+                    settle(ok);
+                    return;
+                }
+                inst.hide();
+                el.addEventListener('hidden.bs.modal', () => {
+                    el.remove();
+                    settle(ok);
+                }, { once: true });
+            };
+
+            el.querySelector('[data-gtes-action="yes"]').addEventListener('click', () => finish(true));
+            el.querySelectorAll('[data-gtes-action="no"]').forEach((btn) => {
+                btn.addEventListener('click', () => finish(false));
+            });
+            el.addEventListener('shown.bs.modal', () => {
+                const backs = document.querySelectorAll('.modal-backdrop');
+                const top = backs[backs.length - 1];
+                if (top) top.style.zIndex = String(z - 1);
+            }, { once: true });
+
+            const modal = new bootstrap.Modal(el, { backdrop: 'static', focus: true });
+            modal.show();
+        });
+    },
+
+    /**
+     * In-app alert — replaces window.alert() for the same Electron keyboard issue.
+     * @returns {Promise<void>}
+     */
+    alertDialog(message, { title = 'Notice', okLabel = 'OK' } = {}) {
+        if (typeof App !== 'undefined' && typeof App.showNotification === 'function') {
+            const plain = String(message == null ? '' : message).replace(/<br\s*\/?>/gi, '\n');
+            const oneLine = plain.split('\n')[0];
+            if (oneLine.length < 120) {
+                App.showNotification(oneLine, 'info');
+            }
+        }
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+            alert(message);
+            return Promise.resolve();
+        }
+
+        const active = document.activeElement;
+        if (active && active !== document.body) this._lastFocusedBeforeDialog = active;
+
+        return new Promise((resolve) => {
+            const id = 'gtesAppAlertModal';
+            document.getElementById(id)?.remove();
+            const z = (this._confirmDialogZ += 2);
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="modal fade" id="${id}" tabindex="-1" data-bs-backdrop="static" style="z-index:${z}">
+                    <div class="modal-dialog modal-dialog-centered modal-sm">
+                        <div class="modal-content bg-dark text-white border-secondary">
+                            <div class="modal-header border-secondary py-2">
+                                <h6 class="modal-title">${this._escapeDialogHtml(title)}</h6>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body small">${this._escapeDialogHtml(message)}</div>
+                            <div class="modal-footer border-secondary py-2">
+                                <button type="button" class="btn btn-sm btn-primary" data-gtes-action="ok">${this._escapeDialogHtml(okLabel)}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`);
+            const el = document.getElementById(id);
+            const done = () => {
+                this.restoreRendererKeyboardFocus();
+                resolve();
+            };
+            const close = () => {
+                const inst = bootstrap.Modal.getInstance(el);
+                if (!inst) { el.remove(); done(); return; }
+                inst.hide();
+                el.addEventListener('hidden.bs.modal', () => { el.remove(); done(); }, { once: true });
+            };
+            el.querySelector('[data-gtes-action="ok"]').addEventListener('click', close);
+            el.querySelector('.btn-close')?.addEventListener('click', close);
+            el.addEventListener('shown.bs.modal', () => {
+                const backs = document.querySelectorAll('.modal-backdrop');
+                const top = backs[backs.length - 1];
+                if (top) top.style.zIndex = String(z - 1);
+            }, { once: true });
+            bootstrap.Modal.getOrCreateInstance(el, { backdrop: 'static', focus: true }).show();
+        });
     },
 
     async updateCompanyBranding() {
@@ -2524,7 +2771,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.48';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.49';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');

@@ -55,6 +55,19 @@ async function notifyNewFlagged() {
     }
 }
 
+function isInvalidGrantError(err) {
+    const msg = String((err && err.message) ? err.message : err || '');
+    return msg.includes('invalid_grant');
+}
+
+async function handleInvalidGrant(err) {
+    console.warn('[gmailIpc] Gmail token expired/revoked — clearing session and stopping poll:', err && err.message);
+    try { await auth.clearTokens(); } catch (_) { /* ignore */ }
+    stopPolling();
+    broadcast('gmail:sync-status', { running: false, error: 'Gmail session expired. Reconnect in Admin → Gmail.' });
+    broadcast('gmail:auth-expired', {});
+}
+
 async function runPollOnce() {
     if (pollBusy) return;
     try {
@@ -66,6 +79,10 @@ async function runPollOnce() {
         broadcast('gmail:sync-status', { running: false, lastSyncAt: new Date().toISOString(), result });
         await notifyNewFlagged();
     } catch (e) {
+        if (isInvalidGrantError(e)) {
+            await handleInvalidGrant(e);
+            return;
+        }
         broadcast('gmail:sync-status', { running: false, error: e.message });
     } finally {
         pollBusy = false;
@@ -247,13 +264,25 @@ function init() {
     console.log('[gmailIpc] init — v3 (sync mutex + index auto-heal + enrichment + user rules)');
     register();
     ensureTray();
-    // Auto-start polling if already logged in.
+    // Validate stored token once after boot; clear expired sessions without blocking UI.
     setTimeout(async () => {
         try {
             const st = await auth.status();
-            if (st.isLoggedIn) startPolling(90_000);
+            if (!st.isLoggedIn) return;
+            const gmail = await auth.getGmail();
+            await gmail.users.getProfile({ userId: 'me' });
+        } catch (e) {
+            if (isInvalidGrantError(e)) await handleInvalidGrant(e);
+        }
+    }, 12000);
+    // Defer background polling until after login/boot.
+    setTimeout(async () => {
+        try {
+            const st = await auth.status();
+            if (!st.isLoggedIn) return;
+            startPolling(120_000);
         } catch {}
-    }, 2000);
+    }, 45000);
 }
 
 module.exports = { init, startPolling, stopPolling };

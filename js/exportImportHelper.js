@@ -821,7 +821,7 @@ const ExportImportHelper = {
             if (!root) throw new Error("Invalid backup format: Missing GTES_Backup root element.");
 
             if (schemaAction === 'create') {
-                if (!confirm("FRESH SCHEMA: This will OVERWRITE your current data with the backup. Continue?")) {
+                if (!(await App.confirmAction("FRESH SCHEMA: This will OVERWRITE your current data with the backup. Continue?"))) {
                     return;
                 }
             }

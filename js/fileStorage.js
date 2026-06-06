@@ -221,8 +221,13 @@ const FileStorage = {
         // rules that require `auth != null` will deny every path.
         if (window.firebaseAuthReady) {
             try {
-                const ar = await window.firebaseAuthReady;
-                if (!ar || !ar.ok) {
+                const ar = await Promise.race([
+                    window.firebaseAuthReady,
+                    new Promise((resolve) => setTimeout(() => resolve({ ok: false, timeout: true }), 6000))
+                ]);
+                if (ar && ar.timeout) {
+                    console.warn('[FileStorage] Firebase auth still pending after 6s — continuing with local cache.');
+                } else if (!ar || !ar.ok) {
                     console.warn(
                         '[FileStorage] Firebase Anonymous Auth did not succeed — cloud sync may show permission_denied. ' +
                         'Enable Anonymous in Firebase Console (Authentication → Sign-in method).'
@@ -347,7 +352,7 @@ const FileStorage = {
         return localSuccess;
     },
 
-    async loadData(key) {
+    async loadData(key, options = {}) {
         // Handle Electron first
         let localData = null;
         if (window.electronAPI) {
@@ -374,7 +379,16 @@ const FileStorage = {
             }
         }
 
+        const DM = window.DataManager;
+        const arrayKey =
+            !!(DM && typeof DM._keysStoredAsArrays === 'function' && DM._keysStoredAsArrays().has(key));
+        const toArr = (v) => {
+            if (!arrayKey || !DM || typeof DM.coerceJsonArray !== 'function') return v;
+            return DM.coerceJsonArray(v);
+        };
+
         if (!this.isCloudReady) {
+            if (localData != null) return arrayKey ? toArr(localData) : localData;
             try {
                 const raw = localStorage.getItem(key);
                 return raw ? JSON.parse(raw) : null;
@@ -384,18 +398,14 @@ const FileStorage = {
             }
         }
 
-        const DM = window.DataManager;
-        const arrayKey =
-            !!(DM && typeof DM._keysStoredAsArrays === 'function' && DM._keysStoredAsArrays().has(key));
-        const toArr = (v) => {
-            if (!arrayKey || !DM || typeof DM.coerceJsonArray !== 'function') return v;
-            return DM.coerceJsonArray(v);
-        };
-
         try {
             // Routine; use debug so DevTools default level stays quiet (enable Verbose to see).
             console.debug(`[FileStorage] Fetching '${key}' from Realtime Database…`);
-            const snapshot = await window.db.ref(key).once('value');
+            const cloudTimeoutMs = typeof options.cloudTimeoutMs === 'number' ? options.cloudTimeoutMs : 10000;
+            const snapshot = await Promise.race([
+                window.db.ref(key).once('value'),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('cloud_timeout')), cloudTimeoutMs))
+            ]);
             if (!snapshot.exists()) {
                 return arrayKey ? toArr(localData) : localData;
             }
@@ -414,6 +424,21 @@ const FileStorage = {
                 ) {
                     return DM._mergeRecordArraysById(locArr, cloudArr, key);
                 }
+                // gtes_users: cloud can hold a stale bootstrap admin; always union with disk.
+                if (
+                    key === 'gtes_users' &&
+                    DM &&
+                    typeof DM._normalizeGtesUsersPayload === 'function' &&
+                    typeof DM._mergeRecordArraysById === 'function'
+                ) {
+                    const locUsers = DM._normalizeGtesUsersPayload(localData);
+                    const cloudUsers = DM._normalizeGtesUsersPayload(cloudRaw);
+                    if (Array.isArray(locUsers) && locUsers.length && Array.isArray(cloudUsers) && cloudUsers.length) {
+                        return DM._mergeRecordArraysById(locUsers, cloudUsers, key);
+                    }
+                    if (Array.isArray(locUsers) && locUsers.length) return locUsers;
+                    if (Array.isArray(cloudUsers) && cloudUsers.length) return cloudUsers;
+                }
                 if (arrayKey && Array.isArray(cloudArr)) return cloudArr;
                 if (arrayKey && Array.isArray(locArr)) return locArr;
                 return cloudArr;
@@ -423,6 +448,16 @@ const FileStorage = {
         } catch (error) {
             const code = error && error.code;
             const msg = error && error.message ? String(error.message) : '';
+            if (msg === 'cloud_timeout' || msg.indexOf('cloud_timeout') !== -1) {
+                console.warn(`[FileStorage] Cloud fetch timed out for '${key}' — using local cache.`);
+                if (localData != null) return arrayKey ? toArr(localData) : localData;
+                try {
+                    const raw = localStorage.getItem(key);
+                    return raw ? JSON.parse(raw) : null;
+                } catch (_) {
+                    return localData;
+                }
+            }
             const denied = code === 'PERMISSION_DENIED' || msg.indexOf('permission_denied') !== -1;
             if (denied) {
                 if (!FileStorage._permissionDeniedHintShown) {
@@ -439,6 +474,7 @@ const FileStorage = {
             } else {
                 console.error(`Error loading ${key} from Cloud:`, error);
             }
+            if (localData != null) return arrayKey ? toArr(localData) : localData;
             try {
                 const raw = localStorage.getItem(key);
                 return raw ? JSON.parse(raw) : null;

@@ -587,7 +587,7 @@ const SalaryModule = {
     },
 
     async emailPayslip(employeeName) {
-        if (!confirm(`Send payslip to ${employeeName} via email?`)) return;
+        if (!(await App.confirmAction(`Send payslip to ${employeeName} via email?`))) return;
 
         App.showLoader('Sending email...');
         try {
@@ -718,13 +718,14 @@ const SalaryModule = {
 
         ReportsModule.showEmployeeSelectionModal(
             (selectedEmployees) => {
-                if (confirm(`Are you sure you want to cancel the salary payout for ${selectedEmployees.length} employees? This will revert their advance deductions and waivers for this month.`)) {
+                void (async () => {
+                    if (!(await App.confirmAction(`Are you sure you want to cancel the salary payout for ${selectedEmployees.length} employees? This will revert their advance deductions and waivers for this month.`))) return;
                     AuthManager.requireAuth(async () => {
                         await DataManager.cancelSalaryPayout(this.currentYear, this.currentMonth, selectedEmployees);
                         App.showNotification('Salary payout cancelled for selected employees', 'success');
-                        await this.renderSalaryView(); // Refresh view
+                        await this.renderSalaryView();
                     });
-                }
+                })();
             },
             title,
             'Cancel Payout',

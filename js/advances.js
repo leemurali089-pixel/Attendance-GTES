@@ -629,7 +629,7 @@ const AdvancesModule = {
     },
 
     async deleteAdvance(advanceId) {
-        if (!App.confirmAction('Are you sure you want to delete this advance record?')) {
+        if (!(await App.confirmAction('Are you sure you want to delete this advance record?'))) {
             return;
         }
 

@@ -520,7 +520,7 @@ const BonusModule = {
         const batch = payouts.find(p => p.id === batchId);
         if (!batch) return;
 
-        if (!confirm(`Generate bonus payslips for ${batch.payouts.length} employees?`)) return;
+        if (!(await App.confirmAction(`Generate bonus payslips for ${batch.payouts.length} employees?`))) return;
 
         App.showLoader();
         try {
@@ -709,7 +709,7 @@ const BonusModule = {
     },
 
     async emailBonusPayslip(batchId, employeeName) {
-        if (!confirm(`Send bonus payslip to ${employeeName} via email?`)) return;
+        if (!(await App.confirmAction(`Send bonus payslip to ${employeeName} via email?`))) return;
 
         App.showLoader('Sending email...');
         try {

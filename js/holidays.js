@@ -248,7 +248,7 @@ const HolidaysModule = {
     },
 
     async deleteHoliday(holidayId) {
-        if (!App.confirmAction('Are you sure you want to delete this holiday?')) {
+        if (!(await App.confirmAction('Are you sure you want to delete this holiday?'))) {
             return;
         }
 

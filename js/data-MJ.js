@@ -48,6 +48,8 @@ const DataManager = {
         INVENTORY: 'inventory',
         TASKS: 'gtes_tasks',
         BANK_ALIAS: 'gtes_bank_alias',
+        BANK_LINKS: 'gtes_bank_links',
+        BANK_IMPORT_SESSION: 'gtes_bank_import_session',
         // Raw Data Storage (Bookkeeper Import)
         IMPORT_COLUMNS: 'gtes_import_columns',
         IMPORT_RAW: 'gtes_import_raw',

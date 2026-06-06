@@ -48,6 +48,9 @@ const DataManager = {
         INVENTORY: 'inventory',
         TASKS: 'gtes_tasks',
         BANK_ALIAS: 'gtes_bank_alias',
+        BANK_LINKS: 'gtes_bank_links',
+        /** Ready-to-import bank rows (not yet Import Saved) — restored when the same statement is re-opened */
+        BANK_IMPORT_SESSION: 'gtes_bank_import_session',
         // Raw Data Storage (Bookkeeper Import)
         IMPORT_COLUMNS: 'gtes_import_columns',
         IMPORT_RAW: 'gtes_import_raw',
@@ -706,6 +709,7 @@ const DataManager = {
             this.KEYS.JOURNAL_ENTRIES,
             this.KEYS.TAX_SCHEMES,
             this.KEYS.BANK_ALIAS,
+            this.KEYS.BANK_LINKS,
             this.KEYS.CHALLANS
         ];
         return [...new Set([...core, ...background, ...extra])];
@@ -941,11 +945,11 @@ const DataManager = {
         // Synchronous First Phase: Essential for UI, Branding, and Auth
         console.log("[DataManager]: Loading core system modules...");
         const coreResults = await Promise.all(coreKeys.map(async (key) => {
-            try { 
-                return await this.loadData(key); 
-            } catch (err) { 
+            try {
+                return await this.loadData(key, { bootFast: true, cloudTimeoutMs: 5000, deferMirrorAsync: true });
+            } catch (err) {
                 console.error(`[DataManager] Core load failed for '${key}':`, err);
-                return null; 
+                return null;
             }
         }));
 
@@ -1215,9 +1219,22 @@ const DataManager = {
             localParsed = this._normalizeGtesUsersPayload(localParsed);
         }
 
+        const bootFast = options.bootFast === true;
+        // Never boot-fast gtes_users from localStorage — disk + cloud merge must run first.
+        const skipBootFast = storageKey === 'gtes_users';
+        if (bootFast && !skipBootFast && localParsed != null && localParsed !== undefined) {
+            this._cache[storageKey] = localParsed;
+            this._trustedCacheKeys.add(storageKey);
+            void this.loadData(key, { forceRefresh: true, cloudTimeoutMs: options.cloudTimeoutMs || 8000 })
+                .catch((err) => console.warn(`[DataManager] Background refresh for '${storageKey}':`, err && err.message));
+            return localParsed;
+        }
+
         let data;
         try {
-            data = await FileStorage.loadData(storageKey);
+            data = await FileStorage.loadData(storageKey, {
+                cloudTimeoutMs: options.cloudTimeoutMs
+            });
         } catch (err) {
             console.error(`[DataManager] FileStorage.loadData('${storageKey}') failed:`, err);
             data = null;
@@ -1225,6 +1242,19 @@ const DataManager = {
 
         if (storageKey === 'gtes_users') {
             data = this._normalizeGtesUsersPayload(data);
+            if (Array.isArray(localParsed) && localParsed.length > 0) {
+                const merged = this._mergeRecordArraysById(
+                    localParsed,
+                    Array.isArray(data) ? data : [],
+                    'gtes_users'
+                );
+                if (merged.length > (Array.isArray(data) ? data.length : 0)) {
+                    console.warn(
+                        `[DataManager] Merged ${merged.length} gtes_users (disk/cache had more than cloud-only snapshot).`
+                    );
+                    data = merged;
+                }
+            }
         }
 
         if (this.MERGE_ON_LOAD_KEYS.has(storageKey) && data != null && !Array.isArray(data) && typeof data === 'object') {
@@ -1311,7 +1341,14 @@ const DataManager = {
             this._trustedCacheKeys.add(storageKey);
             if (key === 'challans' && storageKey !== key) this._trustedCacheKeys.add('challans');
 
-            await this._mirrorToLocalOrIDB(storageKey, data);
+            if (!options.deferMirror) {
+                if (options.deferMirrorAsync) {
+                    void this._mirrorToLocalOrIDB(storageKey, data).catch((e) =>
+                        console.warn(`[DataManager] mirror '${storageKey}':`, e && e.message));
+                } else {
+                    await this._mirrorToLocalOrIDB(storageKey, data);
+                }
+            }
             this._notifyPremiumDashAfterFinancialHydrate(storageKey);
         }
         return data;

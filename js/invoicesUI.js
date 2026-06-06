@@ -1776,13 +1776,13 @@ const InvoicesUI = {
 
     scheduleUnknownPartyCheck(input) {
         clearTimeout(this._unknownPartyTimer);
-        this._unknownPartyTimer = setTimeout(() => this.maybePromptNewPartyFromInvoice(input), 280);
+        this._unknownPartyTimer = setTimeout(() => void this.maybePromptNewPartyFromInvoice(input), 280);
     },
 
     /**
      * @returns {boolean} true if the create-party modal was opened (caller should abort save).
      */
-    maybePromptNewPartyFromInvoice(input) {
+    async maybePromptNewPartyFromInvoice(input) {
         if (!input || !document.getElementById('createInvoiceModal')?.classList.contains('show')) return false;
         const val = (input.value || '').trim();
         if (!val) return false;
@@ -1802,7 +1802,7 @@ const InvoicesUI = {
         if (hid && hid.trim()) return false;
 
         const label = isSales ? 'customer' : 'supplier';
-        if (!confirm(`"${val}" is not in your ${label} list.\n\nCreate as a new ${label} and fill in details?`)) return false;
+        if (!(await App.confirmAction(`"${val}" is not in your ${label} list.\n\nCreate as a new ${label} and fill in details?`))) return false;
 
         if (typeof DeliveryUI !== 'undefined' && typeof DeliveryUI.showCustomerModal === 'function') {
             DeliveryUI.currentCustomerType = isSales ? 'Customer' : 'Supplier';
@@ -1817,7 +1817,7 @@ const InvoicesUI = {
      * Invoices require a party that exists in Customers (matched by id or exact name).
      * @returns {object|null} Customer row or null if blocked (notification shown).
      */
-    assertResolvedPartyOrAbort(formData, opts = {}) {
+    async assertResolvedPartyOrAbort(formData, opts = {}) {
         const saveBtn = opts.saveBtn;
         const type = formData.get('type') || '';
         const isPurchase = String(type).includes('purchase');
@@ -1839,7 +1839,7 @@ const InvoicesUI = {
         }
         if (!party) {
             const nameInput = document.querySelector('#createInvoiceForm [name="customerName"]');
-            if (nameInput && this.maybePromptNewPartyFromInvoice(nameInput)) {
+            if (nameInput && (await this.maybePromptNewPartyFromInvoice(nameInput))) {
                 if (saveBtn) saveBtn.disabled = false;
                 return null;
             }
@@ -2440,7 +2440,7 @@ const InvoicesUI = {
             ? InvoiceManager.isGSTType(type)
             : (String(type).includes('gst') && !String(type).includes('non'));
 
-        const party = this.assertResolvedPartyOrAbort(formData, { saveBtn });
+        const party = await this.assertResolvedPartyOrAbort(formData, { saveBtn });
         if (!party) {
             this._saveInvoiceInProgress = false;
             if (saveBtn) saveBtn.disabled = false;
@@ -2834,7 +2834,7 @@ const InvoicesUI = {
         if (!form || !form.checkValidity()) { form?.reportValidity(); return; }
 
         const formData = new FormData(form);
-        const party = this.assertResolvedPartyOrAbort(formData);
+        const party = await this.assertResolvedPartyOrAbort(formData);
         if (!party) return;
 
         const type = formData.get('type') || '';
@@ -3484,7 +3484,7 @@ const InvoicesUI = {
                 const ids = linked.map(c => c.id).join(', ');
                 msg = `Delete this invoice and ${linked.length} linked challan(s) (${ids})?\n\nThey will be removed from History and View DC, and moved to Recycle Bin.`;
             }
-            if (!confirm(msg)) return;
+            if (!(await App.confirmAction(msg))) return;
             await InvoiceManager.deleteInvoice(id);
         }
         this.updateTable();

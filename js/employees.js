@@ -1533,7 +1533,7 @@ const EmployeesModule = {
                 + `Type: ${type} (${mode})\nEffective: ${effectiveDate}\n`
                 + (skipped.length ? `Skipped: ${skipped.length}\n` : '')
                 + `\nProceed?`;
-            if (!App.confirmAction(summary)) return;
+            if (!(await App.confirmAction(summary))) return;
 
             const employees = await DataManager.getEmployees();
             let applied = 0;
@@ -1606,7 +1606,7 @@ const EmployeesModule = {
     },
 
     async deleteEmployee(employeeId) {
-        if (!App.confirmAction('Are you sure you want to delete this employee? This action cannot be undone.')) {
+        if (!(await App.confirmAction('Are you sure you want to delete this employee? This action cannot be undone.'))) {
             return;
         }
 
@@ -1764,7 +1764,7 @@ const EmployeesModule = {
             btn.disabled = true;
             btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Deleting…`;
         }
-        if (!App.confirmAction('Delete this salary revision? If it is the latest revision, the employee base salary will roll back to the previous value.')) {
+        if (!(await App.confirmAction('Delete this salary revision? If it is the latest revision, the employee base salary will roll back to the previous value.'))) {
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = prevHtml;

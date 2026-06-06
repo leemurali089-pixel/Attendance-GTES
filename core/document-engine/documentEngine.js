@@ -503,6 +503,9 @@ const DocumentEngine = {
         if (typeof DeliveryUI !== 'undefined' && DeliveryUI._installPdfPreviewModalCleanup) {
             DeliveryUI._installPdfPreviewModalCleanup();
         }
+        if (typeof App !== 'undefined' && App.raiseModalAboveStack) {
+            App.raiseModalAboveStack(ui.modal);
+        }
         bootstrap.Modal.getOrCreateInstance(ui.modal).show();
         if (typeof PdfMakeInit !== 'undefined') PdfMakeInit.logStatus();
 

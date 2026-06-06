@@ -692,10 +692,10 @@ const AdminModule = {
     },
 
     async restoreProtectedCoreSnapshot() {
-        if (!confirm(
+        if (!(await App.confirmAction(
             'Restore the last protected snapshot (invoices, vouchers, attendance saved before Book Keeper reset)?\n\n' +
                 'This replaces current data in those three datasets. Continue?'
-        )) {
+        ))) {
             return;
         }
         try {
@@ -769,13 +769,13 @@ const AdminModule = {
         const curCount = Array.isArray(current) ? current.length : 0;
 
         if (
-            !confirm(
+            !(await App.confirmAction(
                 `Restore ${spec.label} from "${file.name}"?\n\n` +
                     `Scope: ${scope} (${rawCount} in file → ${rows.length} to import, BK excluded for plain/GST).\n` +
                     (tagLocal ? 'Imported rows will be tagged LOCAL (protected on Book Keeper reset).\n\n' : '') +
                     `This will REPLACE all current ${spec.label} (${curCount} row(s)).\n\n` +
                     'Other datasets are not changed. Continue?'
-            )
+            ))
         ) {
             if (statusEl) statusEl.textContent = 'Restore cancelled.';
             return;
@@ -870,7 +870,7 @@ const AdminModule = {
     },
 
     async clearInvoiceVoucherCacheAndReload() {
-        if (!confirm('Clear local cache for invoices and vouchers (IndexedDB / storage mirrors), then reload from disk and cloud. Continue?')) return;
+        if (!(await App.confirmAction('Clear local cache for invoices and vouchers (IndexedDB / storage mirrors), then reload from disk and cloud. Continue?'))) return;
         const toast =
             typeof App !== 'undefined' && typeof App.showTaskProgressToast === 'function'
                 ? App.showTaskProgressToast('Invoice & voucher cache', {
@@ -913,10 +913,10 @@ const AdminModule = {
 
     async mergeInvoicesVouchersFromCloudAndDisk() {
         if (
-            !confirm(
+            !(await App.confirmAction(
                 'Reload and merge invoices + vouchers from Firebase and this device, without wiping IndexedDB mirrors.\n\n' +
                     'Try this when plain bills appear on the web app but not here. Continue?'
-            )
+            ))
         ) {
             return;
         }
@@ -975,7 +975,7 @@ const AdminModule = {
         }
         if (pickBtn && window.electronAPI && typeof window.electronAPI.setGtesDataFolderRestart === 'function') {
             pickBtn.onclick = async () => {
-                if (!confirm('The app will restart and load JSON from the folder you select (must contain invoices.json). Continue?')) return;
+                if (!(await App.confirmAction('The app will restart and load JSON from the folder you select (must contain invoices.json). Continue?'))) return;
                 try {
                     const res = await window.electronAPI.setGtesDataFolderRestart();
                     if (res && res.canceled) return;
@@ -1199,7 +1199,7 @@ const AdminModule = {
             try { await api.download(); } finally { dlBtn.disabled = false; }
         };
         if (installBtn) installBtn.onclick = async () => {
-            if (!confirm('Restart the app now to install the update?')) return;
+            if (!(await App.confirmAction('Restart the app now to install the update?'))) return;
             installBtn.disabled = true;
             await api.install();
         };
@@ -1645,7 +1645,7 @@ const AdminModule = {
     },
 
     async deleteUser(id) {
-        if (!confirm('Are you sure you want to delete this user?')) return;
+        if (!(await App.confirmAction('Are you sure you want to delete this user?'))) return;
         try {
             await UserManager.deleteUser(id);
             AuditManager.log('USER_DELETE', `Deleted user ID ${id}`);
@@ -1790,7 +1790,7 @@ const AdminModule = {
     async importBackup(file) {
         if (!file) return;
 
-        if (!confirm('WARNING: Importing a backup will OVERWRITE all current data. This cannot be undone. Are you sure?')) {
+        if (!(await App.confirmAction('WARNING: Importing a backup will OVERWRITE all current data. This cannot be undone. Are you sure?'))) {
             return;
         }
 

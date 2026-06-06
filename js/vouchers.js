@@ -6,11 +6,28 @@
 
 const VoucherManager = {
     _allocationsCache: null,
+    _bankAliasCache: null,
+
+    /** Too generic for bank alias keys — matching these causes cross-customer false positives. */
+    BANK_ALIAS_STOPWORDS: new Set([
+        'SRI', 'SHRI', 'SHREE', 'MR', 'MRS', 'MS', 'THE', 'AND', 'FOR', 'FROM', 'TO', 'BY',
+        'GAS', 'GASE', 'GASES', 'PVT', 'LTD', 'LIMITED', 'PRIVATE', 'AGENCY', 'ENTERPRISES', 'ENTERPRISE',
+        'COMPANY', 'CORP', 'INDIA', 'INDIAN', 'CHENNAI', 'MUMBAI', 'DELHI', 'BANGALORE',
+        'HYDERABAD', 'KOLKATA', 'COIMBATORE', 'MADURAI', 'SALEM', 'TRICHY', 'VELLORE',
+        'BANK', 'NET', 'CMS', 'TRF', 'TRFR', 'PAYMENT', 'RECEIPT', 'CREDIT', 'DEBIT',
+        'TECH', 'HIGH', 'HI', 'NEW', 'OLD', 'NORTH', 'SOUTH', 'EAST', 'WEST', 'CENTRAL',
+        'OTHERS', 'OTHR', 'BIL', 'BILL', 'AIR', 'OXYGE', 'OXYGEN'
+    ]),
 
     invalidateAllocationsCache() {
         this._allocationsCache = null;
         this._lastVoucherCount = null;
     },
+
+    invalidateBankAliasCache() {
+        this._bankAliasCache = null;
+    },
+
     _lastVoucherCount: 0,
 
     /**
@@ -33,6 +50,7 @@ const VoucherManager = {
         const bkInv = s.match(/^BK-INV-(\d+)$/i);
         if (bkInv) return `BK-INV|${bkInv[1]}`;
         if (/^\d+$/.test(s)) {
+            if (s.length >= 6) return `NUM|${s}`;
             const seq = s.replace(/^0+/, '') || '0';
             if (seq.length < 5) return '';
             return `NUM|${seq}`;
@@ -50,13 +68,99 @@ const VoucherManager = {
         const k = raw.toString().trim();
         if (!k) return;
         map.set(k, (map.get(k) || 0) + amount);
-        const nk = this._allocationNormKey(k);
-        if (!nk) return;
         const pid = (partyId || '').toString().trim();
         if (pid) {
-            const pk = `__pnorm:${pid}|${nk}`;
+            const pk = `__pdoc:${pid}|${k}`;
             map.set(pk, (map.get(pk) || 0) + amount);
         }
+        const nk = this._allocationNormKey(k);
+        if (!nk || !pid) return;
+        const normPk = `__pnorm:${pid}|${nk}`;
+        map.set(normPk, (map.get(normPk) || 0) + amount);
+    },
+
+    /** Register one allocation amount once per unique ref (id/no/invoiceNo often repeat the same bill no). */
+    _bumpAllocRefsOnce(map, refs, amount, partyId = null) {
+        const seen = new Set();
+        (refs || []).forEach((raw) => {
+            if (raw === undefined || raw === null || raw === '') return;
+            const k = raw.toString().trim();
+            if (!k || seen.has(k)) return;
+            seen.add(k);
+            this._bumpAllocMap(map, k, amount, partyId);
+        });
+    },
+
+    _applySessionMappedVoucher(map, mv) {
+        if (!mv) return;
+        if (mv.allocations && mv.allocations.length > 0) {
+            const vTds = parseFloat(mv.tdsAmount) || 0;
+            const vDisc = parseFloat(mv.discountAmount) || 0;
+            const totalAllocAmt = mv.allocations.reduce((s, a) => s + (parseFloat(a?.amount) || 0), 0);
+            const hasAnyAllocTds = mv.allocations.some(a => (parseFloat(a?.tdsAmount) || 0) > 0);
+            const hasAnyAllocDisc = mv.allocations.some(a => (parseFloat(a?.discountAmount) || 0) > 0);
+
+            mv.allocations.forEach(a => {
+                const baseAmt = parseFloat(a.amount) || 0;
+                const ratio = totalAllocAmt > 0 ? (baseAmt / totalAllocAmt) : 0;
+                const tdsAmt = (parseFloat(a.tdsAmount) || 0) + ((!hasAnyAllocTds && vTds > 0) ? (vTds * ratio) : 0);
+                const discAmt = (parseFloat(a.discountAmount) || 0) + ((!hasAnyAllocDisc && vDisc > 0) ? (vDisc * ratio) : 0);
+                const amount = baseAmt + tdsAmt + discAmt;
+                if (amount <= 0) return;
+                this._bumpAllocRefsOnce(map, [a.id, a.no, a.invoiceNo, a.billNo], amount, mv.customerId);
+            });
+        } else if (mv.linkedInvoices && mv.linkedInvoices.length > 0) {
+            const totalSettlement = (parseFloat(mv.amount) || 0) + (parseFloat(mv.tdsAmount) || 0) + (parseFloat(mv.discountAmount) || 0);
+            mv.linkedInvoices.forEach(id => {
+                const cleanId = id.toString().trim();
+                const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount
+                    || (totalSettlement / mv.linkedInvoices.length);
+                this._bumpAllocMap(map, cleanId, parseFloat(amt), mv.customerId);
+            });
+        }
+    },
+
+    _applySessionBankTransactions(map, extraTransactions, vouchers, filterType, excludeTxIndex = -1) {
+        if (!Array.isArray(extraTransactions)) return;
+        extraTransactions.forEach((tx, txIndex) => {
+            if (excludeTxIndex >= 0 && txIndex === excludeTxIndex) return;
+            const txVchType = this._bankTxVoucherType(tx);
+            if (filterType && txVchType !== filterType) return;
+
+            const mv = tx.mappedVoucher || tx.mappedData;
+            const vchId = (tx.voucherId || tx.linkedVoucherId || '').toString().trim();
+            const dbVch = vchId
+                ? (vouchers || []).find(v => v.id === vchId || v.bookkeeperId === vchId)
+                : null;
+            const dbHasAlloc = dbVch && Array.isArray(dbVch.allocations) && dbVch.allocations.length > 0;
+
+            if (!tx.isReady || !mv) return;
+
+            const hasDetailAlloc = Array.isArray(mv.allocations) && mv.allocations.length > 0;
+            const hasLinkedInvList = Array.isArray(mv.linkedInvoices) && mv.linkedInvoices.length > 0;
+
+            // Ready session rows with line allocations always count (even if converted flag set by bank links).
+            if (hasDetailAlloc) {
+                this._applySessionMappedVoucher(map, mv);
+                return;
+            }
+
+            if (!tx.converted && !tx.imported) {
+                if (tx.linkedVoucherId && !hasLinkedInvList) {
+                    const lvid = tx.linkedVoucherId.toString().trim();
+                    if (lvid) {
+                        this._bumpAllocMap(map, lvid, parseFloat(tx.amount || 0), mv?.customerId);
+                    }
+                }
+                this._applySessionMappedVoucher(map, mv);
+                return;
+            }
+
+            // Imported row: use session mapped lines when DB voucher has no allocation detail yet
+            if (tx.converted && !dbHasAlloc) {
+                this._applySessionMappedVoucher(map, mv);
+            }
+        });
     },
 
     /**
@@ -182,9 +286,11 @@ const VoucherManager = {
         const linkIds = data.linkedInvoices || [];
         const allLinked = [...new Set([...linkIds, ...allocIds])];
         if (allLinked.length > 0) {
-            void Promise.resolve(this.updateLinkedInvoices(allLinked, data.type)).catch((err) => {
+            try {
+                await this.updateLinkedInvoices(allLinked, data.type);
+            } catch (err) {
                 console.error('[VoucherManager] updateLinkedInvoices:', err);
-            });
+            }
         }
 
         this.invalidateAllocationsCache();
@@ -194,14 +300,17 @@ const VoucherManager = {
     /**
      * update linked documents status
      */
-    async updateLinkedInvoices(invoiceIds, voucherType) {
+    async updateLinkedInvoices(invoiceIds, voucherType, extraTransactions = null, options = {}) {
+        const persist = options.persist !== false;
+        // Bank session save: never mutate invoice cache until Import Saved creates a real voucher.
+        if (!persist) return;
+
         // Load Invoices and Expenses
         const invoices = DataManager.getData('invoices') || [];
         const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || [];
         const purchases = DataManager.getData('purchases') || [];
         const mapFilter = voucherType === 'payment' ? 'payment' : 'receipt';
-        const allocMap = this.getVoucherAllocationsMap(null, mapFilter);
-        
+
         let modifiedInv = false;
         let modifiedExp = false;
         let modifiedPur = false;
@@ -240,19 +349,29 @@ const VoucherManager = {
             );
         };
 
+        const explicitIndex = this.buildExplicitPaidIndex(extraTransactions, mapFilter);
+
         for (const id of invoiceIds) {
             // 1. Check Sales Invoices
             const invIndex = findInvIdx(id);
             if (invIndex !== -1) {
                 const doc = invoices[invIndex];
                 const total = parseFloat(doc.total || doc.amount || 0);
-                const balance = this.getDocumentBalance(doc.id, total, allocMap, doc.invoiceNo, doc);
+                const explicitPaid = this.lookupExplicitPaidAmount(doc, explicitIndex);
+                const balance = Math.max(0, total - explicitPaid);
+                const paidSoFar = explicitPaid;
                 
                 if (balance <= 0.05) { 
                     invoices[invIndex].status = 'paid';
-                } else {
+                    invoices[invIndex].balanceDue = 0;
+                } else if (paidSoFar > 0.05) {
                     invoices[invIndex].status = 'partial';
+                    invoices[invIndex].balanceDue = Math.max(0, balance);
+                } else {
+                    invoices[invIndex].status = 'pending';
+                    invoices[invIndex].balanceDue = Math.max(0, balance);
                 }
+                invoices[invIndex].paidSoFar = Math.max(0, paidSoFar);
                 modifiedInv = true;
                 continue;
             }
@@ -263,12 +382,16 @@ const VoucherManager = {
                 const doc = expenses[expIndex];
                 const total = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
                 const alt = doc.billNo || doc.vch_no || doc.invoiceNo;
-                const balance = this.getDocumentBalance(doc.id, total, allocMap, alt, doc);
+                const explicitPaid = this.lookupExplicitPaidAmount(doc, explicitIndex);
+                const balance = Math.max(0, total - explicitPaid);
+                const paidSoFar = explicitPaid;
                 
                 if (balance <= 0.05) {
                     expenses[expIndex].status = 'paid';
-                } else {
+                } else if (paidSoFar > 0.05) {
                     expenses[expIndex].status = 'partial';
+                } else {
+                    expenses[expIndex].status = 'pending';
                 }
                 modifiedExp = true;
                 continue;
@@ -280,12 +403,16 @@ const VoucherManager = {
                 const doc = purchases[purIndex];
                 const total = parseFloat(doc.total || doc.amount || 0);
                 const alt = doc.billNo || doc.vch_no || doc.invoiceNo;
-                const balance = this.getDocumentBalance(doc.id, total, allocMap, alt, doc);
+                const explicitPaid = this.lookupExplicitPaidAmount(doc, explicitIndex);
+                const balance = Math.max(0, total - explicitPaid);
+                const paidSoFar = explicitPaid;
                 
                 if (balance <= 0.05) {
                     purchases[purIndex].status = 'paid';
-                } else {
+                } else if (paidSoFar > 0.05) {
                     purchases[purIndex].status = 'partial';
+                } else {
+                    purchases[purIndex].status = 'pending';
                 }
                 modifiedPur = true;
             }
@@ -294,6 +421,12 @@ const VoucherManager = {
         if (modifiedInv) await DataManager.saveData('invoices', invoices);
         if (modifiedExp) await DataManager.saveData(DataManager.KEYS.EXPENSES, expenses);
         if (modifiedPur) await DataManager.saveData('purchases', purchases);
+        if (modifiedInv || modifiedExp || modifiedPur) {
+            this.invalidateAllocationsCache();
+            if (typeof InvoiceManager !== 'undefined' && InvoiceManager._balanceCache) {
+                InvoiceManager._balanceCache = null;
+            }
+        }
     },
 
     /**
@@ -530,8 +663,8 @@ const VoucherManager = {
         let cleaned = description.toUpperCase();
         
         // Remove common transaction codes and technical noise
-        cleaned = cleaned.replace(/\b(IMPS|RTGS|NEFT|TRTR|TRF|UPI|CHQ|CHEQUE|CLG|NFT|CMS|NET|BANK|TRANS|TRANSFER)\b/g, ' ');
-        cleaned = cleaned.replace(/\b(HDFC|ICICI|IDIB|IDBI|SBI|KOTAK|AXIS|BARB|UTIB|YESB|PUNB|CNRB)\b/g, ' ');
+        cleaned = cleaned.replace(/\b(IMPS|RTGS|NEFT|TRTR|TRF|UPI|CHQ|CHEQUE|CLG|NFT|CMS|NET|BANK|TRANS|TRANSFER|OTHERS|OTHR|BIL|BILL)\b/g, ' ');
+        cleaned = cleaned.replace(/\b(HDFC|ICICI|IDIB|IDBI|SBI|SBIN|KOTAK|AXIS|BARB|UTIB|YESB|PUNB|CNRB|IOBA|CBIN|KVBL)\b/g, ' ');
 
         // Remove long alphanumeric IDs (like IOBA00000005037217, TRTR/400311394255/IMPS)
         // We keep items that are primarily alphabetic or are meaningful names
@@ -549,55 +682,325 @@ const VoucherManager = {
         // Remove special characters, keep alphanumeric and spaces
         cleaned = cleaned.replace(/[^A-Z0-9\s]/g, ' ');
         
-        // Final cleaning: remove single characters and tiny words that are usually noise (CO, EN, etc. if isolated)
-        cleaned = cleaned.replace(/\b[A-Z0-9]{1,2}\b/g, ' ');
+        // Remove isolated single-character noise only (keep 2-letter tokens like AI, CO, EN in party names)
+        cleaned = cleaned.replace(/\b[A-Z0-9]\b/g, ' ');
 
         // Compress multiple spaces
         cleaned = cleaned.replace(/\s+/g, ' ').trim();
         return cleaned;
     },
 
+    isDistinctiveBankAliasKey(key) {
+        const k = String(key || '').trim().toUpperCase();
+        if (!k || k.length < 4) return false;
+        if (this.BANK_ALIAS_STOPWORDS.has(k)) return false;
+        if (/^\d+$/.test(k)) return false;
+        return true;
+    },
+
+    extractDistinctiveBankTokens(description) {
+        const cleaned = this.cleanBankDescription(description);
+        if (!cleaned) return [];
+        return cleaned.split(/\s+/).filter((w) => this.isDistinctiveBankAliasKey(w));
+    },
+
+    _partyDescOverlapTokens(description, partyName) {
+        const cleaned = this.cleanBankDescription(description);
+        if (!cleaned) return [];
+        return String(partyName || '').toUpperCase().split(/\s+/)
+            .filter((w) => this.isDistinctiveBankAliasKey(w))
+            .filter((tok) => {
+                try {
+                    const re = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                    return re.test(cleaned);
+                } catch (_) {
+                    return false;
+                }
+            })
+            .sort();
+    },
+
     /**
-     * Save Bank Description -> Party Name mapping
+     * Fingerprints saved when user assigns a party — only the same details should match later.
+     * full:<cleaned> = exact same bank narrative after noise removal
+     * sig:a|b = ALL listed tokens must appear in the description
+     */
+    getBankAssignmentFingerprints(description, partyName) {
+        const cleaned = this.cleanBankDescription(description);
+        const fps = new Set();
+        if (cleaned.length >= 8) fps.add(`full:${cleaned}`);
+
+        const overlap = this._partyDescOverlapTokens(description, partyName);
+        if (overlap.length >= 2) fps.add(`sig:${overlap.join('|')}`);
+        else if (overlap.length === 1 && overlap[0].length >= 5) fps.add(`sig:${overlap[0]}`);
+
+        return [...fps];
+    },
+
+    /** Session grouping key — same detail pattern only (not generic tokens). */
+    getBankMatchSignature(description, partyName) {
+        const cleaned = this.cleanBankDescription(description);
+        if (partyName) {
+            const overlap = this._partyDescOverlapTokens(description, partyName);
+            if (overlap.length >= 2) return `sig:${overlap.join('|')}`;
+            if (overlap.length === 1 && overlap[0].length >= 5) return `sig:${overlap[0]}`;
+        }
+        return `full:${cleaned}`;
+    },
+
+    _sanitizeBankAliasMappings(mappings) {
+        const out = {};
+        for (const [key, party] of Object.entries(mappings || {})) {
+            if (!key || !party) continue;
+            const k = String(key).trim();
+            if (k.startsWith('full:') || k.startsWith('sig:')) {
+                out[k] = party;
+                continue;
+            }
+            // Legacy: keep only long full-description keys (never bare tokens like GAS/OTHERS/BHOX)
+            if (k.length >= 20 && !this.isDistinctiveBankAliasKey(k.split(/\s+/)[0])) {
+                out[`full:${k}`] = party;
+            }
+        }
+        return out;
+    },
+
+    _getBankAliasMappings() {
+        if (!this._bankAliasCache) {
+            const raw = DataManager.getData('gtes_bank_alias') || {};
+            this._bankAliasCache = this._sanitizeBankAliasMappings(raw);
+        }
+        return this._bankAliasCache;
+    },
+
+    _sigTokensPresent(required, cleaned, descTokens) {
+        return required.every((tok) => {
+            if (descTokens.has(tok)) return true;
+            try {
+                const re = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                return re.test(cleaned);
+            } catch (_) {
+                return false;
+            }
+        });
+    },
+
+    /**
+     * Save mapping from a user assignment — keyed by this row's specific details only.
      */
     async saveBankMapping(description, partyName) {
         if (!description || !partyName) return;
 
-        const mappings = DataManager.getData('gtes_bank_alias') || {};
-        const cleaned = this.cleanBankDescription(description);
-        
-        if (cleaned.length > 3) { // Only save if meaningful text remains
-            mappings[cleaned] = partyName;
-            await DataManager.saveData('gtes_bank_alias', mappings);
-        }
+        const mappings = { ...this._getBankAliasMappings() };
+        const fingerprints = this.getBankAssignmentFingerprints(description, partyName);
+        if (fingerprints.length === 0) return;
+
+        fingerprints.forEach((fp) => {
+            mappings[fp] = partyName;
+        });
+
+        this._bankAliasCache = this._sanitizeBankAliasMappings(mappings);
+        await DataManager.saveData('gtes_bank_alias', this._bankAliasCache);
     },
 
     /**
-     * Resolve Party Name from Bank Description
+     * Resolve party only when description matches a saved fingerprint (exact details).
      */
     resolveBankParty(description) {
-        const mappings = DataManager.getData('gtes_bank_alias') || {};
+        const mappings = this._getBankAliasMappings();
         const cleaned = this.cleanBankDescription(description);
-
         if (!cleaned || cleaned.length < 3) return null;
 
-        // 1. Direct Exact Match (Highest Priority)
+        const descTokens = new Set(this.extractDistinctiveBankTokens(description));
+
+        if (mappings[`full:${cleaned}`]) return mappings[`full:${cleaned}`];
         if (mappings[cleaned]) return mappings[cleaned];
 
-        // 2. Strict Substring Match
-        // We only match if the alias is a meaningful part of the description
-        const entries = Object.entries(mappings);
-        for (const [key, val] of entries) {
-            if (key.length < 4) continue; // Skip very short alias keys for substring matching
-            
-            // Check if key is a whole word within cleaned description
-            const regex = new RegExp(`\\b${key}\\b`, 'i');
-            if (regex.test(cleaned)) {
-                return val;
+        let best = null;
+        let bestSpecificity = 0;
+        for (const [key, party] of Object.entries(mappings)) {
+            if (!key.startsWith('sig:') || !party) continue;
+            const required = key.slice(4).split('|').filter(Boolean);
+            if (required.length === 0) continue;
+            if (!this._sigTokensPresent(required, cleaned, descTokens)) continue;
+            const specificity = required.join('|').length + (required.length * 5);
+            if (specificity > bestSpecificity) {
+                best = party;
+                bestSpecificity = specificity;
             }
         }
+        return best;
+    },
 
+    _normalizeBankTxDate(date) {
+        const d = date instanceof Date ? date : new Date(date);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().split('T')[0];
+    },
+
+    /** Stable key for the same bank line across re-imports of the same statement file. */
+    buildBankTxFingerprint(tx) {
+        const type = tx?.type === 'debit' ? 'debit' : 'credit';
+        const dateStr = this._normalizeBankTxDate(tx?.date);
+        const amt = (Math.round((parseFloat(tx?.amount) || 0) * 100) / 100).toFixed(2);
+        const desc = this.cleanBankDescription(tx?.description || '');
+        return `${type}|${dateStr}|${amt}|${desc}`;
+    },
+
+    getBankVoucherLinks() {
+        const key = (typeof DataManager !== 'undefined' && DataManager.KEYS?.BANK_LINKS) || 'gtes_bank_links';
+        const raw = DataManager.getData(key);
+        return Array.isArray(raw) ? raw : [];
+    },
+
+    voucherExistsById(voucherId) {
+        const id = String(voucherId || '').trim();
+        if (!id) return false;
+        return (this.getAllVouchers() || []).some((v) => {
+            const vid = String(v.id || v.voucherId || '').trim();
+            return vid === id;
+        });
+    },
+
+    _bankTxLooseMatch(tx, record) {
+        if (!tx || !record) return false;
+        const type = tx.type === 'debit' ? 'debit' : 'credit';
+        const recType = record.type === 'debit' ? 'debit' : 'credit';
+        if (type !== recType) return false;
+        if (this._normalizeBankTxDate(tx.date) !== this._normalizeBankTxDate(record.date)) return false;
+        if (Math.abs((parseFloat(tx.amount) || 0) - (parseFloat(record.amount) || 0)) > 0.01) return false;
+        const txDesc = this.cleanBankDescription(tx.description || '');
+        const recDesc = record.descriptionClean || this.cleanBankDescription(record.description || '');
+        return txDesc === recDesc;
+    },
+
+    findBankVoucherLink(tx) {
+        if (!tx) return null;
+        const links = this.getBankVoucherLinks();
+        const fp = this.buildBankTxFingerprint(tx);
+        let record = links.find((l) => l.fingerprint === fp);
+        if (!record) {
+            record = links.find((l) => this._bankTxLooseMatch(tx, l));
+        }
+        if (record?.linkedVoucherId && !this.voucherExistsById(record.linkedVoucherId)) {
+            return null;
+        }
+        return record || null;
+    },
+
+    getBankTxLinkInfo(tx) {
+        const link = this.findBankVoucherLink(tx);
+        if (link?.linkedVoucherId) {
+            return { linkedVoucherId: link.linkedVoucherId, linkType: link.linkType || 'manual' };
+        }
+        if (tx?.linkedVoucherId && this.voucherExistsById(tx.linkedVoucherId)) {
+            return { linkedVoucherId: tx.linkedVoucherId, linkType: 'session' };
+        }
         return null;
+    },
+
+    async saveBankVoucherLink(tx, voucherId, extra = {}) {
+        if (!tx || !voucherId) return;
+        const key = (typeof DataManager !== 'undefined' && DataManager.KEYS?.BANK_LINKS) || 'gtes_bank_links';
+        const links = this.getBankVoucherLinks();
+        const fingerprint = this.buildBankTxFingerprint(tx);
+        const record = {
+            fingerprint,
+            type: tx.type === 'debit' ? 'debit' : 'credit',
+            date: this._normalizeBankTxDate(tx.date),
+            amount: parseFloat(tx.amount) || 0,
+            description: tx.description || '',
+            descriptionClean: this.cleanBankDescription(tx.description || ''),
+            linkedVoucherId: String(voucherId).trim(),
+            linkType: extra.linkType || 'manual',
+            adjustment: extra.adjustment || null,
+            linkedAt: new Date().toISOString()
+        };
+        const idx = links.findIndex((l) => l.fingerprint === fingerprint);
+        if (idx >= 0) links[idx] = record;
+        else links.push(record);
+        await DataManager.saveData(key, links);
+    },
+
+    async removeBankVoucherLink(tx) {
+        if (!tx) return;
+        const key = (typeof DataManager !== 'undefined' && DataManager.KEYS?.BANK_LINKS) || 'gtes_bank_links';
+        const fp = this.buildBankTxFingerprint(tx);
+        const links = this.getBankVoucherLinks().filter(
+            (l) => l.fingerprint !== fp && !this._bankTxLooseMatch(tx, l)
+        );
+        await DataManager.saveData(key, links);
+    },
+
+    applyPersistedLinksToBankTransactions(transactions) {
+        if (!Array.isArray(transactions)) return transactions;
+        transactions.forEach((tx) => {
+            const hasSessionMap = tx.isReady && !!(tx.mappedVoucher || tx.mappedData);
+            if (hasSessionMap) return;
+            const link = this.findBankVoucherLink(tx);
+            if (link?.linkedVoucherId) {
+                tx.linkedVoucherId = link.linkedVoucherId;
+                tx.converted = true;
+                tx.bankLinkPersisted = true;
+            }
+        });
+        return transactions;
+    },
+
+    _bankImportSessionKey() {
+        return (typeof DataManager !== 'undefined' && DataManager.KEYS?.BANK_IMPORT_SESSION) || 'gtes_bank_import_session';
+    },
+
+    getBankImportSessionRows() {
+        const raw = DataManager.getData(this._bankImportSessionKey());
+        return Array.isArray(raw) ? raw : [];
+    },
+
+    /** Persist a ready-to-import row until Import Saved (survives closing/re-opening the same bank file). */
+    async saveBankImportSessionRow(tx) {
+        if (!tx || !tx.isReady) return;
+        const mv = tx.mappedVoucher || tx.mappedData;
+        if (!mv) return;
+        const fp = this.buildBankTxFingerprint(tx);
+        const rows = this.getBankImportSessionRows();
+        const entry = {
+            fingerprint: fp,
+            isReady: true,
+            mappedVoucher: JSON.parse(JSON.stringify(mv)),
+            bankAssignedParty: (tx.bankAssignedParty || tx.assignedParty || '').toString(),
+            savedAt: new Date().toISOString()
+        };
+        const idx = rows.findIndex((r) => r.fingerprint === fp);
+        if (idx >= 0) rows[idx] = entry;
+        else rows.push(entry);
+        await DataManager.saveData(this._bankImportSessionKey(), rows);
+    },
+
+    async removeBankImportSessionRow(tx) {
+        if (!tx) return;
+        const fp = this.buildBankTxFingerprint(tx);
+        const rows = this.getBankImportSessionRows().filter((r) => r.fingerprint !== fp);
+        await DataManager.saveData(this._bankImportSessionKey(), rows);
+    },
+
+    /** Re-attach saved session voucher details when the same bank statement file is imported again. */
+    restoreBankImportSessionToTransactions(transactions) {
+        if (!Array.isArray(transactions)) return transactions;
+        const rows = this.getBankImportSessionRows();
+        if (!rows.length) return transactions;
+        transactions.forEach((tx) => {
+            const fp = this.buildBankTxFingerprint(tx);
+            const entry = rows.find((r) => r.fingerprint === fp);
+            if (!entry?.isReady || !entry.mappedVoucher) return;
+            const link = this.findBankVoucherLink(tx);
+            if (link?.linkedVoucherId && this.voucherExistsById(link.linkedVoucherId)) return;
+            if (tx.isReady && (tx.mappedVoucher || tx.mappedData)) return;
+            tx.isReady = true;
+            tx.mappedVoucher = entry.mappedVoucher;
+            tx.converted = false;
+            if (entry.bankAssignedParty) tx.bankAssignedParty = entry.bankAssignedParty;
+        });
+        return transactions;
     },
 
     /**
@@ -605,20 +1008,29 @@ const VoucherManager = {
      */
     checkDuplicateVoucher(partyName, amount, date) {
         if (!partyName || !amount || !date) return false;
-        const vouchers = this.getAllVouchers();
         const d_amount = parseFloat(amount);
         const d_date = date instanceof Date ? date.toISOString().split('T')[0] : date;
+        const p_name = partyName.trim().toLowerCase();
+        const d_date_str = d_date.split('T')[0];
+        const cacheKey = `${p_name}|${d_amount.toFixed(2)}|${d_date_str}`;
+        const voucherCount = (DataManager.getData('vouchers') || []).length;
+        if (this._dupVoucherCache && this._dupVoucherCacheVoucherCount === voucherCount) {
+            if (this._dupVoucherCache.has(cacheKey)) return this._dupVoucherCache.get(cacheKey);
+        } else {
+            this._dupVoucherCache = new Map();
+            this._dupVoucherCacheVoucherCount = voucherCount;
+        }
 
-        return vouchers.some(v => {
+        const vouchers = this.getAllVouchers();
+        const hit = vouchers.some(v => {
             const v_name = (v.customerName || '').trim().toLowerCase();
-            const p_name = partyName.trim().toLowerCase();
             const v_date = v.date.split('T')[0];
-            const d_date_str = d_date.split('T')[0];
-
-            return v_name === p_name && 
-                   Math.abs(parseFloat(v.amount) - d_amount) < 0.01 && 
+            return v_name === p_name &&
+                   Math.abs(parseFloat(v.amount) - d_amount) < 0.01 &&
                    v_date === d_date_str;
         });
+        this._dupVoucherCache.set(cacheKey, hit);
+        return hit;
     },
 
     /**
@@ -1008,15 +1420,18 @@ const VoucherManager = {
     /**
      * NEW: Get a map of all document allocations for fast lookup
      * @param {Array} extraTransactions - Optional list of pending bank transactions to include.
+     * @param {string|null} filterType - 'receipt' | 'payment'
+     * @param {{ excludeTxIndex?: number }} options - excludeTxIndex: skip one bank row (current voucher being edited)
      */
-    getVoucherAllocationsMap(extraTransactions = null, filterType = null) {
+    getVoucherAllocationsMap(extraTransactions = null, filterType = null, options = {}) {
         const vouchers = this.getAllVouchers();
+        const excludeTxIndex = Number.isInteger(options.excludeTxIndex) ? options.excludeTxIndex : -1;
         
         // Use a more dynamic key for caching (including filterType to prevent cross-contamination)
-        const readyCount = (extraTransactions || []).filter(tx => tx.isReady || tx.converted).length;
+        const readyCount = (extraTransactions || []).filter(tx => tx.isReady && !tx.converted).length;
         const invCount = (DataManager.getData('invoices') || []).length;
         const expCount = (DataManager.getData(DataManager.KEYS.EXPENSES) || []).length;
-        const cacheKey = `${filterType || 'all'}_v${vouchers.length}_i${invCount}_x${expCount}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}`;
+        const cacheKey = `${filterType || 'all'}_v${vouchers.length}_i${invCount}_x${expCount}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}_x${excludeTxIndex}`;
         const hasExtra = Array.isArray(extraTransactions) && extraTransactions.length > 0;
 
         if (!hasExtra && this._allocationsCache && this._lastVoucherCount === cacheKey) {
@@ -1198,49 +1613,7 @@ const VoucherManager = {
         });
 
         // 3. Pending Bank Transactions (Session-Aware Balance)
-        if (extraTransactions && Array.isArray(extraTransactions)) {
-            extraTransactions.forEach(tx => {
-                const txVchType = this._bankTxVoucherType(tx);
-                if (filterType && txVchType !== filterType) return;
-
-                if ((tx.isReady || tx.converted) && !tx.imported) {
-                    if (tx.linkedVoucherId) {
-                        const lvid = tx.linkedVoucherId.toString().trim();
-                        map.set(lvid, (map.get(lvid) || 0) + parseFloat(tx.amount || 0));
-                    }
-                    const mv = tx.mappedVoucher || tx.mappedData;
-                    if (!mv) return;
-
-                    if (mv.allocations && mv.allocations.length > 0) {
-                        const vTds = parseFloat(mv.tdsAmount) || 0;
-                        const vDisc = parseFloat(mv.discountAmount) || 0;
-                        const totalAllocAmt = mv.allocations.reduce((s, a) => s + (parseFloat(a?.amount) || 0), 0);
-                        const hasAnyAllocTds = mv.allocations.some(a => (parseFloat(a?.tdsAmount) || 0) > 0);
-                        const hasAnyAllocDisc = mv.allocations.some(a => (parseFloat(a?.discountAmount) || 0) > 0);
-
-                        mv.allocations.forEach(a => {
-                            const baseAmt = parseFloat(a.amount) || 0;
-                            const ratio = totalAllocAmt > 0 ? (baseAmt / totalAllocAmt) : 0;
-                            const tdsAmt = (parseFloat(a.tdsAmount) || 0) + ((!hasAnyAllocTds && vTds > 0) ? (vTds * ratio) : 0);
-                            const discAmt = (parseFloat(a.discountAmount) || 0) + ((!hasAnyAllocDisc && vDisc > 0) ? (vDisc * ratio) : 0);
-                            const amount = baseAmt + tdsAmt + discAmt;
-                            if (amount <= 0) return;
-                            [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
-                                this._bumpAllocMap(map, raw, amount, mv.customerId);
-                            });
-                        });
-                    } else if (mv.linkedInvoices && mv.linkedInvoices.length > 0) {
-                        const totalSettlement = (parseFloat(mv.amount) || 0) + (parseFloat(mv.tdsAmount) || 0) + (parseFloat(mv.discountAmount) || 0);
-                        mv.linkedInvoices.forEach(id => {
-                            const cleanId = id.toString().trim();
-                            const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount
-                                || (totalSettlement / mv.linkedInvoices.length);
-                            this._bumpAllocMap(map, cleanId, parseFloat(amt), mv.customerId);
-                        });
-                    }
-                }
-            });
-        }
+        this._applySessionBankTransactions(map, extraTransactions, vouchers, filterType, excludeTxIndex);
 
         this._applyBookkeeperVchAliasMirrors(map, filterType);
         this._applyReferencedReturnNoteOffsets(map, filterType);
@@ -1253,45 +1626,236 @@ const VoucherManager = {
     },
 
     /**
+     * Voucher + session allocation totals only (no credit-note mirrors / fuzzy keys).
+     * Used for paid/partial status and pending-invoice list — avoids false "fully paid".
+     */
+    buildExplicitPaidIndex(extraTransactions = null, filterType = null, excludeTxIndex = -1) {
+        const index = new Map();
+        const vouchers = DataManager.getData('vouchers') || [];
+
+        const bumpFromVoucher = (v) => {
+            const vType = (v.type || '').toString().toLowerCase();
+            if (filterType === 'receipt' && vType !== 'receipt') return;
+            if (filterType === 'payment' && vType !== 'payment') return;
+            const partyId = (v.customerId || '').toString().trim();
+
+            if (v.allocations && v.allocations.length > 0) {
+                const vTds = parseFloat(v.tdsAmount) || 0;
+                const vDisc = parseFloat(v.discountAmount) || 0;
+                const totalAllocAmt = v.allocations.reduce((s, a) => s + (parseFloat(a?.amount) || 0), 0);
+                const hasAnyAllocTds = v.allocations.some(a => (parseFloat(a?.tdsAmount) || 0) > 0);
+                const hasAnyAllocDisc = v.allocations.some(a => (parseFloat(a?.discountAmount) || 0) > 0);
+                v.allocations.forEach((a) => {
+                    const baseAmt = parseFloat(a.amount) || 0;
+                    const ratio = totalAllocAmt > 0 ? (baseAmt / totalAllocAmt) : 0;
+                    const tdsAmt = (parseFloat(a.tdsAmount) || 0) + ((!hasAnyAllocTds && vTds > 0) ? (vTds * ratio) : 0);
+                    const discAmt = (parseFloat(a.discountAmount) || 0) + ((!hasAnyAllocDisc && vDisc > 0) ? (vDisc * ratio) : 0);
+                    const amount = baseAmt + tdsAmt + discAmt;
+                    if (amount <= 0) return;
+                    this._bumpAllocRefsOnce(index, [a.id, a.no, a.invoiceNo, a.billNo], amount, partyId);
+                });
+            } else if (v.linkedInvoices && Array.isArray(v.linkedInvoices)) {
+                const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
+                v.linkedInvoices.forEach((link) => {
+                    let amount;
+                    const keys = [];
+                    if (typeof link === 'string') {
+                        amount = totalSettlement / v.linkedInvoices.length;
+                        keys.push(link);
+                    } else if (link && typeof link === 'object') {
+                        amount = parseFloat(link.amount) || 0;
+                        if (amount <= 0) amount = totalSettlement / Math.max(v.linkedInvoices.length, 1);
+                        [link.id, link.invoiceNo, link.billNo].forEach((k) => { if (k) keys.push(k); });
+                    }
+                    this._bumpAllocRefsOnce(index, keys, amount, partyId);
+                });
+            }
+        };
+
+        vouchers.forEach(bumpFromVoucher);
+
+        if (Array.isArray(extraTransactions)) {
+            extraTransactions.forEach((tx, txIndex) => {
+                if (excludeTxIndex >= 0 && txIndex === excludeTxIndex) return;
+                const txVchType = this._bankTxVoucherType(tx);
+                if (filterType && txVchType !== filterType) return;
+                const mv = tx.mappedVoucher || tx.mappedData;
+                if (!tx.isReady || !mv) return;
+
+                const hasDetailAlloc = Array.isArray(mv.allocations) && mv.allocations.length > 0;
+                if (hasDetailAlloc) {
+                    this._applySessionMappedVoucher(index, mv);
+                    return;
+                }
+
+                const importedId = (tx.voucherId || '').toString().trim();
+                if (tx.converted && importedId) {
+                    const dbVch = vouchers.find(v => v.id === importedId || v.bookkeeperId === importedId);
+                    const dbHasAlloc = dbVch && Array.isArray(dbVch.allocations) && dbVch.allocations.length > 0;
+                    if (dbHasAlloc) return;
+                }
+                this._applySessionMappedVoucher(index, mv);
+            });
+        }
+
+        return index;
+    },
+
+    lookupExplicitPaidAmount(doc, explicitIndex) {
+        if (!doc || !explicitIndex) return 0;
+        const total = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
+        if (!total) return 0;
+        const alt = doc.invoiceNo || doc.billNo || doc.vch_no || doc.id;
+        const balance = this.getDocumentBalance(doc.id, total, explicitIndex, alt, doc, { allowLooseFallback: false });
+        return Math.max(0, total - balance);
+    },
+
+    /** Sum line allocations from other ready bank-import rows in this session (session memory). */
+    sumSessionAllocationsForDoc(doc, extraTransactions, filterType = 'receipt', excludeTxIndex = -1) {
+        if (!doc || !Array.isArray(extraTransactions)) return 0;
+        const docKeys = new Set(
+            [doc.id, doc.invoiceNo, doc.billNo, doc.bookkeeperVchNo, doc.vch_no]
+                .filter((k) => k != null && k !== '')
+                .map((k) => String(k).trim())
+        );
+        let paid = 0;
+        extraTransactions.forEach((tx, txIndex) => {
+            if (excludeTxIndex >= 0 && txIndex === excludeTxIndex) return;
+            if (!tx || !tx.isReady) return;
+            const txVchType = this._bankTxVoucherType(tx);
+            if (filterType && txVchType !== filterType) return;
+            const mv = tx.mappedVoucher || tx.mappedData;
+            if (!mv || !Array.isArray(mv.allocations)) return;
+            mv.allocations.forEach((a) => {
+                const keys = [a.id, a.no, a.invoiceNo, a.billNo]
+                    .filter((k) => k != null && k !== '')
+                    .map((k) => String(k).trim());
+                if (!keys.some((k) => docKeys.has(k))) return;
+                paid += parseFloat(a.amount) || 0;
+            });
+        });
+        return paid;
+    },
+
+    /** Update in-memory invoice partial hints from all ready bank session rows (not saved to disk). */
+    applySessionPartialHintsToInvoiceCache(extraTransactions, filterType = 'receipt') {
+        if (!Array.isArray(extraTransactions)) return;
+        const invoices = DataManager.getData('invoices') || [];
+        const paidByKey = new Map();
+        const dbExplicit = this.buildExplicitPaidIndex(null, filterType);
+
+        const bumpPaidOnce = (refs, amt) => {
+            const seen = new Set();
+            (refs || []).forEach((raw) => {
+                const k = (raw || '').toString().trim();
+                if (!k || amt <= 0 || seen.has(k)) return;
+                seen.add(k);
+                paidByKey.set(k, (paidByKey.get(k) || 0) + amt);
+            });
+        };
+
+        extraTransactions.forEach((tx) => {
+            if (!tx || !tx.isReady) return;
+            const txVchType = this._bankTxVoucherType(tx);
+            if (filterType && txVchType !== filterType) return;
+            const mv = tx.mappedVoucher || tx.mappedData;
+            if (!mv || !Array.isArray(mv.allocations)) return;
+            mv.allocations.forEach((a) => {
+                const amt = parseFloat(a.amount) || 0;
+                if (amt <= 0) return;
+                bumpPaidOnce([a.id, a.no, a.invoiceNo, a.billNo], amt);
+            });
+        });
+
+        const touched = new Set();
+        paidByKey.forEach((_, k) => touched.add(k));
+
+        invoices.forEach((inv) => {
+            const keys = [inv.id, inv.invoiceNo, inv.billNo, inv.bookkeeperVchNo]
+                .filter((k) => k != null && k !== '')
+                .map((k) => String(k).trim());
+            const total = parseFloat(inv.total || inv.amount || 0) || 0;
+            if (!total) return;
+
+            let sessionPaid = 0;
+            keys.forEach((k) => {
+                sessionPaid = Math.max(sessionPaid, paidByKey.get(k) || 0);
+            });
+            const dbPaid = this.lookupExplicitPaidAmount(inv, dbExplicit);
+            const combinedPaid = Math.min(total, Math.max(dbPaid, sessionPaid));
+            const st = (inv.status || '').toLowerCase();
+            const psf = parseFloat(inv.paidSoFar);
+            const hadMemHint = st === 'partial' || st === 'paid'
+                || (!Number.isNaN(psf) && psf > 0.05)
+                || (inv.balanceDue != null && parseFloat(inv.balanceDue) > 0.05);
+
+            if (combinedPaid <= 0.05) {
+                if (hadMemHint && dbPaid <= 0.05) {
+                    inv.status = 'pending';
+                    delete inv.paidSoFar;
+                    delete inv.balanceDue;
+                }
+                return;
+            }
+
+            const balance = Math.max(0, total - combinedPaid);
+            inv.paidSoFar = combinedPaid;
+            inv.balanceDue = balance;
+            inv.status = balance <= 0.05 ? 'paid' : 'partial';
+        });
+    },
+
+    /**
      * Updated: Get the remaining balance for a specific document
      */
     getDocumentBalance(docId, totalAmount, allocationsMap = null, altId = null, doc = null, options = {}) {
-        let allocated = 0;
         const map = allocationsMap || this.getVoucherAllocationsMap();
-        // Strict by default: exact string keys only (case-sensitive). Set allowLooseFallback: true for legacy fuzzy match.
         const allowLooseFallback = options.allowLooseFallback === true;
 
-        const cleanDocId = (docId || '').toString().trim();
-        const cleanAltId = (altId || '').toString().trim();
-
-        allocated = map.get(cleanDocId) || 0;
-
-        if (allocated === 0 && cleanAltId && cleanAltId !== cleanDocId) {
-            allocated = map.get(cleanAltId) || 0;
-        }
-
-        if (allocated === 0 && doc && doc.bookkeeperVchNo) {
-            const vn = doc.bookkeeperVchNo.toString().trim();
-            if (vn) allocated = map.get(vn) || 0;
-        }
-
-        if (allocated === 0 && doc && doc.bookkeeperId) {
-            const fullBkId = doc.bookkeeperId.toString().trim();
-            if (fullBkId) allocated = map.get(fullBkId) || 0;
+        const tryKeys = new Set();
+        const addKey = (raw) => {
+            const k = (raw || '').toString().trim();
+            if (k) tryKeys.add(k);
+        };
+        addKey(docId);
+        addKey(altId);
+        if (doc) {
+            addKey(doc.id);
+            addKey(doc.invoiceNo);
+            addKey(doc.billNo);
+            addKey(doc.bookkeeperVchNo);
+            addKey(doc.bookkeeperId);
+            addKey(doc.vch_no);
         }
 
         const partyId = this._resolveDocPartyId(doc);
-        const normLookup = (raw) => {
-            const nk = this._allocationNormKey(raw);
-            if (!nk || !partyId) return 0;
-            return map.get(`__pnorm:${partyId}|${nk}`) || 0;
+        const isNumericRef = (k) => /^\d+$/.test((k || '').toString().trim());
+
+        const lookupAlloc = (k) => {
+            let a = 0;
+            if (partyId && isNumericRef(k)) {
+                a = Math.max(a, map.get(`__pdoc:${partyId}|${k}`) || 0);
+                const nk = this._allocationNormKey(k);
+                if (nk) a = Math.max(a, map.get(`__pnorm:${partyId}|${nk}`) || 0);
+                if (a <= 0) a = Math.max(a, map.get(k) || 0);
+            } else {
+                a = Math.max(a, map.get(k) || 0);
+                if (partyId) {
+                    a = Math.max(a, map.get(`__pdoc:${partyId}|${k}`) || 0);
+                    const nk = this._allocationNormKey(k);
+                    if (nk) a = Math.max(a, map.get(`__pnorm:${partyId}|${nk}`) || 0);
+                }
+            }
+            return a;
         };
-        if (allocated === 0) {
-            allocated = normLookup(cleanDocId) || normLookup(cleanAltId);
-        }
-        if (allocated === 0 && doc) {
-            allocated = normLookup(doc.invoiceNo) || normLookup(doc.billNo) || 0;
-        }
+
+        let allocated = 0;
+        tryKeys.forEach((k) => {
+            allocated = Math.max(allocated, lookupAlloc(k));
+        });
+
+        const cleanDocId = (docId || '').toString().trim();
+        const cleanAltId = (altId || '').toString().trim();
 
         // Optional legacy fuzzy match (not used for GST invoice balances by default)
         if (allowLooseFallback && allocated === 0 && doc) {
@@ -1328,7 +1892,27 @@ const VoucherManager = {
             }
         }
 
-        return Math.max(0, totalAmount - allocated);
+        let balance = Math.max(0, totalAmount - allocated);
+
+        // Reconcile in-memory paidSoFar/status when voucher rows do not back the stored settlement.
+        if (doc && allocated <= 0.05) {
+            const st = (doc.status || '').toLowerCase();
+            const psf = parseFloat(doc.paidSoFar);
+            const hasPsf = !Number.isNaN(psf) && psf > 0.05;
+            if (hasPsf && psf < totalAmount - 0.05) {
+                balance = Math.max(0.01, totalAmount - psf);
+            } else if (hasPsf && psf >= totalAmount - 0.05 && st === 'paid') {
+                // Stale full-paid memory with no voucher row — treat as still outstanding.
+                balance = totalAmount;
+            } else if (st === 'paid' && !hasPsf) {
+                const srcBk = String(doc.source || '').toLowerCase() === 'bookkeeper'
+                    || !!(doc.bookkeeperId && String(doc.bookkeeperId).trim());
+                // BookKeeper "paid" import is not proof of settlement until a voucher row exists.
+                if (srcBk) balance = totalAmount;
+            }
+        }
+
+        return balance;
     },
 
     /**

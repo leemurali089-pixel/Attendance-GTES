@@ -728,7 +728,7 @@ const SyncManager = {
     },
 
     async resetData() {
-        const ok = confirm(
+        const ok = await App.confirmAction(
             'This will remove BookKeeper–imported accounting data and clear the Book Keeper backup connection.\n\n' +
                 'Keeps: vouchers and invoices you created in this app (tagged local / no BookKeeper id).\n\n' +
                 'Does NOT load demo seed data (your plain/GST vouchers are not replaced).\n\nContinue?'
@@ -785,7 +785,7 @@ const SyncManager = {
                 return false;
             }
 
-            const proceed = confirm('Remote changes detected! Saving now will overwrite them. Continue?');
+            const proceed = await App.confirmAction('Remote changes detected! Saving now will overwrite them. Continue?');
             if (proceed) {
                 this.logSyncEvent('warning', 'User overwrote remote changes');
                 this._conflictPromptCooldownUntil = Date.now() + 15000;

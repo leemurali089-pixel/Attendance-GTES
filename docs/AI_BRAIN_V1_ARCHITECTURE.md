@@ -1,8 +1,8 @@
 # MJS Prime Logic — AI Brain V1
-## Phase 1 Architecture (Approval Required)
+## Architecture (Approved — Phase 2 Ready)
 
-**Status:** DRAFT — awaiting approval before any `/ai-brain/` implementation  
-**Date:** 2026-06-05  
+**Status:** **APPROVED WITH ENHANCEMENTS** — Phase 2 implementation may begin  
+**Date:** 2026-06-05 (updated 2026-06-05)  
 **Scope:** ERP AI Operating System — not a chatbot, not a GPT wrapper
 
 ---
@@ -15,10 +15,28 @@ AI Brain V1 elevates MJS Prime Logic from a **rule-based voice assistant** (`/ai
 - Maintains **conversation memory** and **self-learning preferences**
 - Calls **real ERP functions** — never guesses financial or HR outcomes
 - Reads **live ERP data**, **Book Keeper imports**, and **documents** (PDF/Excel via Document Engine V4)
-- Supports **autonomous analysis** and **admin assistant mode**
+- Supports **autonomous analysis**, **proactive alerts**, and **admin assistant mode**
+- Routes domain work through a **multi-agent layer** (finance, HR, CRM, operations, documents)
+- Enforces **approval gates** on all destructive and financial actions via `approvalEngine.js`
+- Surfaces intelligence in an **AI Command Center Dashboard**
 - Stays **LLM-agnostic** via adapter layer (OpenAI, Claude, Gemini, Ollama) without changing ERP code
 
-**Phase 1 deliverable:** this document only. **No code** in `/ai-brain/` until approved.
+### 1.1 Core Data Integrity Rule (Non-Negotiable)
+
+**All AI responses must be based on actual ERP data only.**
+
+| Rule | Enforcement |
+|------|-------------|
+| No fabricated numbers | Every figure traced to `functionEngine` result or `knowledgeGraphEngine` query with `sourceRef` |
+| No guessed results | If data is missing, reply **"No data found"** — never estimate or infer amounts |
+| No LLM arithmetic | LLMs may narrate; ERP managers compute balances, totals, counts |
+| Citations required | Responses include entity keys (`invoiceNo`, `customerId`, `employeeId`, `taskId`) |
+| Stale data disclosure | If cache TTL exceeded, refresh before answer or state data age |
+
+This rule applies to **voice, text, dashboard widgets, daily briefings, and proactive alerts**.
+
+**Phase 1 deliverable:** this document (complete).  
+**Phase 2 deliverable:** rules-only brain + Command Center + five domain modules (see §16).
 
 **Relationship to existing `/ai/`:** V1 voice stack remains operational during migration. AI Brain absorbs and replaces it module-by-module behind a compatibility façade.
 
@@ -40,9 +58,20 @@ flowchart TB
         CTX[contextEngine.js]
         MEM[memoryEngine.js]
         KNOW[knowledgeEngine.js]
+        KGRAPH[knowledgeGraphEngine.js]
+        PROACT[proactiveEngine.js]
+        APPROVE[approvalEngine.js]
         REASON[reasoningEngine.js]
         DECIDE[decisionEngine.js]
         FUNC[functionEngine.js]
+        CMD[AI Command Center Dashboard]
+        subgraph MultiAgent["Multi-Agent Layer"]
+            FIN[financeAgent.js]
+            HR[hrAgent.js]
+            CRM[crmAgent.js]
+            OPS[operationsAgent.js]
+            DOCAG[documentAgent.js]
+        end
         subgraph DomainEngines["Domain Engines"]
             ATT[attendanceEngine.js]
             EMP[employeeEngine.js]
@@ -53,7 +82,7 @@ flowchart TB
             ANA[analyticsEngine.js]
             DOCE[documentEngine.js]
         end
-        subgraph LLMAdapters["LLM Adapters (Future)"]
+        subgraph LLMAdapters["LLM Adapters (Phase 4+)"]
             OAI[OpenAI]
             CLA[Claude]
             GEM[Gemini]
@@ -80,28 +109,38 @@ flowchart TB
 
     MIC --> VOICE
     TXT --> BRAIN
-    DOC --> DOCE
+    DOC --> DOCAG
+    CMD --> BRAIN
 
     VOICE --> BRAIN
     BRAIN --> CTX
     BRAIN --> MEM
     BRAIN --> REASON
+    PROACT --> BRAIN
+    PROACT --> CMD
     REASON --> DECIDE
-    DECIDE --> FUNC
+    DECIDE --> APPROVE
+    APPROVE --> FUNC
     DECIDE --> KNOW
+    DECIDE --> KGRAPH
 
+    DECIDE --> MultiAgent
+    MultiAgent --> DomainEngines
     FUNC --> DomainEngines
-    KNOW --> DomainEngines
+    KNOW --> KGRAPH
+    KGRAPH --> DomainEngines
     DomainEngines --> ERP
 
-    REASON -.optional.-> LLMAdapters
+    REASON -.Phase 4+.-> LLMAdapters
     LLMAdapters -.structured output only.-> DECIDE
 
     MEM --> LS
     DM --> LS
     DM --> FB
     DOCE --> DE
+    DOCAG --> DOCE
     KNOW --> FILES
+    KGRAPH --> FILES
     BK --> DM
 ```
 
@@ -114,11 +153,135 @@ flowchart TB
 | **memoryEngine.js** | Short-term dialog memory + long-term usage patterns (customers, employees, reports) |
 | **contextEngine.js** | Active entity stack (last customer, last invoice, pending confirmation, view context) |
 | **voiceEngine.js** | STT/TTS, PTT, continuous listen, language detect; wraps existing speech adapters |
-| **knowledgeEngine.js** | Read-only knowledge graph over ERP entities, BK data, uploaded files |
+| **knowledgeEngine.js** | Read-only entity queries, caches, fuzzy indexes over ERP + BK data |
+| **knowledgeGraphEngine.js** | Relationship graph: Customer ↔ Invoice ↔ Payment ↔ Task ↔ Service |
+| **proactiveEngine.js** | Scheduled/triggered briefings and alerts (no user prompt required) |
+| **approvalEngine.js** | Gate for destructive + financial actions; confirm UI + audit |
 | **functionEngine.js** | Typed ERP function registry, validation, execution, audit trail |
-| **decisionEngine.js** | Chooses: answer from knowledge / call function / ask clarify / refuse |
+| **decisionEngine.js** | Chooses: answer from knowledge / delegate agent / call function / ask clarify / refuse |
 | **documentEngine.js** | Query PDFs, Excel, invoices, challans via Document Engine + file index |
+| **\*Agent.js** (multi-agent) | Domain specialists: plan intents, call engines, format narratives |
 | **\*Engine.js** (domain) | Domain-specific planners that map intents → function calls + narratives |
+| **AI Command Center** | Dashboard UI: Attendance, Payroll, Outstanding, Revenue, Tasks, AI Recommendations |
+
+### 2.2 Multi-Agent Layer
+
+Specialist agents sit **between** `decisionEngine` and domain engines. Each agent owns a domain vocabulary, default intents, and response templates. Agents **never write ERP data directly** — they call `functionEngine` after `approvalEngine` clears mutating actions.
+
+| Agent | File | Owns | Primary ERP bindings |
+|-------|------|------|------------------------|
+| **Finance** | `financeAgent.js` | Outstanding, invoices, vouchers, revenue, GST summaries | `InvoiceManager`, `VoucherManager`, `BusinessAnalytics` |
+| **HR** | `hrAgent.js` | Attendance, employees, payroll, salary alerts | `AttendanceModule`, `SalaryModule`, `ReportsModule` |
+| **CRM** | `crmAgent.js` | Customers, follow-ups, AMC, contact history | `CustomerManager`, `BusinessAnalytics`, services/AMC data |
+| **Operations** | `operationsAgent.js` | Tasks, challans, delivery, inventory signals | `TasksUI`, `DeliveryManager`, `DataManager` inventory |
+| **Document** | `documentAgent.js` | PDF/Excel search, preview, extract Q&A | `DocumentEngine` V4, upload manifest |
+
+**Routing rule:** `decisionEngine` selects one primary agent per turn. Cross-domain queries (e.g. "Avon Oxygen outstanding + pending tasks") are handled by `brain.js` orchestrating multiple agents sequentially, merging **sourced** facts only.
+
+```mermaid
+flowchart LR
+    DECIDE[decisionEngine] --> FIN[financeAgent]
+    DECIDE --> HR[hrAgent]
+    DECIDE --> CRM[crmAgent]
+    DECIDE --> OPS[operationsAgent]
+    DECIDE --> DOCAG[documentAgent]
+    FIN --> FE[customerEngine + analyticsEngine]
+    HR --> HE[attendanceEngine + payrollEngine + employeeEngine]
+    CRM --> CE[customerEngine + knowledgeGraphEngine]
+    OPS --> OE[taskEngine + reportEngine]
+    DOCAG --> DE[documentEngine]
+```
+
+### 2.3 proactiveEngine.js
+
+Runs on a **schedule** (dashboard load, morning briefing, idle timer) and on **data-change events** (`gtes:data-changed`). All outputs are **read-only** and **ERP-sourced**.
+
+| Capability | Trigger | Data source | Output |
+|------------|---------|-------------|--------|
+| **Daily briefings** | 08:00 local + on-demand "today summary" | Composite function calls | Command Center + voice digest |
+| **Outstanding alerts** | Balance change, overdue threshold | `InvoiceManager` + party balances | Alert card with customer, amount, invoice refs |
+| **Salary alerts** | Month rollover, payout pending | `ReportsModule.getSalaryPayoutData` | Employees unpaid, totals |
+| **AMC reminders** | Service due date within N days | `gtes_services` + customer link | Customer, service, expiry |
+| **Customer follow-up suggestions** | Outstanding + days since last invoice/voucher | `knowledgeGraphEngine` traversal | Ranked list with suggested action (call, reminder) |
+
+**Proactive payloads** include `{type, severity, facts[], sourceRefs[], generatedAt}` — no free-text numbers without `facts[]`.
+
+### 2.4 knowledgeGraphEngine.js
+
+Builds an **in-memory directed graph** over ERP entities. Refreshed on cache invalidation; not a separate database.
+
+**Core relationships:**
+
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ INVOICE : "has"
+    CUSTOMER ||--o{ PAYMENT : "receives"
+    CUSTOMER ||--o{ TASK : "linked_to"
+    CUSTOMER ||--o{ SERVICE : "AMC_contract"
+    INVOICE ||--o{ PAYMENT : "allocated_by"
+    INVOICE ||--o{ TASK : "follow_up"
+    EMPLOYEE ||--o{ ATTENDANCE : "has"
+    EMPLOYEE ||--o{ PAYROLL : "paid_in"
+```
+
+| Edge | From | To | Key |
+|------|------|-----|-----|
+| `customer_has_invoice` | Customer | Invoice | `customerId` / party name |
+| `invoice_allocated_payment` | Invoice | Voucher line | Party-scoped alloc key (v1.3.44+) |
+| `customer_has_task` | Customer | Task | `customerId` or title match |
+| `customer_has_service` | Customer | AMC/Service | `gtes_services` |
+| `employee_has_attendance` | Employee | Attendance row | `employeeId` + date |
+
+**API surface:**
+
+```typescript
+knowledgeGraphEngine.getRelated(entityType, entityId, relation?, depth?)
+knowledgeGraphEngine.findOutstandingChain(customerId)  // invoices → payments → balance
+knowledgeGraphEngine.findFollowUpCandidates({ minOutstanding, daysSinceContact })
+knowledgeGraphEngine.explainPath(from, to)  // for "why is this overdue?" audit trail
+```
+
+Used by: `crmAgent`, `financeAgent`, `proactiveEngine`, Command Center **AI Recommendations** panel.
+
+### 2.5 approvalEngine.js
+
+**All destructive and financial actions require approval** before `functionEngine.invoke` executes.
+
+| Category | Examples | Approval type |
+|----------|----------|---------------|
+| **Destructive** | Delete attendance, delete task, recycle bin | Spoken + UI confirm modal |
+| **Financial write** | Create voucher, mark invoice paid, allocation change | UI confirm with amount preview |
+| **Financial generate** | Salary payout list, payslip batch | Admin confirm |
+| **Bulk mutating** | Bulk attendance mark | Confirm with employee count |
+
+**Flow:**
+
+```
+decisionEngine → approvalEngine.request({ intent, function, args, tier, destructive })
+  → if read-only: pass through
+  → if T3/T4 or destructive: show ApprovalModal (summary from ERP preview)
+  → on approve: functionEngine.invoke + AuditManager.log
+  → on reject: brain responds "Cancelled" — no side effects
+```
+
+Approval state stored in `contextEngine.pendingApproval` (session-scoped). Voice approval ("yes, confirm") maps to same gate as button click.
+
+### 2.6 AI Command Center Dashboard
+
+New view: **`#aiCommandCenter`** (nav entry: "AI Brain" / icon on dashboard). Replaces passive chat as the **home for ERP intelligence**.
+
+| Panel | Content | Source |
+|-------|---------|--------|
+| **Attendance** | Present / absent today, late marks, OT summary | `attendanceEngine` |
+| **Payroll** | Month status, unpaid count, next payout date | `payrollEngine` |
+| **Outstanding** | Top parties by balance, overdue count, total receivable | `financeAgent` + `InvoiceManager` |
+| **Revenue** | MTD / FY revenue, trend sparkline | `BusinessAnalytics` |
+| **Tasks** | Pending, overdue, due today | `taskEngine` |
+| **AI Recommendations** | Proactive cards from `proactiveEngine` | Follow-ups, AMC, salary, outstanding |
+
+**Interaction:** Each card is clickable → drills into ERP view or opens voice/text brain with context pre-loaded. Refresh button re-runs proactive scan. All numbers display `sourceRef` tooltip on hover (dev mode).
+
+**Layout:** Responsive grid; Tamil/English labels via existing i18n pattern.
 
 ---
 
@@ -180,9 +343,10 @@ Every turn follows **seven stages** — LLM may assist stages 2–4 only; stages
 2. **Normalize** — Tamil/Tanglish token map, entity extraction, temporal resolution
 3. **Understand** — intent + slots + confidence (hybrid: rules + optional LLM)
 4. **Context bind** — resolve pronouns/follow-ups via `contextEngine`
-5. **Authorize** — `UserManager` permissions + destructive confirm gate
-6. **Execute** — `functionEngine` calls real ERP APIs; no direct JSON mutation
-7. **Respond** — templated narrative + structured card; log to audit
+5. **Authorize** — `UserManager` permissions + role tier check
+6. **Approve** — `approvalEngine` gate for destructive/financial actions
+7. **Execute** — `functionEngine` calls real ERP APIs; no direct JSON mutation
+8. **Respond** — templated narrative + structured card with `sourceRefs`; log to audit
 
 ---
 
@@ -200,7 +364,7 @@ AI Brain is **read-mostly** with **controlled writes** through function registry
 | **T3 Write** | Create/update/delete | Mark attendance, create task | Role + confirm if destructive |
 | **T4 Admin** | Import, payout, BK sync | Salary payout list, BK import | Admin only |
 
-### 4.2 Data Sources (via `knowledgeEngine`)
+### 4.2 Data Sources (via `knowledgeEngine` + `knowledgeGraphEngine`)
 
 | Source | Access API | Cache TTL | Notes |
 |--------|------------|-----------|-------|
@@ -222,12 +386,13 @@ AI Brain is **read-mostly** with **controlled writes** through function registry
 ### 4.3 Write Path (Strict)
 
 ```
-decisionEngine → functionEngine.invoke(name, args)
+decisionEngine → approvalEngine.request(...)
+  → (if approved) functionEngine.invoke(name, args)
   → validate schema + permissions
   → call ErpBridge (thin wrapper over existing managers)
   → DataManager.saveData (existing merge/dedupe rules)
   → AuditManager.log
-  → invalidate relevant caches (InvoiceManager, VoucherManager, AI knowledge cache)
+  → invalidate relevant caches (InvoiceManager, VoucherManager, knowledgeEngine, knowledgeGraphEngine)
 ```
 
 **AI Brain never calls `saveData` directly.**
@@ -416,6 +581,11 @@ Intents are **semantic goals**, not command strings. Multiple surface forms map 
 | Analytics | `analytics.revenue_trend` | period | No |
 | Document | `document.find` | docType, ref? | No |
 | Admin | `admin.daily_summary` | date | No |
+| Proactive | `proactive.daily_briefing` | date? | No |
+| Proactive | `proactive.outstanding_alert` | threshold? | No |
+| Proactive | `proactive.salary_alert` | month? | No |
+| Proactive | `proactive.amc_reminder` | daysAhead? | No |
+| Proactive | `proactive.follow_up_suggest` | customer? | No |
 | System | `system.help` | — | No |
 | System | `system.navigate` | view | No |
 
@@ -597,9 +767,13 @@ flowchart TB
 | `erpFunctions.js` | `functionEngine.js` | Formalize registry |
 | `contextManager.js` | `contextEngine.js` | Merge |
 | `memoryManager.js` | `memoryEngine.js` | Extend |
-| `*Agent.js` | `*Engine.js` | Rename + enrich |
+| `*Agent.js` (V1) | `*Agent.js` (V2 multi-agent) + `*Engine.js` | Split specialist vs planner |
+| — | `proactiveEngine.js` | **New** |
+| — | `knowledgeGraphEngine.js` | **New** |
+| — | `approvalEngine.js` | **New** |
+| — | AI Command Center UI | **New** view in `index.html` + `ai-brain/ui/aiCommandCenter.js` |
 
-V1 remains until V2 reaches feature parity on attendance, customer, employee, task domains.
+V1 remains until V2 reaches Phase 2 feature parity (attendance, outstanding, employee, tasks, daily briefing).
 
 ---
 
@@ -607,7 +781,9 @@ V1 remains until V2 reaches feature parity on attendance, customer, employee, ta
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| LLM hallucinates financial figures | **Critical** | All numbers from `functionEngine`; LLM narrates only |
+| LLM hallucinates financial figures | **Critical** | §1.1 data integrity rule; all numbers from `functionEngine` / graph queries; LLM narrates only |
+| AI invents customers/invoices | **Critical** | `sourceRefs` required; empty result → explicit "no data" |
+| Proactive alert false positive | **High** | Thresholds configurable; facts array validated against live read |
 | Wrong customer/employee match | **High** | Fuzzy match + confirm + disambiguation pick list |
 | Destructive action via voice | **High** | `destructive: true` → spoken + UI confirm |
 | Tamil/Tanglish misparse | **High** | Semantic normalizer + clarify fallback |
@@ -637,6 +813,8 @@ V1 remains until V2 reaches feature parity on attendance, customer, employee, ta
 | Cache | Owner | Invalidation |
 |-------|-------|--------------|
 | Knowledge snapshot | `knowledgeEngine` | `gtes:data-changed` event |
+| Relationship graph | `knowledgeGraphEngine` | On data-changed per affected entity type |
+| Proactive digest | `proactiveEngine` | Scheduled + on data-changed debounce 30s |
 | Entity indexes | `knowledgeEngine` | On data-changed per key |
 | Balance map | `InvoiceManager` / `VoucherManager` | Existing invalidation |
 | Document manifest | `documentEngine` | On upload/import |
@@ -656,6 +834,8 @@ V1 remains until V2 reaches feature parity on attendance, customer, employee, ta
 | Authentication | Existing `UserManager` session — brain inactive if not logged in |
 | Authorization | Map intents → `UserManager.hasPermission(view)` |
 | Audit trail | Every T3/T4 function → `AuditManager.log({actor, intent, args, result})` |
+| Financial/destructive gate | `approvalEngine` — no bypass from voice, agent, or LLM |
+| Response integrity | Validator rejects responses missing `sourceRefs` for numeric claims |
 | Data exfiltration | No bulk export via voice without admin role |
 | Prompt injection | Strip ERP JSON from user text; LLM sees redacted summaries only |
 | Local memory | No passwords/tokens in `memoryEngine` |
@@ -664,39 +844,123 @@ V1 remains until V2 reaches feature parity on attendance, customer, employee, ta
 
 ---
 
-## 16. Phased Implementation Roadmap (Post-Approval)
+## 16. Phased Implementation Roadmap
 
-| Phase | Scope | Duration est. |
-|-------|-------|---------------|
-| **1** | Architecture approval (this doc) | — |
-| **2** | `/ai-brain/` skeleton + `brain.js` + `functionEngine` + `contextEngine` + `memoryEngine`; rules-only reasoning; migrate attendance + customer | 2 weeks |
-| **3** | `knowledgeEngine` + analytics + admin assistant mode + document index | 2 weeks |
-| **4** | LLM adapters + hybrid reasoning + self-learning memory | 2 weeks |
-| **5** | Continuous listen, advanced Tamil, proactive alerts | 2 weeks |
+| Phase | Scope | Duration est. | Status |
+|-------|-------|---------------|--------|
+| **1** | Architecture + enhancements (this doc) | — | **Complete** |
+| **2** | Rules-only brain — **no LLM** (see §16.1) | 2–3 weeks | **Ready to start** |
+| **3** | `knowledgeGraphEngine` full graph + analytics + document index + admin assistant | 2 weeks | Planned |
+| **4** | LLM adapters + hybrid reasoning + self-learning memory | 2 weeks | Planned |
+| **5** | Continuous listen, advanced Tamil, extended proactive automation | 2 weeks | Planned |
 
-**No Phase 2 code until explicit approval of this document.**
+### 16.1 Phase 2 — Mandatory Scope (Before Advanced LLM)
+
+Phase 2 implements **deterministic, ERP-sourced intelligence only**. LLM adapters are **out of scope** until Phase 4.
+
+**Infrastructure (skeleton):**
+
+```
+/ai-brain/
+  brain.js
+  contextEngine.js
+  memoryEngine.js
+  reasoningEngine.js          # rules-only; migrate /ai/intentEngine.js
+  decisionEngine.js
+  functionEngine.js
+  approvalEngine.js           # NEW — gate all T3/T4/destructive
+  knowledgeEngine.js          # read caches + indexes
+  knowledgeGraphEngine.js     # NEW — relationship graph (Phase 2: core edges)
+  proactiveEngine.js          # NEW — daily briefing + alerts
+  voiceEngine.js              # wrap existing speech adapters
+  agents/
+    financeAgent.js           # NEW
+    hrAgent.js                # NEW
+    crmAgent.js               # NEW
+    operationsAgent.js        # NEW
+    documentAgent.js          # NEW
+  engines/
+    attendanceEngine.js
+    employeeEngine.js
+    customerEngine.js
+    taskEngine.js
+    payrollEngine.js          # read-only in Phase 2
+    reportEngine.js
+    analyticsEngine.js        # stub — revenue/outstanding summaries only
+    documentEngine.js         # stub — preview routing only
+  bridge/
+    erpBridge.js              # thin wrapper over existing managers
+  ui/
+    aiCommandCenter.js        # NEW — Command Center dashboard
+    approvalModal.js
+    brainPanel.js             # voice/text panel (V1 compatibility)
+```
+
+**Domain features (user-facing):**
+
+| # | Feature | Agent / Engine | Key functions |
+|---|---------|----------------|---------------|
+| 1 | **Attendance** | `hrAgent` + `attendanceEngine` | mark, absent today, monthly summary |
+| 2 | **Customer Outstanding** | `financeAgent` + `crmAgent` | party balance, overdue list, last invoice |
+| 3 | **Employee Details** | `hrAgent` + `employeeEngine` | search, profile, OT hours, attendance slice |
+| 4 | **Task Management** | `operationsAgent` + `taskEngine` | list pending, create, complete, postpone |
+| 5 | **Daily Briefing** | `proactiveEngine` | morning digest via Command Center + voice "today summary" |
+
+**Phase 2 Command Center:** Ship all six panels (§2.6). **AI Recommendations** populated from `proactiveEngine` only — no LLM-generated suggestions.
+
+**Phase 2 exit criteria:**
+
+- [ ] All five domain features work via voice + text + Command Center
+- [ ] Every numeric response includes verifiable `sourceRefs`
+- [ ] Destructive/financial actions blocked without `approvalEngine` confirm
+- [ ] `knowledgeGraphEngine` resolves Customer → Invoice → Payment chains
+- [ ] Daily briefing runs on dashboard load without errors
+- [ ] V1 `/ai/voiceAgent.js` remains functional behind compatibility façade
+- [ ] Zero LLM network calls
+
+### 16.2 Phase 3+ (After Phase 2 Stable)
+
+- Full `knowledgeGraphEngine` (Task ↔ Service ↔ AMC edges)
+- `documentAgent` full PDF index + extract Q&A
+- Admin assistant composite reports
+- Payroll write actions (payout list generation) behind approval
+
+### 16.3 Phase 4+ (Advanced LLM)
+
+- LLM adapters for disambiguation and natural language only
+- LLM **never** returns unsourced numbers (validator rejects)
+- Hybrid reasoning per §9.1
 
 ---
 
-## 17. Approval Checklist
+## 17. Approval Record
 
-Please confirm each item before implementation begins:
+**Approved with enhancements** — 2026-06-05.
 
-- [ ] Overall architecture (§2, §3)
-- [ ] Database access tiers (§4)
-- [ ] Function registry scope (§5)
-- [ ] Memory model (§6)
-- [ ] Intent taxonomy (§7)
-- [ ] Voice provider strategy (§8)
-- [ ] LLM adapter contract (§11)
-- [ ] Migration plan from `/ai/` (§12)
-- [ ] Risk mitigations (§13)
-- [ ] Performance targets (§14)
-- [ ] Security controls (§15)
-- [ ] Phased roadmap (§16)
+| Item | Status |
+|------|--------|
+| Overall architecture (§2, §3) | Approved |
+| Core data integrity rule (§1.1) | Approved — mandatory |
+| `proactiveEngine.js` (§2.3) | Approved |
+| `knowledgeGraphEngine.js` (§2.4) | Approved |
+| Multi-agent layer (§2.2) | Approved |
+| `approvalEngine.js` (§2.5) | Approved |
+| AI Command Center Dashboard (§2.6) | Approved |
+| Phase 2 scope — no LLM (§16.1) | Approved |
+| Database access tiers (§4) | Approved |
+| Function registry scope (§5) | Approved |
+| Memory model (§6) | Approved |
+| Intent taxonomy (§7) | Approved |
+| Voice provider strategy (§8) | Approved |
+| LLM adapter contract (§11) — Phase 4+ | Approved |
+| Migration plan from `/ai/` (§12) | Approved |
+| Risk mitigations (§13) | Approved |
+| Performance targets (§14) | Approved |
+| Security controls (§15) | Approved |
+| Phased roadmap (§16) | Approved |
 
-**Reply with approved sections, requested changes, or "Approved — proceed Phase 2".**
+**Next step:** Begin Phase 2 implementation per §16.1.
 
 ---
 
-*MJS Prime Logic · AI Brain V1 · Architecture Draft · Phase 1 complete*
+*MJS Prime Logic · AI Brain V1 · Architecture Approved · Phase 2 ready*

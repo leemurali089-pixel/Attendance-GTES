@@ -160,7 +160,7 @@ const RecycleBinUI = {
      * Permanently delete a single record
      */
     async _permanentDelete(id, type) {
-        if (!confirm('Permanently delete this record? This cannot be undone.')) return;
+        if (!(await App.confirmAction('Permanently delete this record? This cannot be undone.'))) return;
         const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
         const newBin = bin.filter(item => !(item.id === id && item._recordType === type));
         await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, newBin);
@@ -174,7 +174,7 @@ const RecycleBinUI = {
     async _emptyBin() {
         const bin = DataManager.getData(DataManager.KEYS.RECYCLE_BIN) || [];
         if (bin.length === 0) { App.showNotification('Recycle Bin is already empty.', 'info'); return; }
-        if (!confirm(`Permanently delete ALL ${bin.length} item(s) in the Recycle Bin? This cannot be undone.`)) return;
+        if (!(await App.confirmAction(`Permanently delete ALL ${bin.length} item(s) in the Recycle Bin? This cannot be undone.`))) return;
         await DataManager.saveData(DataManager.KEYS.RECYCLE_BIN, []);
         App.showNotification('Recycle Bin emptied.', 'info');
         this._render();

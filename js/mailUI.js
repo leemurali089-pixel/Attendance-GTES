@@ -596,7 +596,7 @@ const MailUI = (() => {
         $('#mailCleanNewsBtn').onclick = async () => {
             const victims = state.items.filter(m => m.newsletterFlag);
             if (!victims.length) { App.showNotification('No newsletters on this page.', 'info'); return; }
-            if (!confirm(`Move ${victims.length} newsletter message(s) to Spam?`)) return;
+            if (!(await App.confirmAction(`Move ${victims.length} newsletter message(s) to Spam?`))) return;
             let ok = 0;
             for (const m of victims) {
                 try { const r = await window.electronAPI.gmail.reportSpam(m.id); if (r.success) ok++; } catch {}
@@ -906,7 +906,7 @@ const MailUI = (() => {
             if (opts.afterAction) await opts.afterAction('archive');
         };
         if (trashBtn) trashBtn.onclick = async () => {
-            if (!confirm('Move to Trash?')) return;
+            if (!(await App.confirmAction('Move to Trash?'))) return;
             await window.electronAPI.gmail.trash(m.id);
             if (opts.afterAction) await opts.afterAction('trash');
         };
@@ -1288,7 +1288,7 @@ const MailUI = (() => {
             await refreshStatusBar();
         };
         modal.querySelector('#gResetCache').onclick = async () => {
-            if (!confirm('Delete the local mail cache (index, messages, attachments, PO/bank queues)? Your Gmail account stays connected.')) return;
+            if (!(await App.confirmAction('Delete the local mail cache (index, messages, attachments, PO/bank queues)? Your Gmail account stays connected.'))) return;
             modal.querySelector('#gStatus').textContent = 'Resetting cache…';
             const r = await window.electronAPI.gmail.resetCache();
             if (r && r.success) {

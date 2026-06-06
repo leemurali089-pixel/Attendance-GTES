@@ -1241,7 +1241,7 @@ const AttendanceModule = {
     },
 
     async deleteAttendanceRecord(recordId) {
-        if (!App.confirmAction('Are you sure you want to delete this attendance record?')) {
+        if (!(await App.confirmAction('Are you sure you want to delete this attendance record?'))) {
             return;
         }
 

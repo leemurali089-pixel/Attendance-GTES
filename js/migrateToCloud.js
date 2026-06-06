@@ -26,7 +26,7 @@ if (!window.DeepCloudMigrator) {
     ],
 
     async importAll() {
-        if (!confirm("⚠️ WARNING: This will overwrite ALL your current local data with the data from the Cloud.\n\nAre you sure you want to IMPORT?")) return;
+        if (!(await App.confirmAction("⚠️ WARNING: This will overwrite ALL your current local data with the data from the Cloud.\n\nAre you sure you want to IMPORT?"))) return;
         
         console.log("🚀 Starting Cloud Import (Pull)...");
         App.showNotification("Importing from Cloud...", "info");
@@ -80,7 +80,7 @@ if (!window.DeepCloudMigrator) {
     },
 
     async exportAll() {
-        if (!confirm("⚠️ WARNING: This will overwrite ALL Cloud data with your current local machine's data.\n\nAre you sure you want to EXPORT?")) return;
+        if (!(await App.confirmAction("⚠️ WARNING: This will overwrite ALL Cloud data with your current local machine's data.\n\nAre you sure you want to EXPORT?"))) return;
 
         console.log("🚀 Starting Cloud Export (Push)...");
         App.showNotification("Exporting to Cloud...", "info");

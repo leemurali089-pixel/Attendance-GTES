@@ -3709,7 +3709,7 @@ const BookKeeperImport = {
      * Confirm and Clear All BookKeeper Data
      */
     async confirmClearData() {
-        if (confirm('Delete all BookKeeper–imported data from this device?\n\nKeeps: rows tagged LOCAL (plain/GST you created in GTES) and plain invoices/vouchers without BK-* ids.\n\nRemoves: BookKeeper-tagged (BK) customers, invoices, vouchers, purchases, inventory, challans.\n\nTip: Admin → Settings → "Tag plain as LOCAL now" before reset if plain rows have no LOCAL badge.\n\nThis cannot be undone.')) {
+        if (await App.confirmAction('Delete all BookKeeper–imported data from this device?\n\nKeeps: rows tagged LOCAL (plain/GST you created in GTES) and plain invoices/vouchers without BK-* ids.\n\nRemoves: BookKeeper-tagged (BK) customers, invoices, vouchers, purchases, inventory, challans.\n\nTip: Admin → Settings → "Tag plain as LOCAL now" before reset if plain rows have no LOCAL badge.\n\nThis cannot be undone.')) {
             await this.clearAllData();
         }
     },

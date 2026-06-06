@@ -26,7 +26,28 @@ const UserManager = {
 
     // Initialize users
     async init() {
-        const users = await this.getUsers();
+        let users = await this.getUsers();
+
+        // Cloud may still hold a lone bootstrap admin while disk has real accounts.
+        const onlyBootstrapAdmin =
+            users.length === 1 &&
+            String(users[0] && users[0].username || '').toLowerCase() === 'admin';
+        if (onlyBootstrapAdmin && typeof DataManager !== 'undefined' && DataManager.invalidateDataCache) {
+            DataManager.invalidateDataCache(this.STORAGE_KEY);
+            const reloaded = await DataManager.loadData(this.STORAGE_KEY, { forceRefresh: true });
+            const norm = typeof DataManager._normalizeGtesUsersPayload === 'function'
+                ? DataManager._normalizeGtesUsersPayload(reloaded)
+                : reloaded;
+            if (Array.isArray(norm) && norm.length > users.length) {
+                users = norm;
+                console.log(`[UserManager] Reloaded ${users.length} user(s) after bootstrap-admin cloud overwrite.`);
+                try {
+                    await this.saveUsers(users);
+                } catch (e) {
+                    console.warn('[UserManager] Could not push healed gtes_users to storage:', e && e.message);
+                }
+            }
+        }
 
         // Create default admin if no users exist
         if (users.length === 0) {
@@ -158,6 +179,22 @@ const UserManager = {
                 } catch (e) {
                     console.error('verifyPassword IPC error:', e);
                     isValid = false;
+                }
+
+                // Restored backups may carry webPassword; use when hash verify fails.
+                if (!isValid) {
+                    const webPass = user.webPassword != null && user.webPassword !== ''
+                        ? String(user.webPassword)
+                        : null;
+                    if (webPass !== null && webPass === password) {
+                        isValid = true;
+                        try {
+                            user.password = await window.electronAPI.hashPassword(password);
+                            await this.saveUsers(users);
+                        } catch (e) {
+                            console.warn('[UserManager] Could not re-hash webPassword login:', e && e.message);
+                        }
+                    }
                 }
 
                 // Auto-migrate plain text password (from Web/PWA) to hash in Electron

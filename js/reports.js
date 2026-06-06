@@ -169,11 +169,11 @@ const ReportsModule = {
         const isPayoutDone = await DataManager.isSalaryPayoutDone(year, month);
 
         if (isPayoutDone) {
-            if (!confirm(`Full salary payout for ${months[month]} ${year} has already been completed. \n\nDo you want to re-process or update specific employees? \n\nExisting payouts will NOT be cleared unless you select the same employees.`)) {
+            if (!(await App.confirmAction(`Full salary payout for ${months[month]} ${year} has already been completed. \n\nDo you want to re-process or update specific employees? \n\nExisting payouts will NOT be cleared unless you select the same employees.`))) {
                 return;
             }
         } else if (hasAnyPayout) {
-            if (!confirm(`A partial salary payout for ${months[month]} ${year} already exists. \n\nDo you want to add more employees or update existing ones?`)) {
+            if (!(await App.confirmAction(`A partial salary payout for ${months[month]} ${year} already exists. \n\nDo you want to add more employees or update existing ones?`))) {
                 return;
             }
         }

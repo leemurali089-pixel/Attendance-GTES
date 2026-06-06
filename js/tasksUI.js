@@ -1397,7 +1397,7 @@ const TasksUI = {
     },
 
     async deleteTask(taskId, isFromModal = false) {
-        if (!confirm('Are you sure you want to delete this task?')) return;
+        if (!(await App.confirmAction('Are you sure you want to delete this task?'))) return;
         
         const tasks = DataManager.getData(DataManager.KEYS.TASKS) || [];
         const taskToDelete = tasks.find(t => t.id === taskId);

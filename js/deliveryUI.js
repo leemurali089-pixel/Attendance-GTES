@@ -1572,7 +1572,7 @@ const DeliveryUI = {
     },
 
     async deleteCustomer(customerId) {
-        if (!confirm('Delete this customer?')) return;
+        if (!(await App.confirmAction('Delete this customer?'))) return;
 
         try {
             await CustomerManager.deleteCustomer(customerId);
@@ -2019,7 +2019,7 @@ const DeliveryUI = {
     },
 
     async deleteMaterial(materialId) {
-        if (!confirm('Delete this item from inventory?')) return;
+        if (!(await App.confirmAction('Delete this item from inventory?'))) return;
         try {
             await InventoryManager.deleteMaterial(materialId);
             App.showNotification('Item removed', 'success');
@@ -2793,7 +2793,7 @@ const DeliveryUI = {
             if (linked.length && source === 'invoice') {
                 msg = `Delete this invoice and ${linked.length} linked challan(s) (${linked.map(c => c.id).join(', ')})?`;
             }
-            if (!confirm(msg)) return;
+            if (!(await App.confirmAction(msg))) return;
         } else if (source === 'jobcard') {
             const challans = DeliveryManager.getAllChallans();
             const invoices = (typeof InvoiceManager !== 'undefined') ? InvoiceManager.getAllInvoices() : [];
@@ -2806,18 +2806,18 @@ const DeliveryUI = {
                 if (linkedChallan) msg += `- Challan (${linkedChallan.id})\n`;
                 msg += `\nClick Cancel to ONLY delete the Job Card and keep the linked documents.`;
                 
-                const choice = confirm(msg);
+                const choice = await App.confirmAction(msg);
                 if (choice) {
                     deleteChallanToo = true; // Reusing this boolean to mean "delete all children"
                 } else {
-                    if (!confirm("Delete ONLY the Job Card? (The linked documents will remain)")) return;
+                    if (!(await App.confirmAction("Delete ONLY the Job Card? (The linked documents will remain)"))) return;
                     deleteChallanToo = false;
                 }
             } else {
-                if (!confirm(`Delete this Job Card?`)) return;
+                if (!(await App.confirmAction(`Delete this Job Card?`))) return;
             }
         } else {
-            if (!confirm(`Delete this ${source}?`)) return;
+            if (!(await App.confirmAction(`Delete this ${source}?`))) return;
         }
 
         try {
@@ -2850,7 +2850,7 @@ const DeliveryUI = {
     },
 
     async repairImportedData() {
-        if (!confirm('This will fix missing customer names and random IDs in imported invoices. Proceed?')) return;
+        if (!(await App.confirmAction('This will fix missing customer names and random IDs in imported invoices. Proceed?'))) return;
 
         App.showNotification('Repairing data...', 'info');
         try {
@@ -2884,7 +2884,7 @@ const DeliveryUI = {
     },
 
     async deleteChallan(challanId) {
-        if (!confirm('Delete this challan?')) return;
+        if (!(await App.confirmAction('Delete this challan?'))) return;
 
         try {
             await DeliveryManager.deleteChallan(challanId);
@@ -3299,7 +3299,7 @@ const DeliveryUI = {
             throw new Error('All selected delivery challans must belong to the same customer.');
         }
 
-        if (confirmMessage && !confirm(confirmMessage)) return null;
+        if (confirmMessage && !(await App.confirmAction(confirmMessage))) return null;
 
         let allMappedItems = [];
         let narrationParts = [];
@@ -4437,7 +4437,7 @@ const DeliveryUI = {
     },
 
     async deleteJobCard(id) {
-        if (!confirm('Delete this job card?')) return;
+        if (!(await App.confirmAction('Delete this job card?'))) return;
         if (typeof JobCardManager !== 'undefined') {
             await JobCardManager.deleteJobCard(id);
             App.showNotification('Job card deleted', 'success');
@@ -4540,7 +4540,7 @@ const DeliveryUI = {
         if (linked.length) {
             msg = `Delete this invoice and ${linked.length} linked challan(s)?`;
         }
-        if (!confirm(msg)) return;
+        if (!(await App.confirmAction(msg))) return;
         try {
             await InvoiceManager.deleteInvoice(id);
             App.showNotification('Invoice and linked challans deleted', 'success');
@@ -4757,17 +4757,10 @@ const DeliveryUI = {
         const modalEl = document.getElementById('pdfPreviewModal');
         if (modalEl) {
             this._installPdfPreviewModalCleanup();
-            const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
-            inst.show();
-            // Place PDF modal above a parent modal without rewriting z-index of every backdrop (breaks stack on hide).
-            const boostZ = () => {
-                modalEl.style.zIndex = '2005';
-                const all = document.querySelectorAll('.modal-backdrop');
-                if (all.length) all[all.length - 1].style.zIndex = '2000';
-            };
-            setTimeout(boostZ, 0);
-            requestAnimationFrame(() => setTimeout(boostZ, 0));
-            setTimeout(boostZ, 100);
+            if (typeof App !== 'undefined' && App.raiseModalAboveStack) {
+                App.raiseModalAboveStack(modalEl);
+            }
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
         }
     },
 
@@ -5379,14 +5372,14 @@ const DeliveryUI = {
         const vInp = document.getElementById('purchaseVendor');
         if (vInp) {
             vInp.addEventListener('blur', () => {
-                setTimeout(() => this.maybePromptNewVendorForPurchase(vInp), 280);
+                setTimeout(() => void this.maybePromptNewVendorForPurchase(vInp), 280);
             });
         }
 
         modal.show();
     },
 
-    maybePromptNewVendorForPurchase(input) {
+    async maybePromptNewVendorForPurchase(input) {
         if (!input || !document.getElementById('purchaseEntryModal')?.classList.contains('show')) return;
         const val = (input.value || '').trim();
         if (!val) return;
@@ -5398,7 +5391,7 @@ const DeliveryUI = {
             if (input.value !== hit.name) input.value = hit.name;
             return;
         }
-        if (!confirm(`"${val}" is not in your supplier list.\n\nCreate as a new supplier and enter details?`)) return;
+        if (!(await App.confirmAction(`"${val}" is not in your supplier list.\n\nCreate as a new supplier and enter details?`))) return;
         this.currentCustomerType = 'Supplier';
         this.showCustomerModal(null, { prefillName: val });
     },
@@ -5850,7 +5843,7 @@ const DeliveryUI = {
     },
 
     async deleteVoucher(id) {
-        if (!confirm('Are you sure you want to delete this voucher?')) return;
+        if (!(await App.confirmAction('Are you sure you want to delete this voucher?'))) return;
         try {
             await VoucherManager.deleteVoucher(id);
             App.showNotification('Voucher deleted', 'success');

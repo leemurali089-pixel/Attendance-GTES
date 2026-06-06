@@ -255,7 +255,7 @@ const BankMailUI = (() => {
         });
         tbody.querySelectorAll('.bank-voucher').forEach(b => b.onclick = () => createVoucherFrom(b.dataset.msg));
         tbody.querySelectorAll('.bank-dismiss').forEach(b => b.onclick = async () => {
-            if (!confirm('Remove from bank queue?')) return;
+            if (!(await App.confirmAction('Remove from bank queue?'))) return;
             await window.electronAPI.gmail.queueRemove({ name: 'bank', messageId: b.dataset.msg });
             await refresh();
         });

@@ -449,7 +449,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 20; // Party-scoped allocation norm keys (no bare-digit collisions)
+        const logicVersion = 22; // Reconcile app paidSoFar vs BK paid when no voucher rows
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
@@ -480,8 +480,10 @@ const InvoiceManager = {
             const importedStatus = String(inv.status || '').toLowerCase();
             const srcBk = String(inv.source || '').toLowerCase() === 'bookkeeper'
                 || !!(inv.bookkeeperId && String(inv.bookkeeperId).trim());
-            // Honor Book Keeper paid/partial only when no voucher allocations were found (local rows use vouchers).
-            if (!isCreditNote && balance >= (invTotal - 0.05) && srcBk) {
+            // Honor Book Keeper paid/partial only when no voucher allocations and no app-written paidSoFar.
+            const appPaidSoFar = parseFloat(inv.paidSoFar);
+            const hasAppSettlement = !Number.isNaN(appPaidSoFar) && appPaidSoFar > 0.05;
+            if (!isCreditNote && !hasAppSettlement && balance >= (invTotal - 0.05) && srcBk) {
                 if (importedStatus === 'paid') {
                     balance = 0;
                 } else if (importedStatus === 'partial') {

@@ -138,7 +138,7 @@ const POQueueUI = (() => {
         };
         const cleanupBtn = document.getElementById('poCleanup');
         if (cleanupBtn) cleanupBtn.onclick = async () => {
-            if (!confirm('Re-check every PO entry against the updated rules and remove ones that are not actually Purchase Orders?')) return;
+            if (!(await App.confirmAction('Re-check every PO entry against the updated rules and remove ones that are not actually Purchase Orders?'))) return;
             cleanupBtn.disabled = true;
             const orig = cleanupBtn.innerHTML;
             cleanupBtn.innerHTML = '<i class="bi bi-hourglass-split spin"></i> Cleaning…';
@@ -299,7 +299,7 @@ const POQueueUI = (() => {
         tbody.querySelectorAll('.po-manage').forEach(b => b.onclick = () => openInvoicePicker(b.dataset.msg));
         tbody.querySelectorAll('.po-invoice').forEach(b => b.onclick = () => createInvoiceFrom(b.dataset.msg));
         tbody.querySelectorAll('.po-dismiss').forEach(b => b.onclick = async () => {
-            if (!confirm('Remove this message from PO queue?')) return;
+            if (!(await App.confirmAction('Remove this message from PO queue?'))) return;
             await window.electronAPI.gmail.queueRemove({ name: 'po', messageId: b.dataset.msg });
             await refresh();
         });

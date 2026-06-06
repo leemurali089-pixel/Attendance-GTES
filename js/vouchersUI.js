@@ -6,7 +6,77 @@
 const VouchersUI = {
     currentMode: 'gst', // 'gst', 'non-gst', 'purchase', 'credit-note', or 'debit-note'
     _voucherFilterDebounceTimer: null,
-    BANK_RENDER_CHUNK_SIZE: 250,
+    BANK_RENDER_CHUNK_SIZE: 150,
+    _bankRenderCtx: null,
+    _bankPartyMatchCache: null,
+    _bankConvertSeq: 0,
+    _bankConvertTimer: null,
+    _bankPartyPrefillTimer: null,
+
+    _bankRowIndex(el) {
+        const tr = el?.closest?.('tr');
+        const idx = parseInt(tr?.getAttribute('data-index') ?? '-1', 10);
+        return Number.isInteger(idx) && idx >= 0 ? idx : null;
+    },
+
+    convertBankTxFromRow(btn) {
+        const index = this._bankRowIndex(btn);
+        if (index == null) return;
+        this.convertBankTx(index);
+    },
+
+    assignBankPartyFromRow(btn) {
+        const index = this._bankRowIndex(btn);
+        if (index == null) return;
+        this.assignBankParty(index);
+    },
+
+    deleteBankRowFromRow(btn) {
+        const index = this._bankRowIndex(btn);
+        if (index == null) return;
+        this.deleteBankRow(index);
+    },
+
+    showAssignToVoucherModalFromRow(btn) {
+        const index = this._bankRowIndex(btn);
+        if (index == null) return;
+        this.showAssignToVoucherModal(index);
+    },
+
+    async reassignBankVoucherFromRow(btn) {
+        const index = this._bankRowIndex(btn);
+        if (index == null) return;
+        const tx = this.currentBankTransactions?.[index];
+        if (!tx) return;
+
+        const currentId = (typeof VoucherManager.getBankTxLinkInfo === 'function'
+            ? VoucherManager.getBankTxLinkInfo(tx)?.linkedVoucherId
+            : null) || tx.linkedVoucherId || '';
+
+        const ok = await App.confirmAction(
+            currentId
+                ? `This transaction is linked to Voucher ${currentId}. Choose a different voucher?`
+                : 'Assign this transaction to a voucher?',
+            {
+                title: 'Reassign voucher link',
+                confirmLabel: 'Choose voucher',
+                focusAfterClose: () => document.getElementById('bsPartyFilter')
+            }
+        );
+        if (!ok) return;
+
+        if (typeof VoucherManager.removeBankVoucherLink === 'function') {
+            await VoucherManager.removeBankVoucherLink(tx);
+        }
+        delete tx.converted;
+        delete tx.linkedVoucherId;
+        delete tx.bankLinkPersisted;
+        delete tx.voucherId;
+
+        tx._reassigning = true;
+        this._replaceBankRowAt(index);
+        this.showAssignToVoucherModal(index);
+    },
     voucherListSortKey: 'voucherNo',
     voucherListSortDir: 'asc',
     noteListSortKey: 'docNo',
@@ -1263,8 +1333,11 @@ const VouchersUI = {
     },
 
     showCreateModal(type = 'receipt') {
-        // Clear any stale backdrop before opening a fresh voucher modal
-        this.cleanupBackdrops();
+        // Keep bank statement modal stable when stacking receipt/payment on top
+        const bankOpen = !!document.getElementById('bankStatementModal')?.classList.contains('show');
+        if (!bankOpen) {
+            this.cleanupBackdrops();
+        }
 
         let customers = [];
         if (typeof CustomerManager !== 'undefined') {
@@ -1568,6 +1641,16 @@ const VouchersUI = {
                         ? await BankImportHelper.mapToTransactionsAsync(rows, mapping)
                         : BankImportHelper.mapToTransactions(rows, mapping);
 
+                    if (typeof VoucherManager.applyPersistedLinksToBankTransactions === 'function') {
+                        VoucherManager.applyPersistedLinksToBankTransactions(transactions);
+                    }
+                    if (typeof VoucherManager.restoreBankImportSessionToTransactions === 'function') {
+                        VoucherManager.restoreBankImportSessionToTransactions(transactions);
+                    }
+                    if (typeof VoucherManager.applySessionPartialHintsToInvoiceCache === 'function') {
+                        VoucherManager.applySessionPartialHintsToInvoiceCache(transactions, 'receipt');
+                    }
+
                     await this.showStatementProcessingModal(transactions);
                 } catch (err) {
                     console.error('Bank statement import failed:', err);
@@ -1580,22 +1663,117 @@ const VouchersUI = {
         fileInput.click();
     },
 
-    renderBankRow(tx, index) {
+    /** Party name for a bank import row — same sources as the auto-match badge. */
+    resolveBankTxPartyName(tx) {
+        if (!tx) return '';
+        return (
+            tx.bankAssignedParty
+            || tx.assignedParty
+            || tx.mappedVoucher?.customerName
+            || (typeof VoucherManager !== 'undefined' ? VoucherManager.resolveBankParty(tx.description) : null)
+            || ''
+        ).toString().trim();
+    },
+
+    resolveBankTxPartyCustomerId(partyName) {
+        const name = (partyName || '').trim();
+        if (!name) return '';
+        let customers = [];
+        if (typeof CustomerManager !== 'undefined' && CustomerManager.getAllCustomers) {
+            customers = CustomerManager.getAllCustomers();
+        } else {
+            customers = DataManager.getData('customers') || [];
+        }
+        const norm = (s) => (s || '').toString().trim().toLowerCase();
+        const n = norm(name);
+        let found = customers.find((c) => norm(c.name) === n);
+        if (!found) {
+            found = customers.find((c) => {
+                const cn = norm(c.name);
+                return cn && (n.includes(cn) || cn.includes(n));
+            });
+        }
+        return found ? found.id : '';
+    },
+
+    prefillVoucherPartyFromBankTx(tx) {
+        const partyName = this.resolveBankTxPartyName(tx);
+        if (!partyName) return false;
+        const partyId = tx.mappedVoucher?.customerId || this.resolveBankTxPartyCustomerId(partyName);
+        const input = document.getElementById('voucherPartySearch');
+        if (!input) return false;
+        this.selectParty(partyName, partyId);
+        return true;
+    },
+
+    _buildBankRenderContext(transactions) {
+        const list = Array.isArray(transactions) ? transactions : [];
+        const partyCache = new Map();
+        const linkByIndex = new Map();
+        const dupByIndex = new Map();
+        list.forEach((tx, index) => {
+            const desc = (tx?.description || '').toString();
+            let party = partyCache.get(desc);
+            if (party === undefined) {
+                party = this.resolveBankTxPartyName(tx);
+                partyCache.set(desc, party);
+            }
+            const linkInfo = (typeof VoucherManager.getBankTxLinkInfo === 'function')
+                ? VoucherManager.getBankTxLinkInfo(tx)
+                : null;
+            linkByIndex.set(index, linkInfo);
+            const alreadyLinked = !!(linkInfo?.linkedVoucherId);
+            dupByIndex.set(index, !alreadyLinked && !!party && VoucherManager.checkDuplicateVoucher(party, tx.amount, tx.date));
+        });
+        this._bankRenderCtx = { partyCache, linkByIndex, dupByIndex };
+        return this._bankRenderCtx;
+    },
+
+    renderBankRow(tx, index, ctx = null) {
+        const renderCtx = ctx || this._bankRenderCtx;
         const isDebit = tx.type === 'debit';
-        const match = VoucherManager.resolveBankParty(tx.description);
+        const desc = (tx?.description || '').toString();
+        let match = renderCtx?.partyCache?.get(desc);
+        if (match === undefined) {
+            match = this.resolveBankTxPartyName(tx);
+            if (renderCtx?.partyCache) renderCtx.partyCache.set(desc, match);
+        }
         const matchHtml = match ? `<span class="badge bg-primary ms-1"><i class="bi bi-magic"></i> ${match}</span>` : '';
 
         let actionHtml = '';
-        const alreadyVouchered = match && VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date);
+        const linkInfo = renderCtx?.linkByIndex?.get(index)
+            ?? (typeof VoucherManager.getBankTxLinkInfo === 'function' ? VoucherManager.getBankTxLinkInfo(tx) : null);
+        const hasSessionMap = tx.isReady && !!(tx.mappedVoucher || tx.mappedData);
+        if (linkInfo?.linkedVoucherId && !hasSessionMap) {
+            tx.linkedVoucherId = linkInfo.linkedVoucherId;
+            tx.converted = true;
+        }
+        const alreadyLinked = !!(linkInfo?.linkedVoucherId);
+        const alreadyVouchered = renderCtx?.dupByIndex?.has(index)
+            ? renderCtx.dupByIndex.get(index)
+            : (!alreadyLinked && match && VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date));
 
-        if (tx.converted || alreadyVouchered) {
-            actionHtml = `<span class="badge bg-success p-2"><i class="bi bi-check-circle-fill me-1"></i> ${alreadyVouchered ? 'Already Exists' : 'Imported'}</span>`;
+        if ((tx.converted || alreadyLinked || alreadyVouchered) && !hasSessionMap) {
+            const existsLabel = alreadyLinked || alreadyVouchered ? 'Already Exists' : 'Imported';
+            const linkHint = alreadyLinked && linkInfo?.linkedVoucherId
+                ? ` <span class="opacity-75">(${linkInfo.linkedVoucherId})</span>`
+                : '';
+            const reassignBtn = alreadyLinked
+                ? `<button class="btn btn-sm btn-outline-warning mt-1" onclick="VouchersUI.reassignBankVoucherFromRow(this)" title="Change linked voucher">
+                        <i class="bi bi-arrow-repeat"></i> Reassign
+                   </button>`
+                : '';
+            actionHtml = `
+                <div class="d-flex flex-column align-items-center gap-1">
+                    <span class="badge bg-success p-2"><i class="bi bi-check-circle-fill me-1"></i> ${existsLabel}${linkHint}</span>
+                    ${reassignBtn}
+                </div>`;
             tx.converted = true;
         } else if (tx.isReady) {
             actionHtml = `
                 <div class="d-flex flex-column gap-1">
                     <span class="badge bg-warning p-2 text-dark mb-1"><i class="bi bi-clock-history me-1"></i> Ready to Import</span>
-                    <button class="btn btn-sm btn-outline-info" onclick="VouchersUI.convertBankTx(${index})">
+                    <button class="btn btn-sm btn-outline-info" onclick="VouchersUI.convertBankTxFromRow(this)">
                         <i class="bi bi-pencil"></i> Edit Details
                     </button>
                 </div>`;
@@ -1603,20 +1781,20 @@ const VouchersUI = {
             actionHtml = `
                 <div class="d-flex gap-1 justify-content-center flex-wrap">
                     <button class="btn btn-sm btn-${isDebit ? 'outline-warning' : 'outline-info'}" 
-                            onclick="VouchersUI.convertBankTx(${index})">
+                            onclick="VouchersUI.convertBankTxFromRow(this)">
                         <i class="bi bi-${isDebit ? 'arrow-up-right' : 'arrow-down-left'}"></i>
                         ${isDebit ? 'Payment' : 'Receipt'}
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" 
-                            onclick="VouchersUI.assignBankParty(${index})" title="Link to party name for future auto-matching">
+                            onclick="VouchersUI.assignBankPartyFromRow(this)" title="Link to party name for future auto-matching">
                         <i class="bi bi-person-plus"></i> Assign Party
                     </button>
                     <button class="btn btn-sm btn-outline-primary" 
-                            onclick="VouchersUI.showAssignToVoucherModal(${index})" title="Link to an existing voucher (allows amount differences)">
+                            onclick="VouchersUI.showAssignToVoucherModalFromRow(this)" title="Link to an existing voucher (allows amount differences)">
                         <i class="bi bi-link-45deg"></i> Link Voucher
                     </button>
                     <button class="btn btn-sm btn-outline-danger" 
-                            onclick="VouchersUI.deleteBankRow(${index})" title="Delete this transaction">
+                            onclick="VouchersUI.deleteBankRowFromRow(this)" title="Delete this transaction">
                         <i class="bi bi-trash"></i> Delete
                     </button>
                 </div>`;
@@ -1641,20 +1819,62 @@ const VouchersUI = {
         `;
     },
 
+    _refreshBankRowAt(index) {
+        const tbody = document.querySelector('#bankStatementModal tbody');
+        const tx = this.currentBankTransactions?.[index];
+        if (!tbody || !tx) return false;
+        const row = tbody.querySelector(`tr[data-index="${index}"]`);
+        if (!row) return false;
+        row.outerHTML = this.renderBankRow(tx, index);
+        return true;
+    },
+
     async _renderBankRowsChunked(tbody, transactions) {
         if (!tbody) return;
+        const prevVisibility = tbody.style.visibility;
+        tbody.style.visibility = 'hidden';
         tbody.innerHTML = '';
         const list = Array.isArray(transactions) ? transactions : [];
-        for (let i = 0; i < list.length; i += this.BANK_RENDER_CHUNK_SIZE) {
-            const chunk = list.slice(i, i + this.BANK_RENDER_CHUNK_SIZE);
-            const rowsHtml = chunk.map((tx, idx) => this.renderBankRow(tx, i + idx)).join('');
-            tbody.insertAdjacentHTML('beforeend', rowsHtml);
-            await this._yieldToUI();
+        const ctx = this._buildBankRenderContext(list);
+        try {
+            for (let i = 0; i < list.length; i += this.BANK_RENDER_CHUNK_SIZE) {
+                const chunk = list.slice(i, i + this.BANK_RENDER_CHUNK_SIZE);
+                const rowsHtml = chunk.map((tx, idx) => this.renderBankRow(tx, i + idx, ctx)).join('');
+                tbody.insertAdjacentHTML('beforeend', rowsHtml);
+                if (i + this.BANK_RENDER_CHUNK_SIZE < list.length) {
+                    await this._yieldToUI();
+                }
+            }
+        } finally {
+            tbody.style.visibility = prevVisibility || '';
+        }
+    },
+
+    async _cleanupPersistedBankAliases() {
+        if (typeof VoucherManager === 'undefined' || !VoucherManager._sanitizeBankAliasMappings) return;
+        const raw = DataManager.getData('gtes_bank_alias') || {};
+        const clean = VoucherManager._sanitizeBankAliasMappings(raw);
+        if (JSON.stringify(clean) !== JSON.stringify(raw)) {
+            await DataManager.saveData('gtes_bank_alias', clean);
+            VoucherManager.invalidateBankAliasCache();
         }
     },
 
     async showStatementProcessingModal(transactions) {
+        if (typeof VoucherManager.applyPersistedLinksToBankTransactions === 'function') {
+            VoucherManager.applyPersistedLinksToBankTransactions(transactions);
+        }
         this.currentBankTransactions = transactions;
+        if (!this._bankAliasSanitized) {
+            await this._cleanupPersistedBankAliases();
+            this._bankAliasSanitized = true;
+        }
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.invalidateBankAliasCache) {
+            VoucherManager.invalidateBankAliasCache();
+        }
+        (transactions || []).forEach((tx) => {
+            delete tx.bankAssignedParty;
+        });
         
         // Remove existing to avoid duplicate IDs in DOM
         const existing = document.getElementById('bankStatementModal');
@@ -1807,7 +2027,7 @@ const VouchersUI = {
         const filters = this.bsFilters || { party: '', type: '', status: '', month: '' };
         const filterBarHtml = `
             <div class="d-flex gap-2 align-items-center flex-wrap px-3 pb-2 pt-0">
-                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by party name..." oninput="VouchersUI.filterBankRowsDebounced()" value="${filters.party}">
+                <input type="text" id="bsPartyFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:250px;" placeholder="Filter by description..." oninput="VouchersUI.filterBankRowsDebounced()" value="${filters.party}">
                 <input type="month" id="bsMonthFilter" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()" value="${filters.month || ''}">
                 <select id="bsTypeFilter" class="form-select form-select-sm bg-secondary text-white border-secondary" style="max-width:160px;" onchange="VouchersUI.filterBankRows()">
                     <option value="" ${filters.type === '' ? 'selected' : ''}>All Types</option>
@@ -1845,13 +2065,20 @@ const VouchersUI = {
 
         // Store transactions temporarily
         this.currentBankTransactions = transactions;
+
+        if (transactions.length && typeof VoucherManager.applySessionPartialHintsToInvoiceCache === 'function') {
+            VoucherManager.applySessionPartialHintsToInvoiceCache(transactions, 'receipt');
+        }
+        if (typeof InvoiceManager !== 'undefined' && InvoiceManager._balanceCache) {
+            InvoiceManager._balanceCache = null;
+        }
     },
 
     filterBankRowsDebounced() {
         if (this.bsFilterTimeout) clearTimeout(this.bsFilterTimeout);
         this.bsFilterTimeout = setTimeout(() => {
             this.filterBankRows();
-        }, 150); // Small delay to catch fast typers
+        }, 280);
     },
 
     cleanupBackdrops() {
@@ -1879,7 +2106,6 @@ const VouchersUI = {
             const descTd = row.cells[2];
             const debitTd = row.cells[3];
             
-            const desc = (descTd?.textContent || '').toLowerCase();
             const isDebit = debitTd?.textContent.trim() !== '';
             const isImported = row.classList.contains('bs-imported-row') && !descTd?.innerText.includes('Already Exists');
             const isExists = descTd?.innerText.includes('Already Exists');
@@ -1887,10 +2113,11 @@ const VouchersUI = {
             const hasMatch = descTd?.querySelector('.badge.bg-primary') !== null;
             const idx = parseInt(row.getAttribute('data-index') || '-1', 10);
             const tx = Number.isInteger(idx) && idx >= 0 ? this.currentBankTransactions[idx] : null;
+            const txDesc = (tx?.description || '').toLowerCase();
             const txDate = tx && tx.date ? new Date(tx.date) : null;
             const txYm = txDate && !Number.isNaN(txDate.getTime()) ? `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}` : '';
 
-            const partyOk = !partyQ || desc.includes(partyQ);
+            const partyOk = !partyQ || txDesc.includes(partyQ);
             const typeOk = !typeQ || (typeQ === 'debit' && isDebit) || (typeQ === 'credit' && !isDebit);
             const monthOk = !monthQ || txYm === monthQ;
             
@@ -1933,48 +2160,66 @@ const VouchersUI = {
     },
 
     convertBankTx(index) {
-        const tx = this.currentBankTransactions[index];
+        const tx = this.currentBankTransactions?.[index];
         if (!tx) return;
 
-        // Hide statement modal momentarily (or keep open behind)
-        // bootstrap.Modal.getInstance(document.getElementById('bankStatementModal')).hide();
+        if (this._bankConvertTimer) clearTimeout(this._bankConvertTimer);
+        if (this._bankPartyPrefillTimer) clearTimeout(this._bankPartyPrefillTimer);
+        const convertToken = ++this._bankConvertSeq;
+
+        if (typeof VoucherManager !== 'undefined' && VoucherManager.invalidateAllocationsCache) {
+            VoucherManager.invalidateAllocationsCache();
+        }
 
         // Open generic Voucher Create Modal pre-filled
         this.showCreateModal(tx.type === 'debit' ? 'payment' : 'receipt');
 
         // Use timeout to allow modal to render
-        setTimeout(() => {
+        this._bankConvertTimer = setTimeout(() => {
+            this._bankConvertTimer = null;
+            if (convertToken !== this._bankConvertSeq) return;
+
+            const liveTx = this.currentBankTransactions?.[index];
+            if (!liveTx) return;
+
             const form = document.getElementById('createVoucherForm');
             if (form) {
-                // Pre-fill Amount
-                const amtField = form.querySelector('#finalAmount'); // Use the hidden field for final amount
-                if (amtField) amtField.value = tx.amount;
+                const bankAmount = liveTx.isReady && liveTx.mappedVoucher?.amount != null
+                    ? Number(liveTx.mappedVoucher.amount)
+                    : Number(liveTx.amount);
+
+                // Pre-fill Amount from the clicked bank row
+                const amtField = form.querySelector('#finalAmount');
+                if (amtField) amtField.value = bankAmount;
                 const visibleAmtField = form.querySelector('[name="amount"]');
-                if (visibleAmtField) visibleAmtField.value = tx.amount;
+                if (visibleAmtField) visibleAmtField.value = bankAmount;
                 this.calculateTotal();
 
                 // Pre-fill Date
                 const dateField = form.querySelector('[name="date"]');
-                if (dateField && tx.date) {
-                    dateField.value = tx.date.toISOString().split('T')[0];
+                if (dateField && liveTx.date) {
+                    const d = liveTx.date instanceof Date ? liveTx.date : new Date(liveTx.date);
+                    if (!Number.isNaN(d.getTime())) {
+                        dateField.value = d.toISOString().split('T')[0];
+                    }
                 }
 
                 // Voucher No: restore saved session id or advance from last custom serial in this import
                 const idField = document.getElementById('voucherIdField');
                 if (idField) {
-                    if (tx.mappedVoucher?.id) {
-                        idField.value = tx.mappedVoucher.id;
+                    if (liveTx.isReady && liveTx.mappedVoucher?.id) {
+                        idField.value = liveTx.mappedVoucher.id;
                     } else {
                         const dateField = form.querySelector('[name="date"]');
-                        const d = dateField?.value ? new Date(dateField.value) : (tx.date || new Date());
-                        const vchType = tx.type === 'debit' ? 'payment' : 'receipt';
+                        const d = dateField?.value ? new Date(dateField.value) : (liveTx.date || new Date());
+                        const vchType = liveTx.type === 'debit' ? 'payment' : 'receipt';
                         idField.value = VoucherManager.getNextVoucherNumber(vchType, d, VouchersUI.currentMode);
                     }
                 }
 
                 // Restore persistent fields if already mapped in session
-                if (tx.mappedVoucher) {
-                    const mv = tx.mappedVoucher;
+                if (liveTx.isReady && liveTx.mappedVoucher) {
+                    const mv = liveTx.mappedVoucher;
                     if (mv.tdsAmount) {
                         const tdsField = form.querySelector('[name="tdsAmount"]');
                         if (tdsField) tdsField.value = mv.tdsAmount;
@@ -1999,57 +2244,47 @@ const VouchersUI = {
                         if (refField) refField.value = mv.referenceId;
                     }
                 } else {
-                    // Pre-fill Remarks (only if new)
                     const remarksField = form.querySelector('[name="remarks"]');
-                    if (remarksField) remarksField.value = `Bank Import: ${tx.description}`;
+                    if (remarksField) remarksField.value = `Bank Import: ${liveTx.description}`;
                 }
 
-                // NEW: Populate Hidden Bank Desc for Learning
                 const bankDescField = form.querySelector('#bankDescription');
-                if (bankDescField) bankDescField.value = tx.description;
+                if (bankDescField) bankDescField.value = liveTx.description;
 
-                // NEW: Track Index for 'Imported' Status
                 const indexField = form.querySelector('#bankTxIndex');
                 if (indexField) indexField.value = index;
 
-                // NEW: Try to Auto-Resolve Party OR restore existing assignment
-                if (tx) {
-                    const mv = tx.mappedVoucher;
-                    const resolvedName = mv ? mv.customerName : VoucherManager.resolveBankParty(tx.description);
-                    const resolvedId   = mv ? mv.customerId   : '';
-
-                    if (resolvedName) {
-                        // Use the new selectParty to show badge and load invoices
-                        setTimeout(() => {
-                            VouchersUI.selectParty(resolvedName, resolvedId);
-                        }, 350); // Give extra time after the first timeout renders form
+                const partyName = VouchersUI.resolveBankTxPartyName(liveTx);
+                if (partyName) {
+                    if (!VouchersUI.prefillVoucherPartyFromBankTx(liveTx)) {
+                        this._bankPartyPrefillTimer = setTimeout(() => {
+                            this._bankPartyPrefillTimer = null;
+                            if (convertToken !== this._bankConvertSeq) return;
+                            VouchersUI.prefillVoucherPartyFromBankTx(liveTx);
+                        }, 150);
                     }
                 }
                 // Set Payment Mode and Detect Cheque
                 const modeField = form.querySelector('[name="paymentMode"]');
                 const refField = form.querySelector('[name="refNo"]');
 
-                let mode = 'bank'; // Default to Bank (Transfer)
+                let mode = 'bank';
                 let refNo = '';
 
-                // Cheque Detection
-                const descUpper = tx.description.toUpperCase();
+                const descUpper = liveTx.description.toUpperCase();
                 if (descUpper.includes('CHQ') || descUpper.includes('CHEQUE') || descUpper.includes('CLG')) {
                     mode = 'cheque';
-                    // Extract number: Look for 6 digit number typical of cheques
-                    const chqMatch = tx.description.match(/\b\d{6}\b/);
+                    const chqMatch = liveTx.description.match(/\b\d{6}\b/);
                     if (chqMatch) {
                         refNo = chqMatch[0];
                     } else {
-                        // Fallback: finding any number block > 3 digits
-                        const anyNum = tx.description.match(/\d{4,}/);
+                        const anyNum = liveTx.description.match(/\d{4,}/);
                         if (anyNum) refNo = anyNum[0];
                     }
                 }
 
                 if (modeField) {
                     modeField.value = mode;
-                    // Trigger UI update to show reference field
                     VouchersUI.onPaymentModeChange(modeField);
                 }
 
@@ -2244,13 +2479,60 @@ const VouchersUI = {
         if (!tx) return;
 
         await VoucherManager.saveBankMapping(tx.description, partyName);
-        tx.assignedParty = partyName;
+        if (typeof VoucherManager.invalidateBankAliasCache === 'function') {
+            VoucherManager.invalidateBankAliasCache();
+        }
+
+        const signature = VoucherManager.getBankMatchSignature(tx.description, partyName);
+        (this.currentBankTransactions || []).forEach((row) => {
+            if (VoucherManager.getBankMatchSignature(row.description, partyName) === signature) {
+                row.bankAssignedParty = partyName;
+            }
+        });
 
         const modalEl = document.getElementById('assignPartyModal');
         bootstrap.Modal.getInstance(modalEl)?.hide();
 
-        App.showNotification(`"${partyName}" assigned. Future imports will auto-match this description.`, 'success');
-        this.showStatementProcessingModal(this.currentBankTransactions);
+        const matchCount = this._countBankPartyMatches(signature, partyName);
+        App.showNotification(`"${partyName}" assigned to ${matchCount} matching transaction(s).`, 'success');
+        this._refreshBankPartyRowsAfterAssign(signature, partyName);
+    },
+
+    _countBankPartyMatches(signature, partyName) {
+        return (this.currentBankTransactions || []).filter(
+            (row) => VoucherManager.getBankMatchSignature(row.description, partyName) === signature
+        ).length;
+    },
+
+    _replaceBankRowAt(index) {
+        const tbody = document.querySelector('#bankStatementModal tbody');
+        const tr = tbody?.querySelector(`tr[data-index="${index}"]`);
+        const tx = this.currentBankTransactions?.[index];
+        if (!tbody || !tr || !tx) return;
+        const wrap = document.createElement('tbody');
+        wrap.innerHTML = this.renderBankRow(tx, index).trim();
+        const newTr = wrap.firstElementChild;
+        if (newTr) {
+            const prevDisplay = tr.style.display;
+            tr.replaceWith(newTr);
+            if (prevDisplay === 'none') newTr.style.display = 'none';
+        }
+    },
+
+    _refreshBankPartyRowsAfterAssign(signature, partyName) {
+        const tbody = document.querySelector('#bankStatementModal tbody');
+        if (!tbody) {
+            this.showStatementProcessingModal(this.currentBankTransactions);
+            return;
+        }
+        (this.currentBankTransactions || []).forEach((tx, idx) => {
+            if (VoucherManager.getBankMatchSignature(tx.description, partyName) === signature) {
+                this._replaceBankRowAt(idx);
+            }
+        });
+        this.filterBankRows();
+        this.updateBankSelectionStatus();
+        App.restoreRendererKeyboardFocus(document.getElementById('bsPartyFilter'));
     },
 
     // --- Bulk Selection and Deletion Methods ---
@@ -2309,28 +2591,74 @@ const VouchersUI = {
         }
     },
 
-    deleteBankRow(index) {
-        if (!confirm('Are you sure you want to delete this transaction from the import list?')) return;
-        
+    _reindexBankTableRows() {
+        document.querySelectorAll('#bankStatementModal tbody tr').forEach((row, i) => {
+            row.setAttribute('data-index', String(i));
+            const cb = row.querySelector('.bs-row-checkbox');
+            if (cb) cb.value = String(i);
+        });
+    },
+
+    _updateBankFooterCount() {
+        const n = (this.currentBankTransactions || []).length;
+        const foot = document.querySelector('#bankStatementModal .modal-footer .text-muted.small');
+        if (foot) {
+            foot.innerHTML = `<i class="bi bi-shield-check me-1"></i> ${n} transactions loaded for processing.`;
+        }
+    },
+
+    async deleteBankRow(index) {
+        const partyFilter = () => document.getElementById('bsPartyFilter');
+        const ok = await App.confirmAction(
+            'Are you sure you want to delete this transaction from the import list?',
+            { title: 'Delete transaction', confirmLabel: 'Delete', danger: true, focusAfterClose: partyFilter() }
+        );
+        if (!ok) return;
+
+        const tbody = document.querySelector('#bankStatementModal tbody');
+        const row = tbody?.querySelector(`tr[data-index="${index}"]`);
+        if (index < 0 || index >= (this.currentBankTransactions || []).length) return;
+
         this.currentBankTransactions.splice(index, 1);
-        this.showStatementProcessingModal(this.currentBankTransactions);
+        if (row) row.remove();
+
+        if (typeof this._reindexBankTableRows === 'function') this._reindexBankTableRows();
+        if (typeof this._updateBankFooterCount === 'function') this._updateBankFooterCount();
+        this.updateBankSelectionStatus();
+        this.filterBankRows();
+        App.restoreRendererKeyboardFocus(partyFilter());
         App.showNotification('Transaction removed.', 'info');
     },
 
-    deleteSelectedBankRows() {
+    async deleteSelectedBankRows() {
         const checkboxes = document.querySelectorAll('.bs-row-checkbox:checked');
         if (checkboxes.length === 0) return;
 
-        if (!confirm(`Are you sure you want to delete ${checkboxes.length} selected transactions?`)) return;
+        const partyFilter = () => document.getElementById('bsPartyFilter');
+        const ok = await App.confirmAction(
+            `Are you sure you want to delete ${checkboxes.length} selected transactions?`,
+            { title: 'Delete selected', confirmLabel: 'Delete', danger: true, focusAfterClose: partyFilter() }
+        );
+        if (!ok) return;
 
-        // Get indices to delete, sort descending to splice correctly
-        const indices = Array.from(checkboxes).map(cb => parseInt(cb.value)).sort((a, b) => b - a);
-        
-        indices.forEach(idx => {
-            this.currentBankTransactions.splice(idx, 1);
+        const indices = Array.from(checkboxes)
+            .map((cb) => parseInt(cb.value, 10))
+            .filter((n) => Number.isInteger(n) && n >= 0)
+            .sort((a, b) => b - a);
+
+        const tbody = document.querySelector('#bankStatementModal tbody');
+        indices.forEach((idx) => {
+            if (idx < this.currentBankTransactions.length) {
+                tbody?.querySelector(`tr[data-index="${idx}"]`)?.remove();
+                this.currentBankTransactions.splice(idx, 1);
+            }
         });
 
-        this.showStatementProcessingModal(this.currentBankTransactions);
+        if (typeof this._reindexBankTableRows === 'function') this._reindexBankTableRows();
+        if (typeof this._updateBankFooterCount === 'function') this._updateBankFooterCount();
+        this.updateBankSelectionStatus();
+        this.filterBankRows();
+        App.restoreRendererKeyboardFocus(partyFilter());
         App.showNotification(`${indices.length} transactions removed.`, 'info');
     },
 
@@ -2364,8 +2692,11 @@ const VouchersUI = {
 
         // NEW: Calculate remaining balance by accounting for other pending transactions in this session
         // Filter out the CURRENT transaction so we don't subtract its own amount if we are re-editing
-        const otherPendingTx = (this.currentBankTransactions || []).filter((_, i) => i !== index);
-        const sessionAllocationsMap = VoucherManager.getVoucherAllocationsMap(otherPendingTx);
+        const sessionAllocationsMap = VoucherManager.getVoucherAllocationsMap(
+            this.currentBankTransactions || [],
+            null,
+            { excludeTxIndex: index }
+        );
         allVouchers = allVouchers.map(v => {
             const balance = VoucherManager.getDocumentBalance(v.voucherId, v.amount, sessionAllocationsMap);
             return { ...v, amount: balance, originalAmount: v.amount };
@@ -2380,7 +2711,7 @@ const VouchersUI = {
                 <div class="modal-content border-0 shadow-lg bg-dark text-white">
                     <div class="modal-header border-secondary p-4">
                         <h5 class="modal-title fw-bold">
-                            <i class="bi bi-link-45deg me-2 text-primary"></i>Link to Existing ${tx.type === 'debit' ? 'Purchase/Payment' : 'Receipt'}
+                            <i class="bi bi-link-45deg me-2 text-primary"></i>${tx._reassigning ? 'Reassign' : 'Link to'} Existing ${tx.type === 'debit' ? 'Purchase/Payment' : 'Receipt'}
                         </h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
@@ -2552,7 +2883,7 @@ const VouchersUI = {
 
         if (adjustment) {
             const reason = adjustment.type === 'tds' ? 'Tax (TDS)' : (adjustment.type === 'discount' ? 'Discount' : 'Adjustment');
-            if (!confirm(`Linking to ${voucherId} with ${reason} of ₹${adjustment.amount.toFixed(2)}. Correct?`)) return;
+            if (!(await App.confirmAction(`Linking to ${voucherId} with ${reason} of ₹${adjustment.amount.toFixed(2)}. Correct?`))) return;
             
             try {
                 await VoucherManager.updateVoucherAdjustment(voucherId, {
@@ -2565,18 +2896,33 @@ const VouchersUI = {
                 App.showNotification('Error updating voucher adjustments.', 'danger');
             }
         } else {
-            if (!confirm(`Are you sure you want to link this transaction to Voucher ${voucherId}?`)) return;
+            if (!(await App.confirmAction(`Are you sure you want to link this transaction to Voucher ${voucherId}?`))) return;
         }
 
         tx.converted = true;
         tx.linkedVoucherId = voucherId;
-        
+        tx.bankLinkPersisted = true;
+
+        if (typeof VoucherManager.saveBankVoucherLink === 'function') {
+            await VoucherManager.saveBankVoucherLink(tx, voucherId, {
+                linkType: 'manual',
+                adjustment: adjustment || null
+            });
+        }
+
         // Close modal
         const modalEl = document.getElementById('assignToVoucherModal');
         bootstrap.Modal.getInstance(modalEl)?.hide();
 
-        App.showNotification(`Transaction linked to Voucher ${voucherId}.`, 'success');
-        this.showStatementProcessingModal(this.currentBankTransactions);
+        const wasReassign = !!tx._reassigning;
+        delete tx._reassigning;
+        App.showNotification(
+            `Transaction ${wasReassign ? 'relinked' : 'linked'} to Voucher ${voucherId}. Saved for future imports.`,
+            'success'
+        );
+        this._replaceBankRowAt(txIndex);
+        this.filterBankRows();
+        this.updateBankSelectionStatus();
     },
 
     toggleReferenceFields(type) {
@@ -2756,10 +3102,17 @@ const VouchersUI = {
         const voucherType = document.getElementById('voucherType').value;
         tbody.innerHTML = '';
 
-        // NEW: Filter out the CURRENT transaction so we don't subtract its own amount if already mapped
         const indexField = document.getElementById('bankTxIndex');
         const currentIndex = (indexField && indexField.value !== '') ? parseInt(indexField.value, 10) : -1;
-        const otherPendingTx = (VouchersUI.currentBankTransactions || []).filter((_, i) => i !== currentIndex);
+        const sessionBankTx = VouchersUI.currentBankTransactions || [];
+        const allocOpts = { excludeTxIndex: Number.isInteger(currentIndex) && currentIndex >= 0 ? currentIndex : -1 };
+
+        if (sessionBankTx.length && typeof VoucherManager.applySessionPartialHintsToInvoiceCache === 'function') {
+            VoucherManager.applySessionPartialHintsToInvoiceCache(
+                sessionBankTx,
+                voucherType === 'payment' ? 'payment' : 'receipt'
+            );
+        }
 
         if (!name) {
             if (container) container.classList.add('d-none');
@@ -2791,7 +3144,7 @@ const VouchersUI = {
                 const party = (doc.vendor || doc.customerName || doc.partyName || doc.supplier || '').toString().trim().toLowerCase();
                 const partyMatch = party === nameLc;
                 const st = (doc.status || '').toLowerCase();
-                return partyMatch && st !== 'paid' && st !== 'cancelled';
+                return partyMatch && st !== 'cancelled';
             });
 
         } else {
@@ -2804,7 +3157,8 @@ const VouchersUI = {
                 const nameMatch = (customer && inv.customerId && inv.customerId === customer.id) ||
                     (invName && invName === nameLc);
                 const st = (inv.status || 'pending').toLowerCase();
-                const statusMatch = st !== 'cancelled' && st !== 'paid';
+                // Show any non-cancelled invoice — remaining balance decides visibility (partial payments stay listed)
+                const statusMatch = st !== 'cancelled';
 
                 let modeMatch = true;
                 if (this.currentMode === 'gst') {
@@ -2846,8 +3200,9 @@ const VouchersUI = {
         if (pendingDocs.length === 0) {
             tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">No pending ${isPayment ? 'bills' : 'invoices'} — the full amount will be posted as Advance Payment / On Account.</td></tr>`;
         } else {
-            const allocMap = (typeof VoucherManager !== 'undefined' && VoucherManager.getVoucherAllocationsMap)
-                ? VoucherManager.getVoucherAllocationsMap(otherPendingTx, isPayment ? 'payment' : 'receipt')
+            const mapFilter = isPayment ? 'payment' : 'receipt';
+            const explicitIndex = (typeof VoucherManager !== 'undefined' && VoucherManager.buildExplicitPaidIndex)
+                ? VoucherManager.buildExplicitPaidIndex(sessionBankTx, mapFilter, allocOpts.excludeTxIndex)
                 : new Map();
             const frag = document.createDocumentFragment();
             pendingDocs.forEach(doc => {
@@ -2856,15 +3211,32 @@ const VouchersUI = {
                 const totalAmountNum = parseFloat(doc.total || doc.amount || doc.vch_amt || 0);
                 const total = totalAmountNum.toFixed(2);
 
-                const pendingNum = VoucherManager.getDocumentBalance(
-                    doc.id,
-                    totalAmountNum,
-                    allocMap,
-                    docNo,
-                    doc,
-                    { allowLooseFallback: false }
-                );
-                const pending = pendingNum.toFixed(2);
+                const sessionPaid = (typeof VoucherManager.sumSessionAllocationsForDoc === 'function')
+                    ? VoucherManager.sumSessionAllocationsForDoc(doc, sessionBankTx, mapFilter, allocOpts.excludeTxIndex)
+                    : 0;
+                const explicitPaid = (typeof VoucherManager.lookupExplicitPaidAmount === 'function')
+                    ? VoucherManager.lookupExplicitPaidAmount(doc, explicitIndex)
+                    : 0;
+                const totalPaid = Math.max(explicitPaid, sessionPaid);
+                let pendingNum = Math.max(0, totalAmountNum - totalPaid);
+
+                const storedDue = doc.balanceDue != null ? parseFloat(doc.balanceDue) : NaN;
+                const storedPaid = doc.paidSoFar != null ? parseFloat(doc.paidSoFar) : NaN;
+                const hintedDue = !Number.isNaN(storedDue) && storedDue > 0.05
+                    ? storedDue
+                    : (!Number.isNaN(storedPaid) && storedPaid > 0.05 && storedPaid < totalAmountNum - 0.05
+                        ? totalAmountNum - storedPaid
+                        : NaN);
+                // Session partial hints lower balance; also rescue when alloc index missed but memory has partial paid
+                if (!Number.isNaN(hintedDue)) {
+                    if (hintedDue < pendingNum - 0.05 || pendingNum <= 0.01) {
+                        pendingNum = hintedDue;
+                    }
+                }
+                const docStatus = (doc.status || '').toLowerCase();
+                if (pendingNum <= 0.01 && docStatus === 'partial' && !Number.isNaN(storedDue) && storedDue > 0.05) {
+                    pendingNum = storedDue;
+                }
                 
                 // RESTORE: Check if this doc was already assigned in this session
                 let isAssigned = false;
@@ -2881,8 +3253,32 @@ const VouchersUI = {
                     }
                 }
 
-                // Skip if practically zero and NOT already assigned to this specific rows
-                if (pendingNum <= 0.01 && !isAssigned) return;
+                if (pendingNum <= 0.01 && !isAssigned) {
+                    if (sessionPaid > 0.05 && sessionPaid < totalAmountNum - 0.05) {
+                        pendingNum = totalAmountNum - sessionPaid;
+                    } else {
+                        const memPaid = parseFloat(doc.paidSoFar);
+                        if (!Number.isNaN(memPaid) && memPaid > 0.05 && memPaid < totalAmountNum - 0.05) {
+                            pendingNum = totalAmountNum - memPaid;
+                        } else if (!Number.isNaN(hintedDue) && hintedDue > 0.05) {
+                            pendingNum = hintedDue;
+                        } else {
+                            return;
+                        }
+                    }
+                }
+
+                if (pendingNum > 0.05 && docStatus === 'paid') {
+                    doc.status = pendingNum >= (totalAmountNum - 0.05) ? 'pending' : 'partial';
+                    doc.balanceDue = pendingNum;
+                }
+
+                // On the row being edited, show balance after this voucher's assignment too
+                let displayPending = pendingNum;
+                if (isAssigned && assignedAmt > 0) {
+                    displayPending = Math.max(0, totalAmountNum - totalPaid - assignedAmt);
+                }
+                const pending = displayPending.toFixed(2);
 
                 tr.innerHTML = `
                     <td class="text-center align-middle">
@@ -2898,7 +3294,7 @@ const VouchersUI = {
                         <div class="small text-muted d-flex align-items-center">
                             Bill No: ${docNo}
                             <button type="button" class="btn btn-link btn-sm p-0 ms-2 text-info" 
-                                    onclick="${isPayment ? `InvoicesUI.previewPurchase` : `InvoicesUI.previewInvoice`}('${doc.id}')" 
+                                    onclick="event.stopPropagation(); ${isPayment ? 'InvoicesUI.previewPurchase' : 'InvoicesUI.previewInvoice'}('${String(doc.id).replace(/'/g, "\\'")}')" 
                                     title="View ${isPayment ? 'Bill' : 'Invoice'}">
                                 <i class="bi bi-eye"></i>
                             </button>
@@ -2968,7 +3364,7 @@ const VouchersUI = {
         const invoiceNos = [];
 
         const allocations = [];
-        const voucherType = document.querySelector('#createVoucherForm [name="voucherType"]')?.value || 'receipt';
+        const voucherType = document.querySelector('#createVoucherForm [name="type"]')?.value || 'receipt';
         const isPayment = voucherType === 'payment';
 
         inputs.forEach(input => {
@@ -3183,13 +3579,47 @@ const VouchersUI = {
                 if (this.currentBankTransactions[idx]) {
                     this.currentBankTransactions[idx].isReady = true;
                     this.currentBankTransactions[idx].mappedVoucher = data; // Unify field naming
-                    
+                    this.currentBankTransactions[idx].converted = false;
+
+                    if (typeof VoucherManager.applySessionPartialHintsToInvoiceCache === 'function') {
+                        VoucherManager.applySessionPartialHintsToInvoiceCache(
+                            this.currentBankTransactions,
+                            data.type === 'payment' ? 'payment' : 'receipt'
+                        );
+                    }
+
                     // Record this serial locally to ensure immediate auto-increment correctness for the next row
                     if (typeof VoucherManager.recordUsedSerial === 'function') {
                         VoucherManager.recordUsedSerial(data.type, data.id, this.currentMode);
                     }
                     if (typeof VoucherManager.invalidateAllocationsCache === 'function') {
                         VoucherManager.invalidateAllocationsCache();
+                    }
+
+                    const allocIds = (data.allocations || []).flatMap((a) => [a.id, a.no, a.invoiceNo, a.billNo].filter(Boolean));
+                    if (allocIds.length > 0 && typeof VoucherManager.updateLinkedInvoices === 'function') {
+                        try {
+                            // Session-only save: do not persist invoice paid/partial to disk until Import Saved.
+                            await VoucherManager.updateLinkedInvoices(
+                                allocIds,
+                                data.type,
+                                this.currentBankTransactions,
+                                { persist: false }
+                            );
+                        } catch (err) {
+                            console.warn('[VouchersUI] updateLinkedInvoices (session):', err);
+                        }
+                    }
+                    if (typeof InvoiceManager !== 'undefined' && InvoiceManager._balanceCache) {
+                        InvoiceManager._balanceCache = null;
+                    }
+
+                    if (typeof VoucherManager.saveBankImportSessionRow === 'function') {
+                        try {
+                            await VoucherManager.saveBankImportSessionRow(this.currentBankTransactions[idx]);
+                        } catch (err) {
+                            console.warn('[VouchersUI] saveBankImportSessionRow:', err);
+                        }
                     }
 
                     // --- Learning Mapping ---
@@ -3200,9 +3630,13 @@ const VouchersUI = {
 
                     const modalEl = document.getElementById('createVoucherModal');
                     const modal = bootstrap.Modal.getInstance(modalEl);
+                    const savedBankIdx = idx;
                     if (modalEl) {
                         modalEl.addEventListener('hidden.bs.modal', () => {
-                            this.showStatementProcessingModal(this.currentBankTransactions);
+                            if (!this._refreshBankRowAt(savedBankIdx)) {
+                                const bankModal = document.getElementById('bankStatementModal');
+                                if (bankModal) this.filterBankRows();
+                            }
                         }, { once: true });
                         modal.hide();
                     }
@@ -3289,7 +3723,7 @@ const VouchersUI = {
             return;
         }
 
-        if (!confirm(`Import ${readyIndices.length} saved transactions to Vouchers?`)) return;
+        if (!(await App.confirmAction(`Import ${readyIndices.length} saved transactions to Vouchers?`))) return;
 
         const importBtn = document.getElementById('btnImportSelectedBankTx');
         const originalHtml = importBtn.innerHTML;
@@ -3311,6 +3745,13 @@ const VouchersUI = {
                 const newVoucher = await VoucherManager.createVoucher(voucherData);
                 tx.converted = true;
                 tx.voucherId = newVoucher.id;
+                tx.linkedVoucherId = newVoucher.id;
+                if (typeof VoucherManager.saveBankVoucherLink === 'function') {
+                    await VoucherManager.saveBankVoucherLink(tx, newVoucher.id, { linkType: 'import' });
+                }
+                if (typeof VoucherManager.removeBankImportSessionRow === 'function') {
+                    await VoucherManager.removeBankImportSessionRow(tx);
+                }
                 successCount++;
                 console.log(`Success: Imported ${newVoucher.id}`);
             } catch (err) {
@@ -3325,6 +3766,12 @@ const VouchersUI = {
 
         if (successCount > 0) {
             App.showNotification(`Successfully imported ${successCount} vouchers.`, 'success');
+            if (typeof VoucherManager.invalidateAllocationsCache === 'function') {
+                VoucherManager.invalidateAllocationsCache();
+            }
+            if (typeof InvoiceManager !== 'undefined' && InvoiceManager._balanceCache) {
+                InvoiceManager._balanceCache = null;
+            }
         }
         
         if (failCount > 0) {
@@ -3421,7 +3868,7 @@ const VouchersUI = {
     },
 
     async deleteVoucher(id) {
-        if (!confirm('Are you sure you want to delete this voucher?')) return;
+        if (!(await App.confirmAction('Are you sure you want to delete this voucher?'))) return;
 
         // Before deleting, check which invoices this voucher was linked to
         const voucher = VoucherManager.getVoucher(id);
@@ -3972,15 +4419,10 @@ const VouchersUI = {
             DeliveryUI._installPdfPreviewModalCleanup();
         }
         if (modalEl) {
-            const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
-            inst.show();
-            const boostZ = () => {
-                modalEl.style.zIndex = '2005';
-                const all = document.querySelectorAll('.modal-backdrop');
-                if (all.length) all[all.length - 1].style.zIndex = '2000';
-            };
-            setTimeout(boostZ, 0);
-            setTimeout(boostZ, 100);
+            if (typeof App !== 'undefined' && App.raiseModalAboveStack) {
+                App.raiseModalAboveStack(modalEl);
+            }
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
         }
     },
 
