@@ -449,7 +449,7 @@ const InvoiceManager = {
         const voucherCount = typeof VoucherManager !== 'undefined' ? (DataManager.getData('vouchers') || []).length : 0;
 
         // Cache hit check (Force clear if logic updated)
-        const logicVersion = 19; // Web cloud-only load + normalized invoice dedupe keys
+        const logicVersion = 20; // Party-scoped allocation norm keys (no bare-digit collisions)
         if (this._balanceCache && 
             this._lastInvoiceCount === invoices.length && 
             this._lastVoucherCount === voucherCount &&
@@ -478,12 +478,13 @@ const InvoiceManager = {
                 { allowLooseFallback: false }
             );
             const importedStatus = String(inv.status || '').toLowerCase();
-            // If allocations are absent but imported status is authoritative, honor it.
-            if (!isCreditNote && balance >= (invTotal - 0.05)) {
+            const srcBk = String(inv.source || '').toLowerCase() === 'bookkeeper'
+                || !!(inv.bookkeeperId && String(inv.bookkeeperId).trim());
+            // Honor Book Keeper paid/partial only when no voucher allocations were found (local rows use vouchers).
+            if (!isCreditNote && balance >= (invTotal - 0.05) && srcBk) {
                 if (importedStatus === 'paid') {
                     balance = 0;
                 } else if (importedStatus === 'partial') {
-                    // Keep non-zero to retain partial bucket even without granular allocations.
                     balance = Math.max(0.01, invTotal * 0.5);
                 }
             }

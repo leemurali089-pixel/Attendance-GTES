@@ -14,6 +14,7 @@ const VouchersUI = {
     _vouchersListVisibleLimit: 150,
     _voucherSkipLimitReset: false,
     _voucherTableRaf: null,
+    _voucherPreviewToolbarBound: false,
     _receiptGstCache: null,
     _receiptGstCacheInvLen: 0,
     async _yieldToUI() {
@@ -2923,6 +2924,8 @@ const VouchersUI = {
         const invoiceNos = [];
 
         const allocations = [];
+        const voucherType = document.querySelector('#createVoucherForm [name="voucherType"]')?.value || 'receipt';
+        const isPayment = voucherType === 'payment';
 
         inputs.forEach(input => {
             const val = parseFloat(input.value) || 0;
@@ -2933,7 +2936,13 @@ const VouchersUI = {
                 selectedIds.push(cb.value);
                 const docNo = cb.dataset.no;
                 invoiceNos.push(docNo);
-                allocations.push({ id: cb.value, no: docNo, amount: val });
+                const alloc = { id: cb.value, no: docNo, amount: val };
+                if (isPayment) {
+                    alloc.billNo = docNo;
+                } else {
+                    alloc.invoiceNo = docNo;
+                }
+                allocations.push(alloc);
             }
         });
 
@@ -3803,7 +3812,50 @@ const VouchersUI = {
         await html2pdf().set(opt).from(element).save();
     },
 
+    _applyVoucherPreviewLayout(element, settings) {
+        if (!element || typeof DocumentSettings === 'undefined') return;
+        const normalized = DocumentSettings.normalize(settings || DocumentSettings.get(null));
+        const dims = DocumentSettings.pageDimensionsMm(normalized);
+        const marginMm = DocumentSettings.marginMm(normalized.marginPreset);
+        const scale = (normalized.scale || 100) / 100;
+        const padPx = 20;
+        const widthPx = Math.max(520, Math.floor(((dims.w - marginMm * 2) / 25.4) * 96) - padPx);
+        element.style.width = `${widthPx}px`;
+        element.style.maxWidth = `${widthPx}px`;
+        element.style.padding = `${Math.round((marginMm * 96) / 25.4)}px`;
+        element.style.transform = scale !== 1 ? `scale(${scale})` : '';
+        element.style.transformOrigin = 'top center';
+        element.dataset.gtesPreviewScale = String(normalized.scale);
+    },
+
+    _wireVoucherPreviewToolbarOnce() {
+        if (this._voucherPreviewToolbarBound) return;
+        this._voucherPreviewToolbarBound = true;
+        const onSettingsChange = () => {
+            const container = document.getElementById('pdfPreviewContainer');
+            if (container?.dataset.gtesPreviewKind !== 'voucher') return;
+            const settings = typeof DocumentSettings !== 'undefined'
+                ? DocumentSettings.normalize(DocumentSettings.readFromUi())
+                : null;
+            if (settings && typeof DocumentSettings !== 'undefined') {
+                DocumentSettings.save(null, settings);
+            }
+            const el = document.querySelector('#gtesPdfLegacyStage .gtes-pdf-document')
+                || container?.querySelector('.gtes-pdf-document');
+            if (el && settings) this._applyVoucherPreviewLayout(el, settings);
+            const scaleEl = document.getElementById('gtesInvSetScale');
+            if (scaleEl && settings) scaleEl.value = settings.scale;
+        };
+        ['gtesInvSetPageSize', 'gtesInvSetOrientation', 'gtesInvSetMargin'].forEach((id) => {
+            document.getElementById(id)?.addEventListener('change', onSettingsChange);
+        });
+        const scaleEl = document.getElementById('gtesInvSetScale');
+        scaleEl?.addEventListener('input', onSettingsChange);
+        scaleEl?.addEventListener('change', onSettingsChange);
+    },
+
     async previewVoucher(voucherId) {
+        const voucher = VoucherManager.getVoucher(voucherId);
         const element = await this.getVoucherElement(voucherId, { skipQr: true });
         if (!element) return;
 
@@ -3811,9 +3863,16 @@ const VouchersUI = {
         const title = document.getElementById('pdfPreviewTitle');
         const downloadBtn = document.getElementById('pdfDownloadBtn');
 
-        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.deactivateEngineMode) {
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.activateLegacyToolbarMode) {
+            DocumentEngine.activateLegacyToolbarMode({
+                subtitle: voucher?.customerName,
+                pageCount: 1,
+                hideCopyPicker: true
+            });
+        } else if (typeof DocumentEngine !== 'undefined' && DocumentEngine.deactivateEngineMode) {
             DocumentEngine.deactivateEngineMode();
         }
+        this._wireVoucherPreviewToolbarOnce();
         const legacyHost = typeof DocumentPreviewHost !== 'undefined'
             ? DocumentPreviewHost.prepareLegacy()
             : container;
@@ -3824,6 +3883,10 @@ const VouchersUI = {
         element.style.margin = '0 auto';
         element.style.boxShadow = 'none';
         legacyHost.appendChild(element);
+        const previewSettings = typeof DocumentSettings !== 'undefined'
+            ? DocumentSettings.get(null)
+            : null;
+        if (previewSettings) this._applyVoucherPreviewLayout(element, previewSettings);
         title.textContent = 'Voucher Preview';
 
         downloadBtn.onclick = () => {

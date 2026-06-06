@@ -14,6 +14,52 @@ const VoucherManager = {
     _lastVoucherCount: 0,
 
     /**
+     * Safer allocation norm key — never collapse INV-NB-0008 / 008 / 08 into bare "8".
+     * Party-scoped keys (__pnorm:) are used for lookups to avoid cross-customer collisions.
+     */
+    _allocationNormKey(raw) {
+        const s = String(raw || '').trim().toUpperCase();
+        if (!s) return '';
+        const gtes = s.match(/^GTES\/(\d{2}-\d{2})\/(.+)$/i);
+        if (gtes) {
+            const seq = (gtes[2].replace(/\D/g, '').replace(/^0+/, '') || '0');
+            return `GTES|${gtes[1]}|${seq}`;
+        }
+        const invNb = s.match(/^INV[-/]?NB[-/]?(\d+)$/i);
+        if (invNb) {
+            const seq = invNb[1].replace(/^0+/, '') || '0';
+            return `INV-NB|${seq}`;
+        }
+        const bkInv = s.match(/^BK-INV-(\d+)$/i);
+        if (bkInv) return `BK-INV|${bkInv[1]}`;
+        if (/^\d+$/.test(s)) {
+            const seq = s.replace(/^0+/, '') || '0';
+            if (seq.length < 5) return '';
+            return `NUM|${seq}`;
+        }
+        return '';
+    },
+
+    _resolveDocPartyId(doc) {
+        if (!doc) return '';
+        return (doc.customerId || doc.partyId || doc.vendorId || '').toString().trim();
+    },
+
+    _bumpAllocMap(map, raw, amount, partyId = null) {
+        if (raw === undefined || raw === null || raw === '') return;
+        const k = raw.toString().trim();
+        if (!k) return;
+        map.set(k, (map.get(k) || 0) + amount);
+        const nk = this._allocationNormKey(k);
+        if (!nk) return;
+        const pid = (partyId || '').toString().trim();
+        if (pid) {
+            const pk = `__pnorm:${pid}|${nk}`;
+            map.set(pk, (map.get(pk) || 0) + amount);
+        }
+    },
+
+    /**
      * Initialize if needed
      */
     init() {
@@ -141,6 +187,7 @@ const VoucherManager = {
             });
         }
 
+        this.invalidateAllocationsCache();
         return voucher;
     },
 
@@ -970,8 +1017,9 @@ const VoucherManager = {
         const invCount = (DataManager.getData('invoices') || []).length;
         const expCount = (DataManager.getData(DataManager.KEYS.EXPENSES) || []).length;
         const cacheKey = `${filterType || 'all'}_v${vouchers.length}_i${invCount}_x${expCount}_e${extraTransactions ? extraTransactions.length : 0}_r${readyCount}`;
+        const hasExtra = Array.isArray(extraTransactions) && extraTransactions.length > 0;
 
-        if (this._allocationsCache && this._lastVoucherCount === cacheKey) {
+        if (!hasExtra && this._allocationsCache && this._lastVoucherCount === cacheKey) {
             return this._allocationsCache;
         }
 
@@ -1102,7 +1150,7 @@ const VoucherManager = {
                     keySet.forEach(k => {
                         // Avoid indexing truly ambiguous short numeric keys unless we could resolve them.
                         if (looksAmbiguousShortNo(k) && !resolved.has(k)) return;
-                        map.set(k, (map.get(k) || 0) + amount);
+                        this._bumpAllocMap(map, k, amount, v.customerId);
                     });
                 });
             }
@@ -1119,13 +1167,13 @@ const VoucherManager = {
                             if (resolvedIds.length) {
                                 resolvedIds.forEach(r => {
                                     const rk = r.toString().trim();
-                                    if (rk) map.set(rk, (map.get(rk) || 0) + amt);
+                                    if (rk) this._bumpAllocMap(map, rk, amt, v.customerId);
                                 });
                                 return;
                             }
                             return;
                         }
-                        map.set(k, (map.get(k) || 0) + amt);
+                        this._bumpAllocMap(map, k, amt, v.customerId);
                     };
                     if (typeof link === 'string') {
                         const totalSettlement = (parseFloat(v.amount) || 0) + (parseFloat(v.tdsAmount) || 0) + (parseFloat(v.discountAmount) || 0);
@@ -1178,8 +1226,7 @@ const VoucherManager = {
                             const amount = baseAmt + tdsAmt + discAmt;
                             if (amount <= 0) return;
                             [a.id, a.no, a.invoiceNo, a.billNo].forEach(raw => {
-                                const k = (raw || '').toString().trim();
-                                if (k) map.set(k, (map.get(k) || 0) + amount);
+                                this._bumpAllocMap(map, raw, amount, mv.customerId);
                             });
                         });
                     } else if (mv.linkedInvoices && mv.linkedInvoices.length > 0) {
@@ -1188,7 +1235,7 @@ const VoucherManager = {
                             const cleanId = id.toString().trim();
                             const amt = mv.allocations?.find(a => (a.id || '').toString().trim() === cleanId)?.amount
                                 || (totalSettlement / mv.linkedInvoices.length);
-                            map.set(cleanId, (map.get(cleanId) || 0) + parseFloat(amt));
+                            this._bumpAllocMap(map, cleanId, parseFloat(amt), mv.customerId);
                         });
                     }
                 }
@@ -1198,8 +1245,10 @@ const VoucherManager = {
         this._applyBookkeeperVchAliasMirrors(map, filterType);
         this._applyReferencedReturnNoteOffsets(map, filterType);
 
-        this._allocationsCache = map;
-        this._lastVoucherCount = cacheKey;
+        if (!hasExtra) {
+            this._allocationsCache = map;
+            this._lastVoucherCount = cacheKey;
+        }
         return map;
     },
 
@@ -1229,6 +1278,19 @@ const VoucherManager = {
         if (allocated === 0 && doc && doc.bookkeeperId) {
             const fullBkId = doc.bookkeeperId.toString().trim();
             if (fullBkId) allocated = map.get(fullBkId) || 0;
+        }
+
+        const partyId = this._resolveDocPartyId(doc);
+        const normLookup = (raw) => {
+            const nk = this._allocationNormKey(raw);
+            if (!nk || !partyId) return 0;
+            return map.get(`__pnorm:${partyId}|${nk}`) || 0;
+        };
+        if (allocated === 0) {
+            allocated = normLookup(cleanDocId) || normLookup(cleanAltId);
+        }
+        if (allocated === 0 && doc) {
+            allocated = normLookup(doc.invoiceNo) || normLookup(doc.billNo) || 0;
         }
 
         // Optional legacy fuzzy match (not used for GST invoice balances by default)

@@ -269,10 +269,27 @@ const UserManager = {
 
     // Check if user has specific permission
     async hasPermission(permission) {
+        const ctx = await this.getPermissionContext();
+        return ctx.has(permission);
+    },
+
+    /** One session lookup for boot nav — avoids N× getCurrentUser during dashboard open. */
+    async getPermissionContext() {
         const user = await this.getCurrentUser();
-        if (!user) return false;
-        if (user.role === this.ROLES.ADMIN) return true; // Admin has all permissions
-        return user.permissions && user.permissions.includes(permission);
+        if (!user) {
+            return {
+                user: null,
+                isAdmin: false,
+                has: () => false
+            };
+        }
+        const isAdmin = user.role === this.ROLES.ADMIN;
+        const perms = new Set(Array.isArray(user.permissions) ? user.permissions : []);
+        return {
+            user,
+            isAdmin,
+            has: (permission) => isAdmin || perms.has(permission)
+        };
     },
 
     // Logout

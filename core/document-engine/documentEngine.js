@@ -35,6 +35,107 @@ const DocumentEngine = {
         this._setEngineMode(false);
     },
 
+    /** Legacy HTML preview (vouchers, etc.) — show invoice toolbar without engine session. */
+    activateLegacyToolbarMode(opts = {}) {
+        const { subtitle, pageCount = 1, hideCopyPicker = true } = opts;
+        this._session = null;
+
+        if (typeof DocumentPreviewHost !== 'undefined') {
+            DocumentPreviewHost.ensure();
+        }
+
+        const modal = document.getElementById('pdfPreviewModal');
+        const previewContainer = document.getElementById('pdfPreviewContainer');
+        if (previewContainer) {
+            previewContainer.classList.remove('gtes-invoice-paginated-preview', 'gtes-document-engine-preview');
+        }
+        if (modal) {
+            modal.classList.remove('gtes-document-engine-mode', 'gtes-invoice-v3-mode');
+        }
+
+        const bar = document.getElementById('gtesDocumentPdfSettingsBar')
+            || document.getElementById('gtesInvoicePdfSettingsBar');
+        bar?.classList.remove('d-none');
+        bar?.classList.add('d-flex');
+
+        const docNav = document.getElementById('gtesDocumentPreviewNav');
+        const invNav = document.getElementById('gtesInvoicePreviewNav');
+        if (docNav) {
+            docNav.classList.add('d-none');
+            docNav.classList.remove('d-flex');
+        }
+        if (invNav) {
+            invNav.classList.remove('d-none');
+            invNav.classList.add('d-flex');
+        }
+
+        const primary = document.getElementById('gtesDocumentEngineStage') || document.getElementById('gtesInvoiceV3Stage');
+        primary?.classList.add('d-none');
+        primary?.classList.remove('d-flex');
+        const invoiceV3Stage = document.getElementById('gtesInvoiceV3Stage');
+        if (invoiceV3Stage && invoiceV3Stage !== primary) {
+            invoiceV3Stage.classList.add('d-none');
+            invoiceV3Stage.classList.remove('d-flex');
+        }
+
+        const diag = document.getElementById('gtesDocumentEngineDiagnostics')
+            || document.getElementById('gtesInvoiceV3Diagnostics');
+        if (diag) {
+            diag.classList.add('d-none');
+            diag.classList.remove('d-block');
+        }
+
+        document.getElementById('gtesInvoicePagesStage')?.classList.add('d-none');
+        document.getElementById('gtesInvoiceMeasureHost')?.classList.add('d-none');
+        document.getElementById('gtesInvoicePrintSource')?.classList.add('d-none');
+
+        const copyWrap = document.getElementById('gtesDocCopyPicker')
+            || document.querySelector('.gtes-doc-copy-wrap');
+        if (hideCopyPicker) {
+            copyWrap?.classList.add('d-none');
+            copyWrap?.previousElementSibling?.classList.add('d-none');
+        }
+
+        const debugFooter = document.getElementById('gtesDocumentEngineDebugFooter');
+        if (debugFooter) {
+            debugFooter.classList.add('d-none');
+            debugFooter.classList.remove('d-block');
+        }
+
+        const subtitleEl = document.getElementById('pdfPreviewSubtitle');
+        if (subtitleEl) {
+            if (subtitle) {
+                subtitleEl.textContent = subtitle;
+                subtitleEl.classList.remove('d-none');
+            } else {
+                subtitleEl.classList.add('d-none');
+            }
+        }
+
+        const pages = Math.max(1, parseInt(pageCount, 10) || 1);
+        const badge = document.getElementById('gtesDocPageCount')
+            || document.getElementById('gtesInvPageCount');
+        if (badge) badge.textContent = `Pages: ${pages}`;
+
+        const navLabel = document.getElementById('gtesDocPageNavLabel')
+            || document.getElementById('gtesInvPageNavLabel');
+        if (navLabel) navLabel.textContent = `Page 1 of ${pages}`;
+
+        const prevBtn = document.getElementById('gtesDocPrevPage')
+            || document.getElementById('gtesInvPrevPage');
+        const nextBtn = document.getElementById('gtesDocNextPage')
+            || document.getElementById('gtesInvNextPage');
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = pages <= 1;
+
+        const settings = typeof DocumentSettings !== 'undefined'
+            ? DocumentSettings.get(null)
+            : { pageSize: 'A4', orientation: 'portrait', marginPreset: 'normal', scale: 100 };
+        this._syncSettingsUi(null, null, settings);
+
+        if (typeof DocumentPreview !== 'undefined') DocumentPreview.reset();
+    },
+
     _setEngineMode(active, type) {
         if (typeof DocumentPreviewHost !== 'undefined') {
             DocumentPreviewHost.ensure();

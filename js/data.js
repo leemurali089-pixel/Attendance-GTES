@@ -970,7 +970,7 @@ const DataManager = {
         // This is deferred so the Login/Dashboard can appear immediately.
         const runPrefetch = async () => {
             if (window.App && typeof App.isInStartupGrace === 'function' && App.isInStartupGrace()) {
-                await new Promise((r) => setTimeout(r, 4000));
+                await new Promise((r) => setTimeout(r, 1500));
             }
             console.log("[DataManager]: Prefetching transaction modules in background...");
             const prefetchBatch = 2;
@@ -987,7 +987,7 @@ const DataManager = {
             this.autoMarkSundayHolidays().catch(e => console.error("Sunday check error:", e));
             this.scheduleSundayHolidayCheck();
         };
-        setTimeout(() => { void runPrefetch(); }, 6000);
+        setTimeout(() => { void runPrefetch(); }, 2500);
         })();
     },
 

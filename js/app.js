@@ -361,7 +361,7 @@ const App = {
         this.showLoader();
         this._setInitialBootProgress(8, 'Preparing…');
 
-        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.43';
+        const _pv = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.44';
         console.log(`%c🚀 MJS PrimeLogic v${_pv} Initializing...`, "color: #0dcaf0; font-weight: bold; font-size: 1.2rem;");
         console.log("%c✅ Performance Optimization: ACTIVE (Parallel Cloud Loading)", "color: #198754; font-weight: bold;");
         console.log("%c✅ Voucher Serial Logic: FIXED (Prefix-Sticky & Session Sync)", "color: #198754; font-weight: bold;");
@@ -381,9 +381,9 @@ const App = {
             this._applyDefaultDashboardFyEarly();
             this._setInitialBootProgress(48, 'Core data loaded…');
             const loggedIn = await this.checkLoginStatus();
-            this._setInitialBootProgress(66, 'Session checked…');
 
             if (!loggedIn) {
+                this._setInitialBootProgress(66, 'Session checked…');
                 // Core data (users/settings) is already in cache. First-run has no user rows: must
                 // finish UserManager.init (create admin) before allowing interaction.
                 const rawUsers = DataManager.getData('gtes_users') || DataManager.getData(UserManager.STORAGE_KEY);
@@ -406,13 +406,12 @@ const App = {
                     setTimeout(() => this._initDeferredModules(), 15000);
                 }
             } else {
-                this._setInitialBootProgress(74, 'User profile…');
-                await UserManager.init();
-                this._setInitialBootProgress(86, 'Branding…');
-                await this.updateCompanyBranding();
-                this._setInitialBootProgress(94, 'Ready');
-                setTimeout(() => this._initDeferredModules(), 12000);
                 this._setInitialBootProgress(100, 'Ready');
+                this.hideLoader(0);
+                loginScreenReady = true;
+                void UserManager.init().then(() => this.updateCompanyBranding().catch((e) =>
+                    console.warn('[App] updateCompanyBranding:', e && e.message)));
+                setTimeout(() => this._initDeferredModules(), 12000);
             }
         } catch (error) {
             bootFailed = true;
@@ -672,6 +671,8 @@ const App = {
 
         if (isLoggedIn) {
             const user = await UserManager.getCurrentUser();
+            const permCtx = await UserManager.getPermissionContext();
+            const hasPerm = (p) => permCtx.has(p);
             if (loginOverlay) {
                 loginOverlay.classList.add('hidden');
                 loginOverlay.style.display = 'none'; // Force hide
@@ -688,8 +689,8 @@ const App = {
                 userNameDisplay.textContent = user.fullName || user.username;
 
                 // Admin Panel Access
-                if (await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
-                    await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_USERS)) {
+                if (hasPerm(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
+                    hasPerm(UserManager.PERMISSIONS.MANAGE_USERS)) {
                     userInfo.style.cursor = 'pointer';
                     userInfo.title = 'Click to open Admin Panel';
                     userInfo.onclick = () => this.showView('admin');
@@ -711,40 +712,40 @@ const App = {
 
                 switch (view) {
                     case 'dashboard':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.VIEW_DASHBOARD);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.VIEW_DASHBOARD);
                         break;
                     case 'employees':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_EMPLOYEES);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_EMPLOYEES);
                         break;
                     case 'attendance':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_ATTENDANCE);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_ATTENDANCE);
                         break;
                     case 'salary':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SALARY);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_SALARY);
                         break;
                     case 'bonus':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SALARY);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_SALARY);
                         break;
                     case 'reports':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.VIEW_REPORTS);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.VIEW_REPORTS);
                         break;
                     case 'holidays':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_HOLIDAYS);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_HOLIDAYS);
                         break;
                     case 'advances':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_ADVANCES);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_ADVANCES);
                         break;
                     case 'mail':
                     case 'poQueue':
                     case 'bankMail':
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.ACCESS_MAIL);
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.ACCESS_MAIL);
                         break;
-                    case 'admin': // Admin view is not typically in the main nav, but good to handle
-                        hasAccess = await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
-                            await UserManager.hasPermission(UserManager.PERMISSIONS.MANAGE_USERS);
+                    case 'admin':
+                        hasAccess = hasPerm(UserManager.PERMISSIONS.MANAGE_SETTINGS) ||
+                            hasPerm(UserManager.PERMISSIONS.MANAGE_USERS);
                         break;
                     default:
-                        hasAccess = true; // Default to true for views not explicitly listed
+                        hasAccess = true;
                 }
 
                 // Find the parent li element to hide/show the entire nav item
@@ -777,8 +778,7 @@ const App = {
             // Ensure backup dropdown is visible for admins
             const backupDropdownParent = document.getElementById('backupDropdown')?.closest('.nav-item');
             if (backupDropdownParent) {
-                const isAdmin = await UserManager.isAdmin();
-                if (isAdmin) {
+                if (permCtx.isAdmin) {
                     backupDropdownParent.style.display = '';
                 } else {
                     backupDropdownParent.style.display = 'none';
@@ -801,7 +801,7 @@ const App = {
             const landingBackupDropdown = document.getElementById('landingBackupDropdown');
             const landingUserInfo = document.getElementById('landingUserInfo');
 
-            if (await UserManager.isAdmin()) {
+            if (permCtx.isAdmin) {
                 if (landingBackupDropdown) landingBackupDropdown.style.display = 'block';
 
                 if (landingUserInfo) {
@@ -826,22 +826,12 @@ const App = {
                 landingThemeToggle.checked = savedTheme === 'light';
             }
 
-            // Open dashboard first; load heavy sales data in the background (avoids boot freeze).
-            this._setInitialBootProgress(55, 'Opening dashboard…');
-            await this.showView('dashboard', {}, { suppressLoader: !!this._bootSequenceActive });
+            this._setInitialBootProgress(88, 'Opening dashboard…');
+            await this.showView('dashboard', {}, { suppressLoader: true, fastBoot: true });
+            this._setInitialBootProgress(100, 'Ready');
             if (typeof window.__gtesSyncShellVisibility === 'function') {
                 window.__gtesSyncShellVisibility();
             }
-            setTimeout(() => {
-                void Promise.all([
-                    DataManager.loadData('invoices').catch((e) => console.warn('[App] boot invoices:', e && e.message)),
-                    DataManager.loadData('vouchers').catch((e) => console.warn('[App] boot vouchers:', e && e.message)),
-                ]).then(() => {
-                    try {
-                        this._refreshPremiumDashboardShell();
-                    } catch (_) { /* ignore */ }
-                });
-            }, 0);
             return true;
         }
 
@@ -1464,6 +1454,14 @@ const App = {
         }
     },
 
+    /** Map logical view name → DOM container id (#dashboardView, #employeeView, #deliveryView, …). */
+    _resolveViewContainerId(viewName) {
+        const deliveryAppViews = new Set(['challans', 'jobcard', 'customers', 'inventory', 'services']);
+        if (deliveryAppViews.has(viewName)) return 'deliveryView';
+        if (document.getElementById(viewName)) return viewName;
+        return `${viewName}View`;
+    },
+
     async showView(viewName, params = {}, navOpts = {}) {
         const suppressLoader = !!(navOpts && navOpts.suppressLoader);
         // Special case for landing
@@ -1583,9 +1581,7 @@ const App = {
                 section.classList.add('d-none');
             });
 
-            // Delivery / challan hub uses #deliveryView for challans, job card, customers, inventory, services
-            const deliveryAppViews = new Set(['challans', 'jobcard', 'customers', 'inventory', 'services']);
-            const containerId = deliveryAppViews.has(viewName) ? 'deliveryView' : `${viewName}View`;
+            const containerId = this._resolveViewContainerId(viewName);
 
             // Show selected view
             const targetView = document.getElementById(containerId);
@@ -1620,7 +1616,7 @@ const App = {
 
             // Load view-specific content
             try {
-                await this.loadViewContent(viewName, params);
+                await this.loadViewContent(viewName, params, navOpts);
             } catch (err) {
                 console.error('[App] loadViewContent', viewName, err);
                 this.showNotification(
@@ -1699,9 +1695,16 @@ const App = {
         }
     },
 
-    async loadViewContent(viewName, params) {
+    async loadViewContent(viewName, params, navOpts = {}) {
         switch (viewName) {
-            case 'dashboard':
+            case 'dashboard': {
+                const fastBoot = !!(navOpts && navOpts.fastBoot) || this.isInStartupGrace();
+                if (fastBoot) {
+                    this._refreshPremiumDashboardShell();
+                    this._schedulePremiumDashboardShellRetry();
+                    void this._hydrateDashboardInBackground();
+                    break;
+                }
                 try {
                     await Promise.all([
                         DataManager.loadData('invoices').catch(() => {}),
@@ -1712,6 +1715,7 @@ const App = {
                 this._refreshPremiumDashboardShell();
                 this._schedulePremiumDashboardShellRetry();
                 break;
+            }
             case 'employees':
                 await EmployeesModule.load();
                 break;
@@ -1851,12 +1855,41 @@ const App = {
         }
     },
 
-    async loadDashboard() {
+    async _hydrateDashboardInBackground() {
+        try {
+            const keys = [
+                'invoices',
+                'vouchers',
+                DataManager.KEYS.ATTENDANCE,
+                DataManager.KEYS.EMPLOYEES
+            ].filter(Boolean);
+            for (let i = 0; i < keys.length; i += 2) {
+                await Promise.all(keys.slice(i, i + 2).map((k) =>
+                    DataManager.loadData(k).catch((e) => console.warn(`[App] dashboard ${k}:`, e && e.message))
+                ));
+            }
+            await this.loadDashboard({ allowHeavyFetch: true });
+            this._refreshPremiumDashboardShell();
+        } catch (e) {
+            console.warn('[App] dashboard hydrate:', e && e.message);
+        }
+    },
+
+    async loadDashboard(opts = {}) {
         const dashboard = document.getElementById('dashboardView');
         if (!dashboard) return;
 
-        const employees = await DataManager.getActiveEmployees();
-        const attendance = await DataManager.getAttendance();
+        const allowHeavy = opts.allowHeavyFetch !== false;
+        const trusted = DataManager._trustedCacheKeys;
+        const canUseEmployees = trusted && trusted.has(DataManager.KEYS.EMPLOYEES);
+        const canUseAttendance = trusted && trusted.has(DataManager.KEYS.ATTENDANCE);
+
+        if (!allowHeavy && (!canUseEmployees || !canUseAttendance)) {
+            return;
+        }
+
+        const employees = canUseEmployees ? await DataManager.getActiveEmployees() : [];
+        const attendance = canUseAttendance ? await DataManager.getAttendance() : [];
         const today = new Date();
         const todayStr = DataManager.formatDate(today);
         const todayAttendance = attendance.filter(a => DataManager.formatDate(new Date(a.date)) === todayStr);
@@ -1911,7 +1944,7 @@ const App = {
         }
 
         const totalAdvEl = document.getElementById('dashTotalAdvances');
-        if (totalAdvEl) {
+        if (totalAdvEl && (!trusted || trusted.has(DataManager.KEYS.ADVANCES))) {
             const advances = await DataManager.getAdvances();
             totalAdvEl.textContent = advances.length;
         }
@@ -2483,7 +2516,7 @@ const App = {
             setDash('dashFIec', iec || '—');
             setDash('dashFPan', pan || '—');
             setDash('dashFCopyright', `© ${new Date().getFullYear()} ${companyName}. All rights reserved.`);
-            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.43';
+            const _ver = (typeof UpdateChecker !== 'undefined' && UpdateChecker.getDisplayVersion) ? UpdateChecker.getDisplayVersion() : '1.3.44';
             setDash('dashFVersionLine', `Version ${_ver} | Developed by Murali D | Support: ${supportContact}`);
 
             const shellCo = document.getElementById('shellBrandCompanyName');
