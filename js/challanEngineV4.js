@@ -9,6 +9,31 @@ const ChallanDataV4 = {
             : String(item.itemDescription || item.description || '').trim();
     },
 
+    _resolveReceiptItems(challan) {
+        if (Array.isArray(challan.equipmentItems) && challan.equipmentItems.length) {
+            return challan.equipmentItems.map((row) => ({
+                itemName: (row.itemName || row.name || '').trim(),
+                description: (row.description || '').trim(),
+                quantity: parseInt(row.quantity, 10) || 1,
+                complaint: (row.complaint || '').trim()
+            })).filter((row) => row.itemName);
+        }
+        const items = challan.items || [];
+        if (items.some((row) => Object.prototype.hasOwnProperty.call(row, 'complaint'))) {
+            return items.map((row) => ({
+                itemName: (row.name || '').trim(),
+                description: (row.description || '').trim(),
+                quantity: parseInt(row.quantity, 10) || 1,
+                complaint: (row.complaint || '').trim()
+            })).filter((row) => row.itemName);
+        }
+        if (challan.jobCardId && typeof JobCardManager !== 'undefined') {
+            const jobCard = JobCardManager.getJobCard(challan.jobCardId);
+            if (jobCard) return JobCardManager.normalizeEquipmentItems(jobCard);
+        }
+        return [];
+    },
+
     _buildPseudoInvoice(challan, customerName, customerAddress) {
         return {
             customerId: challan.customerId,
@@ -37,7 +62,39 @@ const ChallanDataV4 = {
         };
     },
 
-    async _buildDeliveryDcDoc(challan, challanId) {
+    _buildServiceItems(challan) {
+        const receiptItems = this._resolveReceiptItems(challan);
+        const source = receiptItems.length
+            ? receiptItems
+            : (challan.items || []).map((row) => ({
+                itemName: (row.name || row.itemName || '').trim(),
+                description: (row.description || row.itemDescription || '').trim(),
+                quantity: parseInt(row.quantity, 10) || 1,
+                complaint: (row.complaint || '').trim()
+            })).filter((row) => row.itemName);
+
+        return source.map((row, idx) => {
+            const descParts = [];
+            if (row.description) descParts.push(row.description);
+            if (row.complaint) descParts.push(`Complaint: ${row.complaint}`);
+            const desc = descParts.join('\n');
+            return {
+                sl: idx + 1,
+                name: row.itemName || '-',
+                desc,
+                hsn: '-',
+                qty: parseInt(row.quantity, 10) || 1,
+                unit: 'nos',
+                rate: 0,
+                taxPct: '',
+                amount: 0,
+                rowHeightPt: 20 + (desc ? 10 : 0)
+            };
+        });
+    },
+
+    async _buildDeliveryDcDoc(challan, challanId, docType) {
+        const isServiceChallan = challan.type === 'service' || docType === 'service-challan';
         const customer = typeof CustomerManager !== 'undefined'
             ? CustomerManager.getCustomer(challan.customerId)
             : null;
@@ -113,33 +170,35 @@ const ChallanDataV4 = {
         const igstPct = parseFloat(challan.igstPercent) || 0;
         const useIgst = isGst && igstPct > 0 && (parseFloat(challan.igst) || 0) > 0;
 
-        const items = (challan.items || []).map((item, idx) => {
-            const desc = this._lineDesc(item);
-            const invRow = masterInventory.find((m) =>
-                String(m.name || '').toLowerCase() === String(item.name || '').toLowerCase());
-            const retBadge = typeof DcReturnable !== 'undefined' && DcReturnable.isReturnable(item)
-                ? ' [Returnable]'
-                : '';
-            let taxPct = '';
-            if (isGst) {
-                taxPct = useIgst ? `${igstPct}%` : `${parseFloat((cgstPct + sgstPct).toFixed(2))}%`;
-            }
-            const qty = parseFloat(item.quantity) || 0;
-            const rate = parseFloat(item.rate) || 0;
-            const amount = parseFloat(item.amount) || (qty * rate);
-            return {
-                sl: idx + 1,
-                name: (item.name || item.description || '') + retBadge,
-                desc,
-                hsn: item.hsn || invRow?.hsn || invRow?.hsnCode || '-',
-                qty,
-                unit: item.unit || 'nos',
-                rate,
-                taxPct,
-                amount,
-                rowHeightPt: 20 + (desc ? 10 : 0)
-            };
-        });
+        const items = isServiceChallan
+            ? this._buildServiceItems(challan)
+            : (challan.items || []).map((item, idx) => {
+                const desc = this._lineDesc(item);
+                const invRow = masterInventory.find((m) =>
+                    String(m.name || '').toLowerCase() === String(item.name || '').toLowerCase());
+                const retBadge = typeof DcReturnable !== 'undefined' && DcReturnable.isReturnable(item)
+                    ? ' [Returnable]'
+                    : '';
+                let taxPct = '';
+                if (isGst) {
+                    taxPct = useIgst ? `${igstPct}%` : `${parseFloat((cgstPct + sgstPct).toFixed(2))}%`;
+                }
+                const qty = parseFloat(item.quantity) || 0;
+                const rate = parseFloat(item.rate) || 0;
+                const amount = parseFloat(item.amount) || (qty * rate);
+                return {
+                    sl: idx + 1,
+                    name: (item.name || item.description || '') + retBadge,
+                    desc,
+                    hsn: item.hsn || invRow?.hsn || invRow?.hsnCode || '-',
+                    qty,
+                    unit: item.unit || 'nos',
+                    rate,
+                    taxPct,
+                    amount,
+                    rowHeightPt: 20 + (desc ? 10 : 0)
+                };
+            });
 
         const subtotal = parseFloat(challan.subtotal) || items.reduce((s, r) => s + r.amount, 0);
         const cgst = parseFloat(challan.cgst) || 0;
@@ -152,35 +211,63 @@ const ChallanDataV4 = {
             : grandTotal.toFixed(2);
 
         const adapter = typeof DocumentTemplates !== 'undefined'
-            ? DocumentTemplates.get('delivery-challan')
+            ? DocumentTemplates.get(isServiceChallan ? 'service-challan' : 'delivery-challan')
             : null;
         const modalOpen = document.getElementById('pdfPreviewModal')?.classList.contains('show');
         const copyTypes = adapter && typeof DocumentSettings !== 'undefined'
             ? DocumentSettings.resolveCopyTypes(adapter, challanId, modalOpen)
             : ['original'];
         const copyType = copyTypes[0] || 'original';
-        const remarks = typeof DocumentBuildCommon !== 'undefined'
-            ? DocumentBuildCommon.resolveDocumentRemarks(challan)
-            : String(pseudo.narration || '').trim();
+        const serviceAckText = 'We acknowledge receipt of the following materials with complaints as stated above.';
+        let remarks = isServiceChallan
+            ? String(challan.narration || challan.remarks || challan.workDone || '').trim()
+            : (typeof DocumentBuildCommon !== 'undefined'
+                ? DocumentBuildCommon.resolveDocumentRemarks(challan)
+                : String(pseudo.narration || '').trim());
+        const serviceAck = isServiceChallan
+            ? (String(challan.notes || '').trim() || serviceAckText)
+            : null;
 
         const bank = company.bank || {};
         return {
             challanId,
-            meta: { isGst, isPlain: !isGst, isDc: true, isCreditNote: false, isInterstate: useIgst, isService: false, docTitle: 'DELIVERY CHALLAN' },
+            meta: {
+                isGst: isServiceChallan ? false : isGst,
+                isPlain: isServiceChallan ? true : !isGst,
+                isDc: true,
+                isCreditNote: false,
+                isInterstate: useIgst,
+                isService: false,
+                isServiceChallan,
+                docTitle: isServiceChallan ? 'SERVICE CHALLAN' : 'DELIVERY CHALLAN',
+                docSubtitle: isServiceChallan ? '(Material Received for Service — Customer Copy)' : null
+            },
             copyTypes,
             copyType,
             copyLabel: typeof InvoiceDataV3 !== 'undefined'
                 ? InvoiceDataV3.copyLabel(copyType)
                 : (typeof DocumentBuildCommon !== 'undefined' ? DocumentBuildCommon.copyLabel(copyType) : 'ORIGINAL'),
             company,
-            invoice: {
-                no: challan.id,
-                date: challan.date || '',
-                dateDisplay: typeof InvoiceDataV3 !== 'undefined'
+            invoice: (() => {
+                const dateDisplay = typeof InvoiceDataV3 !== 'undefined'
                     ? InvoiceDataV3._formatDateDisplay(challan.date)
-                    : (typeof DocumentBuildCommon !== 'undefined' ? DocumentBuildCommon.formatDateDisplay(challan.date) : challan.date),
-                ...dispatch
-            },
+                    : (typeof DocumentBuildCommon !== 'undefined'
+                        ? DocumentBuildCommon.formatDateDisplay(challan.date)
+                        : challan.date);
+                const base = {
+                    no: challan.id,
+                    date: challan.date || '',
+                    dateDisplay,
+                    jobCardNo: challan.jobCardId || null
+                };
+                if (isServiceChallan) {
+                    return {
+                        ...base,
+                        customerRef: challan.referenceNumber || ''
+                    };
+                }
+                return { ...base, ...dispatch };
+            })(),
             receiver,
             consignee,
             customer: receiver,
@@ -195,12 +282,19 @@ const ChallanDataV4 = {
                 grandTotal,
                 amountInWords: `Rupees ${amountWords} Only`
             },
-            terms: [
-                '1. Goods once sold will not be taken back.',
-                '2. Subject to Chennai Jurisdiction.'
-            ],
+            terms: isServiceChallan
+                ? [
+                    '1. This document acknowledges receipt of materials for service/repair.',
+                    '2. Complaints stated above are as reported by the customer at time of handover.',
+                    '3. Subject to Chennai Jurisdiction.'
+                ]
+                : [
+                    '1. Goods once sold will not be taken back.',
+                    '2. Subject to Chennai Jurisdiction.'
+                ],
             bankLine: `Bank: ${bank.bankName || '-'} | A/c: ${bank.accountNo || '-'} | IFSC: ${bank.ifsc || '-'}`,
-            footerNote: 'Computer generated delivery challan.',
+            footerNote: isServiceChallan ? 'Computer generated service challan.' : 'Computer generated delivery challan.',
+            serviceAck,
             remarks: remarks || null
         };
     },
@@ -215,6 +309,8 @@ const ChallanDataV4 = {
         if (!customerName) customerName = 'Walk-in Customer';
 
         const company = DocumentBuildCommon.buildCompany();
+        const receiptItems = this._resolveReceiptItems(challan);
+        const isReceiptAck = receiptItems.length > 0;
         const items = (challan.items || []).map((item, idx) => {
             const desc = DocumentPdfBase._plainText(this._lineDesc(item));
             const replaced = item.materialChanged
@@ -238,7 +334,8 @@ const ChallanDataV4 = {
         const docInfoRows = [
             ['Date', DocumentBuildCommon.formatDateDisplay(challan.date)]
         ];
-        if (challan.referenceNumber) docInfoRows.push(['Ref No', challan.referenceNumber]);
+        if (challan.jobCardId) docInfoRows.push(['Job Card No', challan.jobCardId]);
+        if (challan.referenceNumber) docInfoRows.push(['Customer DC / Ref', challan.referenceNumber]);
         if (challan.dispatchVia) docInfoRows.push(['Dispatch Via', challan.dispatchVia]);
         if (challan.lrNo) docInfoRows.push(['LR / Track No', challan.lrNo]);
         if (challan.vehicleNo) docInfoRows.push(['Vehicle No', challan.vehicleNo]);
@@ -246,27 +343,40 @@ const ChallanDataV4 = {
         if (challan.technicianId) docInfoRows.push(['Technician', challan.technicianId]);
 
         const remarks = DocumentBuildCommon.resolveDocumentRemarks(challan) || null;
+        const receiptIntro = isReceiptAck
+            ? (challan.notes || 'We acknowledge receipt of the following materials with complaints as stated above.')
+            : null;
 
         return {
             challanId,
             meta: {
-                docTitle: isService ? 'Service Challan' : 'Delivery Challan',
+                docTitle: isReceiptAck ? 'Material Received Acknowledgment' : (isService ? 'Service Challan' : 'Delivery Challan'),
+                docSubtitle: isReceiptAck ? 'Service Challan' : null,
                 isService,
+                isReceiptAck,
                 isGst: !!challan.gstMode,
-                gstBadge: challan.gstMode ? 'Taxable Document' : 'Non-GST Note'
+                gstBadge: challan.gstMode ? 'Taxable Document' : 'Receipt / Acknowledgment'
             },
             company,
             doc: { no: challan.id, date: challan.date, dateDisplay: DocumentBuildCommon.formatDateDisplay(challan.date) },
             customer: {
                 name: customerName,
                 address: customerAddress,
-                phone: customer?.phone || '',
+                phone: customer?.phone || challan.customerPhone || '',
                 gstin: customer?.gstin || ''
             },
             docInfoRows,
+            receiptIntro,
+            receiptItems: receiptItems.map((row, idx) => ({
+                sl: idx + 1,
+                itemName: row.itemName || '-',
+                description: row.description || '',
+                quantity: row.quantity ?? 1,
+                complaint: row.complaint || '-'
+            })),
             serviceLog: {
-                show: !!(challan.complaint || challan.workDone),
-                complaint: challan.complaint || '',
+                show: !isReceiptAck && !!(challan.complaint || challan.workDone || challan.faultReported),
+                complaint: challan.complaint || challan.faultReported || '',
                 workDone: challan.workDone || ''
             },
             items,
@@ -275,11 +385,17 @@ const ChallanDataV4 = {
                 tax: (parseFloat(challan.cgst) || 0) + (parseFloat(challan.sgst) || 0) + (parseFloat(challan.igst) || 0),
                 total: parseFloat(challan.total) || 0
             },
-            terms: [
-                'Goods once sold will not be taken back.',
-                'Subject to city jurisdiction.',
-                'Please verify items before project handover.'
-            ],
+            terms: isReceiptAck
+                ? [
+                    'This document acknowledges receipt of materials for service/repair.',
+                    'Complaints stated above are as reported by the customer at time of handover.',
+                    'Subject to city jurisdiction.'
+                ]
+                : [
+                    'Goods once sold will not be taken back.',
+                    'Subject to city jurisdiction.',
+                    'Please verify items before project handover.'
+                ],
             remarks
         };
     },
@@ -290,11 +406,7 @@ const ChallanDataV4 = {
             : null;
         if (!challan) return null;
 
-        const isService = docType === 'service-challan' || challan.type === 'service';
-        if (!isService) {
-            return this._buildDeliveryDcDoc(challan, challanId);
-        }
-        return this._buildServiceDoc(challan, challanId, docType);
+        return this._buildDeliveryDcDoc(challan, challanId, docType);
     }
 };
 
@@ -303,13 +415,16 @@ const ChallanLayoutV4 = {
         if (!doc.meta?.isService && typeof InvoiceLayoutV3 !== 'undefined') {
             return InvoiceLayoutV3.paginate(doc, settings);
         }
+        const receiptExtra = doc.meta.isReceiptAck
+            ? 24 + (doc.receiptItems?.length || 0) * 16
+            : 0;
         return DocumentPaginate.paginate(doc, settings, {
             header: 72,
             prefix: 0,
             party: 96,
-            extra: doc.serviceLog?.show ? 48 : 0,
+            extra: (doc.serviceLog?.show ? 48 : 0) + receiptExtra,
             tableHeader: 24,
-            closing: doc.meta.isService ? 56 : 88
+            closing: doc.meta.isReceiptAck ? 72 : (doc.meta.isService ? 56 : 88)
         });
     }
 };
@@ -326,8 +441,84 @@ const ChallanPdfV4 = {
     },
 
     _columnWidths(doc) {
+        if (doc.meta.isReceiptAck) return ['6%', '22%', '24%', '10%', '38%'];
         if (doc.meta.isService) return ['6%', '58%', '18%', '18%'];
         return ['6%', '44%', '12%', '12%', '13%', '13%'];
+    },
+
+    _receiptItemsTable(doc) {
+        const fs = (n) => DocumentPdfBase._ctx.fs(n);
+        const sp = (n) => DocumentPdfBase._ctx.sp(n);
+        const head = [
+            { text: '#', alignment: 'center', bold: true, fontSize: fs(7) },
+            { text: 'Item Name', bold: true, fontSize: fs(7) },
+            { text: 'Description', bold: true, fontSize: fs(7) },
+            { text: 'Qty', alignment: 'center', bold: true, fontSize: fs(7) },
+            { text: 'Complaint', bold: true, fontSize: fs(7) }
+        ];
+        const body = [head];
+        (doc.receiptItems || []).forEach((row) => {
+            body.push([
+                { text: String(row.sl), alignment: 'center', fontSize: fs(8), color: '#666' },
+                { text: row.itemName || '-', fontSize: fs(8), bold: true },
+                { text: row.description || '—', fontSize: fs(8) },
+                DocumentPdfBase._numCell(row.quantity, { alignment: 'center' }),
+                { text: row.complaint || '—', fontSize: fs(8) }
+            ]);
+        });
+        body.push([
+            {
+                text: 'Received by customer — signature & date',
+                colSpan: 5,
+                alignment: 'center',
+                italics: true,
+                fontSize: fs(7),
+                color: '#666',
+                margin: [0, sp(16), 0, sp(8)]
+            },
+            {}, {}, {}, {}
+        ]);
+        return {
+            table: { headerRows: 1, widths: this._columnWidths(doc), body },
+            layout: {
+                hLineWidth: (i, node) => (i === 0 || i === 1 || i === node.table.body.length ? 1 : 0.5),
+                vLineWidth: () => 0.5,
+                hLineColor: () => '#333',
+                vLineColor: () => '#333',
+                fillColor: (i) => (i === 0 ? '#f8f9fa' : null)
+            },
+            margin: [0, 0, 0, sp(10)]
+        };
+    },
+
+    _receiptSignatureFooter(doc) {
+        const fs = (n) => DocumentPdfBase._ctx.fs(n);
+        const sp = (n) => DocumentPdfBase._ctx.sp(n);
+        const termLines = (doc.terms || []).map((t, i) => `${i + 1}. ${t}`);
+        const signLine = (label, sub) => ({
+            stack: [
+                { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 100, y2: 0, lineWidth: 1, lineColor: '#eee' }], margin: [0, sp(20), 0, sp(4)] },
+                { text: label, fontSize: fs(8), bold: true, alignment: 'center' },
+                { text: sub, fontSize: fs(7), color: '#666', alignment: 'center', margin: [0, sp(2), 0, 0] }
+            ]
+        });
+        return {
+            table: {
+                widths: ['50%', '25%', '25%'],
+                body: [[
+                    {
+                        stack: [
+                            { text: 'Terms & Conditions:', fontSize: fs(8), bold: true, margin: [0, 0, 0, sp(4)] },
+                            { text: termLines.join('\n'), fontSize: fs(7), color: '#666' }
+                        ]
+                    },
+                    signLine('Authorized Signatory', `For ${doc.company.name}`),
+                    signLine('Received by Customer', 'Customer signature & date')
+                ]]
+            },
+            layout: 'noBorders',
+            margin: [0, sp(12), 0, 0]
+        };
     },
 
     _itemsTable(doc) {
@@ -386,7 +577,15 @@ const ChallanPdfV4 = {
             ]);
         } else {
             body.push([
-                { text: 'I acknowledge receipt of the materials/services listed above in good condition.', colSpan: 4, alignment: 'center', italics: true, fontSize: fs(7), color: '#666', margin: [0, sp(16), 0, sp(16)] },
+                {
+                    text: 'Customer acknowledges receipt of the materials listed above with complaints as stated.',
+                    colSpan: 4,
+                    alignment: 'center',
+                    italics: true,
+                    fontSize: fs(7),
+                    color: '#666',
+                    margin: [0, sp(16), 0, sp(16)]
+                },
                 {}, {}, {}
             ]);
         }
@@ -410,6 +609,9 @@ const ChallanPdfV4 = {
         const header = DocumentBlocks.companyHeaderSplit(doc, (f) => ({
             stack: [
                 { text: doc.meta.docTitle.toUpperCase(), fontSize: f(13), bold: true, alignment: 'right', characterSpacing: 1 },
+                doc.meta.docSubtitle
+                    ? { text: `(${doc.meta.docSubtitle.toUpperCase()})`, fontSize: f(9), bold: true, alignment: 'right', margin: [0, sp(2), 0, 0], color: '#1a5276' }
+                    : null,
                 doc.copyLabel
                     ? { text: `(${doc.copyLabel})`, fontSize: f(9), bold: true, alignment: 'right', margin: [0, sp(2), 0, 0] }
                     : null,
@@ -426,12 +628,21 @@ const ChallanPdfV4 = {
         );
 
         const blocks = [header, party];
+        if (doc.receiptIntro) {
+            blocks.push({
+                text: doc.receiptIntro,
+                fontSize: fs(8),
+                italics: true,
+                color: '#444',
+                margin: [0, 0, 0, sp(6)]
+            });
+        }
         const serviceLog = DocumentBlocks.serviceLogBlock(doc);
         if (serviceLog) blocks.push(serviceLog);
-        blocks.push(this._itemsTable(doc));
+        blocks.push(doc.meta.isReceiptAck ? this._receiptItemsTable(doc) : this._itemsTable(doc));
         const remarks = DocumentBlocks.dcRemarksRow(doc);
         if (remarks) blocks.push(remarks);
-        blocks.push(DocumentBlocks.termsSignatureFooter(doc));
+        blocks.push(doc.meta.isReceiptAck ? this._receiptSignatureFooter(doc) : DocumentBlocks.termsSignatureFooter(doc));
         return blocks;
     },
 
@@ -450,32 +661,46 @@ const ChallanPreviewV4 = {
 
     _renderPage(doc, page) {
         const isService = doc.meta.isService;
+        const isReceiptAck = doc.meta.isReceiptAck;
         const copyLine = page.copyLabel
             ? `<div style="font-size:9px;font-weight:700;text-align:right;">(${this._esc(page.copyLabel)})</div>`
+            : '';
+        const subtitleLine = doc.meta.docSubtitle
+            ? `<div style="font-size:10px;font-weight:700;text-align:right;color:#1a5276;margin-top:2px;">(${this._esc(doc.meta.docSubtitle.toUpperCase())})</div>`
             : '';
         const infoRows = doc.docInfoRows.map(([l, v]) =>
             `<tr><td style="color:#666;font-size:9px;padding:2px 0;">${this._esc(l)}:</td><td style="font-weight:700;font-size:9px;text-align:right;padding:2px 0;">${this._esc(v)}</td></tr>`
         ).join('');
 
-        const itemHead = isService
-            ? '<th style="width:6%;">#</th><th>Material / Description</th><th style="width:12%;">Qty</th><th style="width:12%;">Unit</th>'
-            : '<th style="width:6%;">#</th><th>Material / Description</th><th style="width:10%;">Qty</th><th style="width:10%;">Unit</th><th style="width:13%;text-align:right;">Rate</th><th style="width:13%;text-align:right;">Amount</th>';
-
-        const rows = (page.itemRows.length ? page.itemRows : doc.items).map((r) => {
-            const desc = r.desc ? `<div style="font-size:8px;color:#666;font-style:italic;">${this._esc(r.desc)}</div>` : '';
-            const rateAmt = isService ? '' : `<td style="text-align:right;font-family:monospace;white-space:nowrap;">₹${this._esc(DocumentBuildCommon.formatMoney(r.rate))}</td><td style="text-align:right;font-weight:700;font-family:monospace;white-space:nowrap;">₹${this._esc(DocumentBuildCommon.formatMoney(r.amount))}</td>`;
-            return `<tr style="font-size:9px;"><td style="text-align:center;color:#666;">${r.sl}</td><td><div style="font-weight:700;">${this._esc(r.name)}</div>${desc}</td><td style="text-align:center;font-family:monospace;white-space:nowrap;">${this._esc(r.qty)}</td><td style="text-align:center;white-space:nowrap;">${this._esc(r.unit)}</td>${rateAmt}</tr>`;
-        }).join('');
-
+        let itemHead;
+        let rows;
         let foot = '';
-        if (!isService && page.includeClosing) {
-            foot = `<tfoot><tr><td colspan="4"></td><td style="text-align:right;">Subtotal:</td><td style="text-align:right;font-weight:700;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.subtotal))}</td></tr>`;
-            if (doc.meta.isGst) {
-                foot += `<tr><td colspan="4"></td><td style="text-align:right;">Tax (GST):</td><td style="text-align:right;font-weight:700;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.tax))}</td></tr>`;
+        if (isReceiptAck) {
+            itemHead = '<th style="width:6%;">#</th><th style="width:22%;">Item Name</th><th style="width:24%;">Description</th><th style="width:10%;">Qty</th><th>Complaint</th>';
+            rows = (doc.receiptItems || []).map((r) =>
+                `<tr style="font-size:9px;"><td style="text-align:center;color:#666;">${r.sl}</td><td style="font-weight:700;">${this._esc(r.itemName)}</td><td>${this._esc(r.description) || '—'}</td><td style="text-align:center;font-family:monospace;">${this._esc(r.quantity)}</td><td>${this._esc(r.complaint) || '—'}</td></tr>`
+            ).join('');
+            if (page.includeClosing) {
+                foot = '<tfoot><tr><td colspan="5" style="text-align:center;font-style:italic;color:#666;padding:24px 0;">Received by customer — signature &amp; date</td></tr></tfoot>';
             }
-            foot += `<tr><td colspan="4"></td><td style="text-align:right;font-weight:700;color:#1a5276;">Total:</td><td style="text-align:right;font-weight:700;color:#1a5276;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.total))}</td></tr></tfoot>`;
-        } else if (isService && page.includeClosing) {
-            foot = '<tfoot><tr><td colspan="4" style="text-align:center;font-style:italic;color:#666;padding:24px 0;">I acknowledge receipt of the materials/services listed above in good condition.</td></tr></tfoot>';
+        } else {
+            itemHead = isService
+                ? '<th style="width:6%;">#</th><th>Material / Description</th><th style="width:12%;">Qty</th><th style="width:12%;">Unit</th>'
+                : '<th style="width:6%;">#</th><th>Material / Description</th><th style="width:10%;">Qty</th><th style="width:10%;">Unit</th><th style="width:13%;text-align:right;">Rate</th><th style="width:13%;text-align:right;">Amount</th>';
+            rows = (page.itemRows.length ? page.itemRows : doc.items).map((r) => {
+                const desc = r.desc ? `<div style="font-size:8px;color:#666;font-style:italic;">${this._esc(r.desc)}</div>` : '';
+                const rateAmt = isService ? '' : `<td style="text-align:right;font-family:monospace;white-space:nowrap;">₹${this._esc(DocumentBuildCommon.formatMoney(r.rate))}</td><td style="text-align:right;font-weight:700;font-family:monospace;white-space:nowrap;">₹${this._esc(DocumentBuildCommon.formatMoney(r.amount))}</td>`;
+                return `<tr style="font-size:9px;"><td style="text-align:center;color:#666;">${r.sl}</td><td><div style="font-weight:700;">${this._esc(r.name)}</div>${desc}</td><td style="text-align:center;font-family:monospace;white-space:nowrap;">${this._esc(r.qty)}</td><td style="text-align:center;white-space:nowrap;">${this._esc(r.unit)}</td>${rateAmt}</tr>`;
+            }).join('');
+            if (!isService && page.includeClosing) {
+                foot = `<tfoot><tr><td colspan="4"></td><td style="text-align:right;">Subtotal:</td><td style="text-align:right;font-weight:700;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.subtotal))}</td></tr>`;
+                if (doc.meta.isGst) {
+                    foot += `<tr><td colspan="4"></td><td style="text-align:right;">Tax (GST):</td><td style="text-align:right;font-weight:700;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.tax))}</td></tr>`;
+                }
+                foot += `<tr><td colspan="4"></td><td style="text-align:right;font-weight:700;color:#1a5276;">Total:</td><td style="text-align:right;font-weight:700;color:#1a5276;">₹${this._esc(DocumentBuildCommon.formatMoney(doc.summary.total))}</td></tr></tfoot>`;
+            } else if (isService && page.includeClosing) {
+                foot = '<tfoot><tr><td colspan="4" style="text-align:center;font-style:italic;color:#666;padding:24px 0;">Customer acknowledges receipt of the materials listed above with complaints as stated.</td></tr></tfoot>';
+            }
         }
 
         const serviceLog = (page.includePrefix && doc.serviceLog?.show)
@@ -493,6 +718,7 @@ const ChallanPreviewV4 = {
                 </div>
                 <div style="width:42%;text-align:right;">
                     <div style="font-size:14px;font-weight:800;letter-spacing:1px;">${this._esc(doc.meta.docTitle.toUpperCase())}</div>
+                    ${subtitleLine}
                     ${copyLine}
                     <div style="font-size:9px;margin-top:6px;">No: <strong>#${this._esc(doc.doc.no)}</strong></div>
                     <div style="font-size:8px;margin-top:4px;color:${doc.meta.isGst ? '#198754' : '#6c757d'};">${this._esc(doc.meta.gstBadge)}</div>
@@ -511,13 +737,21 @@ const ChallanPreviewV4 = {
                     <table width="100%">${infoRows}</table>
                 </td>
             </tr></table>
+            ${doc.receiptIntro ? `<div style="font-size:9px;font-style:italic;color:#444;margin-bottom:10px;">${this._esc(doc.receiptIntro)}</div>` : ''}
             ${serviceLog}` : '';
 
-        const closing = page.includeClosing ? `
-            <div style="display:flex;margin-top:20px;">
-                <div style="width:65%;font-size:8px;color:#666;"><strong>Terms & Conditions:</strong><ol style="margin:4px 0 0 16px;padding:0;">${(doc.terms || []).map((t) => `<li>${this._esc(t)}</li>`).join('')}</ol></div>
-                <div style="width:35%;text-align:center;"><div style="border-bottom:1px solid #eee;height:32px;margin:16px 12px 4px;"></div><div style="font-weight:700;font-size:9px;">Authorized Signatory</div><div style="font-size:8px;color:#666;">For ${this._esc(doc.company.name)}</div></div>
-            </div>` : '';
+        const closing = page.includeClosing
+            ? (isReceiptAck
+                ? `<div style="display:flex;margin-top:20px;gap:8px;">
+                    <div style="width:50%;font-size:8px;color:#666;"><strong>Terms &amp; Conditions:</strong><ol style="margin:4px 0 0 16px;padding:0;">${(doc.terms || []).map((t) => `<li>${this._esc(t)}</li>`).join('')}</ol></div>
+                    <div style="width:25%;text-align:center;"><div style="border-bottom:1px solid #eee;height:32px;margin:16px 8px 4px;"></div><div style="font-weight:700;font-size:9px;">Authorized Signatory</div><div style="font-size:8px;color:#666;">For ${this._esc(doc.company.name)}</div></div>
+                    <div style="width:25%;text-align:center;"><div style="border-bottom:1px solid #eee;height:32px;margin:16px 8px 4px;"></div><div style="font-weight:700;font-size:9px;">Received by Customer</div><div style="font-size:8px;color:#666;">Customer signature &amp; date</div></div>
+                </div>`
+                : `<div style="display:flex;margin-top:20px;">
+                    <div style="width:65%;font-size:8px;color:#666;"><strong>Terms & Conditions:</strong><ol style="margin:4px 0 0 16px;padding:0;">${(doc.terms || []).map((t) => `<li>${this._esc(t)}</li>`).join('')}</ol></div>
+                    <div style="width:35%;text-align:center;"><div style="border-bottom:1px solid #eee;height:32px;margin:16px 12px 4px;"></div><div style="font-weight:700;font-size:9px;">Authorized Signatory</div><div style="font-size:8px;color:#666;">For ${this._esc(doc.company.name)}</div></div>
+                </div>`)
+            : '';
 
         return `${prefix}<table width="100%" class="inv-v3-line-items" style="border-collapse:collapse;border:1px solid #333;margin-bottom:10px;"><thead style="background:#f8f9fa;"><tr style="font-size:8px;text-transform:uppercase;">${itemHead}</tr></thead><tbody>${rows}</tbody>${foot}</table>${page.includeClosing && doc.remarks ? `<table width="100%" style="border-collapse:collapse;border:1px solid #333;margin-bottom:10px;"><tr><td style="font-size:9px;padding:6px 8px;"><strong>Remarks:</strong> ${this._esc(doc.remarks)}</td></tr></table>` : ''}${closing}`;
     },

@@ -412,7 +412,7 @@ const TasksUI = {
                         <button class="btn btn-warning fw-bold shadow-sm" onclick="TasksUI.showCreateModal()">
                             <i class="bi bi-plus-lg me-1"></i> New Task
                         </button>
-                        <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                             <i class="bi bi-grid-fill"></i>
                         </button>
                     </div>

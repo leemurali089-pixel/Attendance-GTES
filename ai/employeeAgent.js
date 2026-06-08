@@ -41,6 +41,8 @@ const EmployeeAgent = {
         return {
             needClarify: true,
             state: 'need_name',
+            query,
+            candidates: suggestions.map((name) => ({ name })),
             message: NotificationAgent.formatClarify('employee_not_found', { query, suggestions })
         };
     },

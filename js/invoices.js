@@ -177,6 +177,8 @@ const InvoiceManager = {
             sourceDcInvoiceIds: Array.isArray(invoiceData.sourceDcInvoiceIds) ? invoiceData.sourceDcInvoiceIds : null,
             skipAutoChallan: invoiceData.skipAutoChallan === true,
             jobCardId: invoiceData.jobCardId || null,
+            serviceChallanId: invoiceData.serviceChallanId || null,
+            serviceChallanNo: invoiceData.serviceChallanNo || null,
             date: invoiceData.date || new Date().toISOString().split('T')[0],
             customerId: invoiceData.customerId,
             customerName: invoiceData.customerName,

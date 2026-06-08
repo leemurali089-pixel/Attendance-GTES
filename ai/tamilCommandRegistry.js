@@ -24,6 +24,12 @@ const TamilCommandRegistry = {
     strongCommandRe: /(?:outstanding|pending(?:\s+amount)?|invoices?|help|what\s+(?:are\s+)?(?:the\s+)?things?\s+(?:you\s+)?can\s+do|what\s+can\s+you\s+do|(?:list|show)\s+(?:down\s+)?(?:all\s+)?(?:the\s+)?(?:employees?|invoices?)|employees?\s+list|absent|(?:generate|create)\s+(?:salary|invoice|task)|attendance\s+(?:of|for|od|summary|report)|(?:last|latest|recent)\s+invoice)/i,
 
     normalize(text) {
+        if (typeof LanguageEngine !== 'undefined' && LanguageEngine.normalizeForParse) {
+            const raw = String(text || '');
+            if (LanguageEngine.TAMIL_SCRIPT_RE.test(raw)) {
+                return LanguageEngine.normalizeForParse(raw).text;
+            }
+        }
         return String(text || '')
             .toLowerCase()
             .replace(/[.,!?'"`]/g, ' ')
@@ -171,7 +177,11 @@ const TamilCommandRegistry = {
 
     patterns: [
         // Help
-        { intent: 'help', re: /what\s+(?:are\s+)?(?:the\s+)?things?\s+(?:you\s+)?can\s+do|what\s+can\s+you\s+do|(?:show\s+)?help|commands?\s*list|capabilities/i, slots: [] },
+        { intent: 'help', re: /what\s+(?:are\s+)?(?:the\s+)?things?\s+(?:you\s+)?can\s+do|what\s+can\s+you\s+do|(?:show\s+)?help|commands?\s*list|capabilities|enna\s+panna\s+mudiyum|help\s+kaatu|udhavi/i, slots: [] },
+
+        // Daily briefing / today summary
+        { intent: 'daily_briefing', re: /(?:today|inniku|daily|morning)\s+(?:summary|briefing|status|report)|daily\s+(?:summary|briefing)|today\s+briefing|(?:give\s+me\s+)?today\s+summary|(?:show\s+)?(?:daily|today)\s+briefing/i, slots: [] },
+        { intent: 'daily_briefing', re: /(?:இன்றைய\s*சுருக்கம்|இன்று\s*என்ன\s*நிலை|இன்று\s*நிலை\s*சுருக்கம்)/u, slots: [] },
 
         // Employee details (before list — "show employee X" must not match list)
         { intent: 'employee_details', re: /(?:employee\s+)?details?\s+(?:of|for)\s+([a-z][a-z\s.'-]{1,40})/i, slots: ['employeeName'] },
@@ -185,14 +195,17 @@ const TamilCommandRegistry = {
         // Attendance — absent with date
         { intent: 'absent_employees', re: /(?:how\s+many\s+)?(?:employees?\s+)?(?:are\s+|were\s+)?absent\s+(?:yesterday|innal|innalai)/i, slots: [] },
         { intent: 'absent_employees', re: /(?:yesterday|innal|innalai)\s+(?:who\s+)?(?:were\s+)?absent|absent\s+(?:yesterday|innal|innalai)/i, slots: [] },
-        { intent: 'absent_employees', re: /(?:yaar|who)\s+absent|absent\s+(?:inniku|today|employees?)|absent\s+list/i, slots: [] },
+        { intent: 'absent_employees', re: /(?:yaar|who)\s+absent|absent\s+(?:inniku|today|employees?)|absent\s+list|inniku\s+yaar\s+absent|innal\s+yaar\s+absent|yaar\s+varala|(?:inniku|today)\s+yaar\s+varala/i, slots: [] },
+        { intent: 'absent_employees', re: /(?:இன்று|நேற்று)?\s*யார்\s*வரவில்லை|இன்று\s*யார்\s*வரவில்லை/u, slots: [] },
 
         { intent: 'mark_attendance', re: /(?:^|.*\b)([a-z][a-z\s.'-]{1,30}?)\s+(?:ku|ukku)?\s*(?:attendance|attendence)\s+(?:podu|mark|pannu|set)/i, slots: ['employeeName'] },
         { intent: 'mark_attendance', re: /(?:attendance|attendence)\s+(?:podu|mark|pannu)\s+(?:for\s+)?([a-z][a-z\s.'-]{1,30})/i, slots: ['employeeName'] },
         { intent: 'mark_attendance', re: /([a-z][a-z\s.'-]{1,30})\s+(present|half\s*day|halfday)\s*(?:podu|mark|pannu|inniku|today)?/i, slots: ['employeeName', 'status'] },
+        { intent: 'mark_attendance', re: /([a-z][a-z\s.'-]{1,30})\s+(?:varugai|attendance)\s+(?:podu|pannu|mark|பதிவு)/i, slots: ['employeeName'] },
+        { intent: 'mark_attendance', re: /(?:அண்ணாதுரை|[\u0B80-\u0BFF\s]{2,20})\s*வருகை\s*(?:பதிவு\s*செய்|பதிவு)/u, slots: [] },
         { intent: 'mark_leave', re: /([a-z][a-z\s.'-]{1,30})\s*(?:ku|ukku)?\s*leave\s+(?:podu|mark|pannu)/i, slots: ['employeeName'] },
         { intent: 'mark_leave', re: /leave\s+(?:podu|mark|pannu)\s+(?:for\s+)?([a-z][a-z\s.'-]{1,30})/i, slots: ['employeeName'] },
-        { intent: 'attendance_summary', re: /(?:attendance|attendence)\s+(?:summary|report|kaatu|show)|monthly\s+attendance/i, slots: [] },
+        { intent: 'attendance_summary', re: /(?:attendance|attendence)\s+(?:summary|report|kaatu|show|list)|monthly\s+attendance|(?:yesterday|innal|innalai)\s+(?:attendance|varugai)\s+list|(?:நேற்று|இன்று)\s*வருகை\s*பட்டியல்/u, slots: [] },
 
         // Employee attendance — natural English (date/status variants before generic)
         { intent: 'employee_attendance', re: /([a-z][a-z\s.'-]{1,30})\s+(?:yesterday|today|innal|inniku|innalai)\s+attendance(?:\s+status)?/i, slots: ['employeeName'] },
@@ -212,7 +225,7 @@ const TamilCommandRegistry = {
         { intent: 'last_invoice', re: /(?:give\s+me\s+(?:the\s+)?)?(?:recent|latest|last)\s+invoice(?:\s+billed)?(?:\s+to)?/i, slots: [] },
 
         // Customer — "outstanding OF customer" (must be before loose patterns)
-        { intent: 'customer_outstanding', re: /(?:give\s+me\s+(?:the\s+)?)?(?:latest\s+)?(?:pending\s+amount|outstanding|pending)\s+(?:of|for)\s+([a-z0-9][a-z0-9\s&.'-]{2,60})/i, slots: ['customerName'] },
+        { intent: 'customer_outstanding', re: /(?:give\s+me\s+(?:the\s+)?)?(?:latest\s+)?(?:pending\s+amount|outstanding|pending|niluvai)\s+(?:of|for)\s+([a-z0-9][a-z0-9\s&.'-]{2,60})/i, slots: ['customerName'] },
         { intent: 'customer_last_invoice', re: /(?:latest|last)\s+invoice\s+(?:of|for)\s+([a-z0-9][a-z0-9\s&.'-]{2,60})/i, slots: ['customerName'] },
         { intent: 'last_invoice', re: /(?:give\s+me\s+(?:the\s+)?)?(?:latest|last)\s+invoice\s*$/i, slots: [] },
         { intent: 'last_invoice', re: /(?:give\s+me\s+(?:the\s+)?)?(?:latest|last)\s+invoice\s*(?:kaatu|show|details?)?\s*$/i, slots: [] },
@@ -222,7 +235,12 @@ const TamilCommandRegistry = {
         { intent: 'customer_outstanding', re: /(?:pending|outstanding)\s+(?:amount\s+)?(?:of|for)\s+([a-z0-9][a-z0-9\s&.'-]{2,60})/i, slots: ['customerName'] },
         { intent: 'customer_search', re: /(?:customer|party)\s+(?:search|find|kaatu)\s+([a-z0-9][a-z0-9\s&.'-]{2,60})/i, slots: ['customerName'] },
         { intent: 'customer_outstanding', re: /customer\s+outstanding\s+(?:kaatu|show|list)/i, slots: [] },
-        { intent: 'customer_outstanding', re: /^(?:give\s+me\s+(?:the\s+)?)?(?:pending|outstanding)\s*(?:amount|balance|evlo|enna|kaatu)?$/i, slots: [] },
+        { intent: 'customer_outstanding', re: /^(?:give\s+me\s+(?:the\s+)?)?(?:pending|outstanding|niluvai)\s*(?:amount|balance|evlo|enna|kaatu)?$/i, slots: [] },
+        { intent: 'customer_outstanding', re: /([a-z0-9][a-z0-9\s&.'-]{2,60})\s+(?:niluvai|pending)\s*(?:evlo|enna|kaatu|எவ்வளவு)?/i, slots: ['customerName'] },
+        { intent: 'customer_outstanding', re: /(?:அவான்\s*ஆக்சிஜன்|[\u0B80-\u0BFF\s]{2,30})\s*நிலுவை\s*எவ்வளவு/u, slots: [] },
+        { intent: 'employee_attendance', re: /([a-z][a-z\s.'-]{1,30})\s+(?:innal|innalai|yesterday)\s+(?:attendance|varugai)/i, slots: ['employeeName'] },
+        { intent: 'employee_salary', re: /([a-z][a-z\s.'-]{1,30})\s+(?:sambalam|salary)\s*(?:evlo|enna|kaatu)?/i, slots: ['employeeName'] },
+        { intent: 'salary_summary', re: /(?:this\s+month|இந்த\s*மாத(?:ம்)?)\s+(?:sambalam|salary|சம்பளம்)\s*(?:evlo|enna|kaatu|எவ்வளவு)?|(?:sambalam|salary|சம்பளம்)\s+(?:evlo|enna|kaatu)\s*(?:this\s+month|இந்த\s*மாத)?/i, slots: [] },
         { intent: 'last_invoice', re: /^last\s+invoice\s*(?:kaatu|show|evlo)?$/i, slots: [] },
         { intent: 'customer_outstanding', re: /^(?:pending|outstanding)\s*(?:evlo|amount|enna|kaatu)?$/i, slots: [] },
 

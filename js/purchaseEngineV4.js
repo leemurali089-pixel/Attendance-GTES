@@ -47,6 +47,36 @@ const PurchaseDataV4 = {
             ? pdfLineTaxes.taxable
             : (parseFloat(p.subtotal) || (dnDocTotal - pdfCgst - pdfSgst - pdfIgst));
 
+        const docTotal = parseFloat(p.amount) || dnDocTotal;
+        let purchaseBalance = docTotal;
+        if (!isDebitNote && typeof VoucherManager !== 'undefined') {
+            const map = VoucherManager.getVoucherAllocationsMap(null, 'payment');
+            purchaseBalance = VoucherManager.getDocumentBalance(
+                p.id,
+                docTotal,
+                map,
+                p.billNo || p.vch_no || p.invoiceNo,
+                p,
+                { allowLooseFallback: false }
+            );
+            const importedStatus = String(p.status || '').toLowerCase();
+            const srcBk = String(p.source || '').toLowerCase() === 'bookkeeper'
+                || !!(p.bookkeeperId && String(p.bookkeeperId).trim());
+            if (purchaseBalance >= (docTotal - 0.05) && srcBk) {
+                if (importedStatus === 'paid') purchaseBalance = 0;
+                else if (importedStatus === 'partial') purchaseBalance = Math.max(0.01, docTotal * 0.5);
+            }
+        }
+        const payment = typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.resolvePaymentStatus({
+                status: p.status,
+                balance: isDebitNote ? 0 : purchaseBalance,
+                total: docTotal,
+                isPaid: isDebitNote ? true : purchaseBalance <= 0.05,
+                skipDisplay: isDebitNote
+            })
+            : { show: false };
+
         const items = pdfItems.length > 0
             ? pdfItems.map((item, idx) => {
                 const details = InvoicesUI.getItemDisplayDetails(item, allMasterItems, false);
@@ -119,8 +149,9 @@ const PurchaseDataV4 = {
                 ['Ref No / PO:', p.poNumber || '-'],
                 isDebitNote
                     ? ['Return Status:', 'POSTED']
-                    : ['Payment Status:', (p.status || 'pending').toUpperCase()]
+                    : ['Payment Status:', payment.label || (p.status || 'pending').toUpperCase()]
             ],
+            payment,
             shipTo: {
                 show: showPurchaseShipPdf,
                 address: purchaseShipAddr,
@@ -295,6 +326,9 @@ const PurchasePdfV4 = {
             : null;
         if (setOff) blocks.push(setOff);
         blocks.push(this._footerBlock(doc));
+        if (doc.payment?.isPaid && typeof DocumentBuildCommon !== 'undefined') {
+            blocks.push(DocumentBuildCommon.paidStampPdfBlock());
+        }
         return blocks;
     },
 
@@ -310,9 +344,11 @@ const PurchasePreviewV4 = {
 
     _renderPage(doc, page) {
         const copyLine = page.copyLabel ? `<div style="font-size:9px;font-weight:700;text-align:right;">(${this._esc(page.copyLabel)})</div>` : '';
-        const billRows = doc.billDetails.map(([l, v]) =>
-            `<tr><td style="color:#444;font-size:9px;padding:2px 0;width:120px;vertical-align:top;">${this._esc(l)}</td><td style="font-size:9px;font-weight:700;padding:2px 0;"><strong>${this._esc(v)}</strong></td></tr>`
-        ).join('');
+        const billRows = doc.billDetails.map(([l, v]) => {
+            const isPay = l === 'Payment Status:';
+            const color = isPay ? (doc.payment?.color || '#111') : '#111';
+            return `<tr><td style="color:#444;font-size:9px;padding:2px 0;width:120px;vertical-align:top;">${this._esc(l)}</td><td style="font-size:9px;font-weight:700;padding:2px 0;color:${color};"><strong>${this._esc(v)}</strong></td></tr>`;
+        }).join('');
 
         const itemRows = (page.itemRows.length ? page.itemRows : doc.items).map((r) => `
             <tr style="font-size:9px;">
@@ -400,20 +436,18 @@ const PurchasePreviewV4 = {
     render(layoutResult, host) {
         if (!host || !layoutResult?.pages) return;
         const { pages, doc, settings } = layoutResult;
-        const dims = DocumentSettings.pageDimensionsMm(settings || {});
-        const marginMm = DocumentSettings.marginMm((settings || {}).marginPreset || 'normal');
+        const paidStamp = doc.payment?.isPaid && typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.paidStampHtml()
+            : '';
         host.innerHTML = pages.map((p) => `
             <section class="doc-engine-page-frame inv-v3-page-frame" data-page="${p.pageNumber}" id="doc-engine-page-${p.pageNumber}">
-                <div class="inv-v3-page-sheet" style="width:${dims.w}mm;min-height:${dims.h - marginMm * 2}mm;padding:${marginMm}mm;box-sizing:border-box;background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif;">
-                    ${this._renderPage(doc, p)}
-                </div>
+                <div class="inv-v3-page doc-page-root">${paidStamp}${this._renderPage(doc, p)}</div>
             </section>`).join('');
         if (typeof DocumentPreview !== 'undefined') {
-            DocumentPreview._state.pageCount = pages.length;
-            DocumentPreview._state.currentPage = 1;
+            DocumentPreview.applyPageSettings(host, settings || layoutResult.settings || {});
+            DocumentPreview.syncPageCount(pages.length);
             DocumentPreview._bindNavOnce();
             host.querySelectorAll('.doc-engine-page-frame').forEach((f) => DocumentPreview._observer?.observe(f));
-            DocumentPreview._updateNav();
         }
     }
 };

@@ -55,7 +55,7 @@ const PaymentsUI = {
                         <button class="btn btn-outline-warning btn-sm" onclick="App.showView('tasks')">
                             <i class="bi bi-check-square"></i> View Tasks
                         </button>
-                        <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                             <i class="bi bi-grid-fill"></i> Back to Apps
                         </button>
                     </div>

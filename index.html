@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' https: data: blob:; script-src 'self' https: 'unsafe-inline' 'unsafe-eval'; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self' https: data:; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://*.firebasedatabase.app wss://*.firebaseio.com wss://*.firebasedatabase.app; object-src 'none'; base-uri 'self';">
+        content="default-src 'self' https: data: blob:; script-src 'self' https: 'unsafe-inline' 'unsafe-eval'; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self' https: data:; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.gstatic.com https://api.deepgram.com https://api.openai.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://*.firebasedatabase.app wss://*.firebaseio.com wss://*.firebasedatabase.app wss://api.deepgram.com; object-src 'none'; base-uri 'self';">
     <title id="appTitle">Attendance & Salary Management</title>
 
     <!-- Bootstrap 5 CSS -->
@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="css/login.css">
     <link rel="stylesheet" href="css/landing.css">
     <link rel="stylesheet" href="css/dashboard-shell.css?v=2.5">
-    <link rel="stylesheet" href="css/voice-agent.css?v=1.1">
+    <link rel="stylesheet" href="css/voice-agent.css?v=1.7">
 
 
     <!-- Google Fonts -->
@@ -142,7 +142,7 @@
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                     <!-- App Launcher (Returns to Landing Page) -->
                     <li class="nav-item">
-                        <a class="nav-link fw-bold" href="#" onclick="event.preventDefault(); App.showLandingPage();"
+                        <a class="nav-link fw-bold" href="#" onclick="event.preventDefault(); App.goBack();"
                             title="Back to Home">
                             <i class="bi bi-grid-3x3-gap-fill text-warning me-1"></i> Home
                         </a>
@@ -519,7 +519,7 @@
             </div>
             <div class="gtes-footer-bottom">
                 <span id="dashFCopyright">© 2026 Gas Tech Engineering Service. All rights reserved.</span>
-                <span id="dashFVersionLine">Version 1.3.50 | Developed by Murali D | Support: leemurali001@gmail.com / +91 99529 70089</span>
+                <span id="dashFVersionLine">Version 1.3.51 | Developed by Murali D | Support: leemurali001@gmail.com / +91 99529 70089</span>
             </div>
         </footer>
 
@@ -768,7 +768,7 @@
                 <!-- Header -->
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2><i class="bi bi-graph-up text-success me-2"></i> Business Analytics</h2>
-                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                    <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                         <i class="bi bi-grid-fill"></i> Back to Apps
                     </button>
                 </div>
@@ -896,7 +896,7 @@
 
                 <!-- Challan Sub-Menu -->
                 <div id="deliveryChallanMenu" class="d-none">
-                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="DeliveryUI.showLanding()">
+                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="App.goBack()">
                         <i class="bi bi-arrow-left me-1"></i> Back to Main
                     </button>
                     <div class="row g-4">
@@ -932,7 +932,7 @@
 
                 <!-- Voucher Sub-Menu -->
                 <div id="deliveryVoucherMenu" class="d-none">
-                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="DeliveryUI.showLanding()">
+                    <button class="btn btn-sm btn-outline-secondary mb-4" onclick="App.goBack()">
                         <i class="bi bi-arrow-left me-1"></i> Back to Main
                     </button>
                     <div class="row g-4">
@@ -2002,12 +2002,12 @@
     <script src="js/migrateToCloud.js?v=1.1"></script>
 
     <!-- File Storage Module (must load before data.js) -->
-    <script src="js/fileStorage.js?v=3.0"></script>
+    <script src="js/fileStorage.js?v=3.1"></script>
 
     <!-- Application Scripts -->
     <script src="js/data.js?v=2.25"></script>
     <script src="js/integration/financialYearUi.js?v=1.1"></script>
-    <script src="js/updateChecker.js?v=3.0"></script>
+    <script src="js/updateChecker.js?v=3.1"></script>
     <script src="js/userManager.js?v=1.5"></script>
     <script src="js/auth.js?v=1.1"></script>
     <script src="js/appUpdater.js?v=1.0"></script>
@@ -2029,11 +2029,11 @@
     <script src="js/emailService.js?v=1.1"></script>
     <script src="js/salary.js?v=1.3"></script>
     <script src="js/employeeView.js?v=1.2"></script>
-    <script src="js/customers.js?v=1.6"></script>
+    <script src="js/customers.js?v=1.7"></script>
     <script src="js/inventory.js?v=1.2"></script>
-    <script src="js/delivery.js?v=1.1"></script>
-    <script src="js/jobcard.js?v=1.1"></script>
-<script src="js/invoices.js?v=2.9"></script>
+    <script src="js/delivery.js?v=1.2"></script>
+    <script src="js/jobcard.js?v=1.2"></script>
+<script src="js/invoices.js?v=3.0"></script>
 <script src="js/vouchers.js?v=3.9"></script>
 <script src="js/vouchersUI.js?v=6.11"></script>
     <script src="js/paymentsUI.js?v=1.9"></script>
@@ -2049,33 +2049,34 @@
     <script src="core/document-engine/documentDiagnostics.js?v=1.0"></script>
     <script src="core/document-engine/documentLayout.js?v=1.0"></script>
     <script src="core/document-engine/documentPdfGenerator.js?v=1.1"></script>
-    <script src="core/document-engine/documentPrintManager.js?v=1.3"></script>
+    <script src="core/document-engine/documentPrintManager.js?v=1.4"></script>
     <script src="core/document-engine/documentPreview.js?v=1.0"></script>
     <script src="core/document-engine/documentPreviewHost.js?v=1.0"></script>
     <script src="core/document-engine/documentToolbar.js?v=1.1"></script>
     <script src="core/document-engine/documentTemplates.js?v=1.1"></script>
     <script src="core/document-engine/documentLegacyBridge.js?v=1.1"></script>
     <script src="core/document-engine/documentPdfBase.js?v=1.0"></script>
-    <script src="core/document-engine/documentBuildCommon.js?v=1.3"></script>
+    <script src="core/document-engine/documentBuildCommon.js?v=1.5"></script>
     <script src="core/document-engine/documentBlocks.js?v=1.2"></script>
     <script src="core/document-engine/documentPaginate.js?v=1.0"></script>
     <script src="core/document-engine/adapterBase.js?v=1.0"></script>
-    <script src="js/invoiceDataV3.js?v=1.7"></script>
+    <script src="js/invoiceDataV3.js?v=1.8"></script>
     <script src="js/invoiceLayoutV3.js?v=1.3"></script>
-    <script src="js/invoicePdfMakeV3.js?v=2.3"></script>
-    <script src="js/invoicePreviewV3.js?v=1.9"></script>
-    <script src="js/challanEngineV4.js?v=1.3"></script>
+    <script src="js/invoicePdfMakeV3.js?v=2.9"></script>
+    <script src="js/invoicePreviewV3.js?v=2.5"></script>
+    <script src="js/challanEngineV4.js?v=1.9"></script>
+    <script src="js/jobCardEngineV4.js?v=1.1"></script>
     <script src="js/purchaseEngineV4.js?v=1.1"></script>
     <script src="js/orderEngineV4.js?v=1.0"></script>
     <script src="js/estimateEngineV4.js?v=1.0"></script>
     <script src="core/document-engine/adapters/adapterSalesInvoice.js?v=1.1"></script>
-    <script src="core/document-engine/adapters/adapterPhase1.js?v=1.0"></script>
-    <script src="core/document-engine/documentEngine.js?v=2.5"></script>
+    <script src="core/document-engine/adapters/adapterPhase1.js?v=1.1"></script>
+    <script src="core/document-engine/documentEngine.js?v=2.6"></script>
     <script src="js/invoiceEngineV3.js?v=1.1"></script>
     <script src="js/invoicePdfEngine.js?v=3.1"></script>
     <script src="js/dcReturnable.js?v=1.1"></script>
-    <script src="js/invoicesUI.js?v=4.8"></script>
-    <script src="js/deliveryUI.js?v=3.7"></script>
+    <script src="js/invoicesUI.js?v=5.0"></script>
+    <script src="js/deliveryUI.js?v=4.5"></script>
     <script src="js/accountingUI.js?v=1.2"></script>
     <script src="js/admin.js?v=2.3"></script>
     <script src="js/mailUI.js?v=1.6"></script>
@@ -2192,31 +2193,70 @@
             backdrop-filter: blur(8px);
         }
     </style>
-    <div id="globalAIBtn" class="ai-floating-btn voice-agent-mic" title="Voice ERP Assistant (Tamil / English / Tanglish)">
+    <div id="globalAIBtn" class="ai-floating-btn voice-agent-mic" title="Voice ERP Assistant (Tamil / English / Tanglish). Double-click for AI Command Center.">
         <i class="bi bi-mic-fill" id="globalAIIcon"></i>
     </div>
     
-    <script src="ai/memoryManager.js?v=1.0"></script>
+    <script src="ai/memoryManager.js?v=1.3"></script>
     <script src="ai/contextManager.js?v=1.5"></script>
-    <script src="ai/conversationHistory.js?v=1.0"></script>
-    <script src="ai/tamilCommandRegistry.js?v=1.6"></script>
-    <script src="ai/intentRegistry.js?v=1.6"></script>
-    <script src="ai/erpFunctions.js?v=1.6"></script>
-    <script src="ai/notificationAgent.js?v=1.4"></script>
+    <script src="ai/languageEngine.js?v=1.2"></script>
+    <script src="ai/responseI18n.js?v=1.2"></script>
+    <script src="ai/conversationHistory.js?v=1.1"></script>
+    <script src="ai/tamilCommandRegistry.js?v=1.8"></script>
+    <script src="ai/intentRegistry.js?v=1.7"></script>
+    <script src="ai/erpFunctions.js?v=1.7"></script>
+    <script src="ai/notificationAgent.js?v=1.6"></script>
     <script src="ai/attendanceAgent.js?v=1.3"></script>
-    <script src="ai/customerAgent.js?v=1.5"></script>
+    <script src="ai/customerAgent.js?v=1.6"></script>
     <script src="ai/taskAgent.js?v=1.0"></script>
     <script src="ai/payrollAgent.js?v=1.0"></script>
     <script src="ai/employeeAgent.js?v=1.6"></script>
     <script src="ai/documentAgent.js?v=1.0"></script>
-    <script src="ai/speechAdapters/browserSpeechAdapter.js?v=1.0"></script>
-    <script src="ai/speechAdapters/openaiSpeechAdapter.js?v=1.0"></script>
-    <script src="ai/speechAdapters/googleSpeechAdapter.js?v=1.0"></script>
-    <script src="ai/speechAdapters/deepgramSpeechAdapter.js?v=1.0"></script>
-    <script src="ai/speechEngine.js?v=1.0"></script>
-    <script src="ai/intentEngine.js?v=1.6"></script>
-    <script src="ai/commandRouter.js?v=1.6"></script>
-    <script src="ai/voiceAgent.js?v=1.4"></script>
+    <script src="ai/speechAdapters/browserSpeechAdapter.js?v=1.6"></script>
+    <script src="ai/providers/browserSpeechProvider.js?v=1.0"></script>
+    <script src="ai/speechProviderManager.js?v=1.2.4"></script>
+    <script src="ai/voiceDiagnostics.js?v=1.2"></script>
+    <script src="ai/speechAdapters/openaiSpeechAdapter.js?v=1.1"></script>
+    <script src="ai/speechAdapters/googleSpeechAdapter.js?v=1.1"></script>
+    <script src="ai/speechAdapters/deepgramSpeechAdapter.js?v=1.3"></script>
+    <script src="ai/speechEngine.js?v=2.0"></script>
+    <script src="ai/intentEngine.js?v=1.8"></script>
+    <script src="ai/commandRouter.js?v=1.7"></script>
+    <script src="ai/voiceAgent.js?v=2.7"></script>
+
+    <!-- AI Brain Phase 2 -->
+    <script src="ai-brain/trainingCenter.js?v=2.6"></script>
+    <script src="ai-brain/actionReplayEngine.js?v=2.5"></script>
+    <script src="ai-brain/sandboxEngine.js?v=2.5"></script>
+    <script src="ai-brain/contextEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/memoryEngine.js?v=2.5"></script>
+    <script src="ai-brain/knowledgeEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/knowledgeGraphEngine.js?v=2.5"></script>
+    <script src="ai-brain/reasoningEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/decisionEngine.js?v=2.5"></script>
+    <script src="ai-brain/approvalEngine.js?v=2.5"></script>
+    <script src="ai-brain/bridge/erpBridge.js?v=2.5"></script>
+    <script src="ai-brain/engines/attendanceEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/engines/employeeEngine.js?v=2.5"></script>
+    <script src="ai-brain/engines/customerEngine.js?v=2.5"></script>
+    <script src="ai-brain/engines/taskEngine.js?v=2.0"></script>
+    <script src="ai-brain/engines/payrollEngine.js?v=2.0"></script>
+    <script src="ai-brain/engines/reportEngine.js?v=2.0"></script>
+    <script src="ai-brain/engines/analyticsEngine.js?v=2.0"></script>
+    <script src="ai-brain/engines/documentEngine.js?v=2.0"></script>
+    <script src="ai-brain/functionEngine.js?v=2.5"></script>
+    <script src="ai-brain/proactiveEngine.js?v=2.6"></script>
+    <script src="ai-brain/voiceEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/agents/financeAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/hrAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/crmAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/operationsAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/documentAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/executiveAgent.js?v=2.0"></script>
+    <script src="ai-brain/ui/approvalModal.js?v=2.0"></script>
+    <script src="ai-brain/ui/brainPanel.js?v=2.0"></script>
+    <script src="ai-brain/ui/aiCommandCenter.js?v=2.1"></script>
+    <script src="ai-brain/brain.js?v=2.5.1"></script>
     
     <!-- Recycle Bin UI -->
     <script src="js/recycleBinUI.js?v=1.1"></script>
@@ -2236,3 +2276,4 @@
 </body>
 
 </html>
+

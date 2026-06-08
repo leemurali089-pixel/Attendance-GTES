@@ -1723,7 +1723,13 @@ const VouchersUI = {
                 : null;
             linkByIndex.set(index, linkInfo);
             const alreadyLinked = !!(linkInfo?.linkedVoucherId);
-            dupByIndex.set(index, !alreadyLinked && !!party && VoucherManager.checkDuplicateVoucher(party, tx.amount, tx.date));
+            const vchType = tx.type === 'debit' ? 'payment' : 'receipt';
+            const txForMatch = { ...tx, bankAssignedParty: party || tx.bankAssignedParty };
+            dupByIndex.set(index, !alreadyLinked && !!party && (
+                VoucherManager.checkDuplicateVoucher(party, tx.amount, tx.date, { voucherType: vchType })
+                || !!(typeof VoucherManager.findMatchingVoucherForBankTx === 'function'
+                    && VoucherManager.findMatchingVoucherForBankTx(txForMatch))
+            ));
         });
         this._bankRenderCtx = { partyCache, linkByIndex, dupByIndex };
         return this._bankRenderCtx;
@@ -1733,10 +1739,15 @@ const VouchersUI = {
         const renderCtx = ctx || this._bankRenderCtx;
         const isDebit = tx.type === 'debit';
         const desc = (tx?.description || '').toString();
-        let match = renderCtx?.partyCache?.get(desc);
-        if (match === undefined) {
-            match = this.resolveBankTxPartyName(tx);
-            if (renderCtx?.partyCache) renderCtx.partyCache.set(desc, match);
+        let match = (tx.bankAssignedParty || '').toString().trim();
+        if (!match) {
+            match = renderCtx?.partyCache?.get(desc);
+            if (match === undefined) {
+                match = this.resolveBankTxPartyName(tx);
+                if (renderCtx?.partyCache) renderCtx.partyCache.set(desc, match);
+            }
+        } else if (renderCtx?.partyCache) {
+            renderCtx.partyCache.set(desc, match);
         }
         const matchHtml = match ? `<span class="badge bg-primary ms-1"><i class="bi bi-magic"></i> ${match}</span>` : '';
 
@@ -1749,15 +1760,26 @@ const VouchersUI = {
             tx.converted = true;
         }
         const alreadyLinked = !!(linkInfo?.linkedVoucherId);
+        const vchType = isDebit ? 'payment' : 'receipt';
+        const matchedVoucher = (!alreadyLinked && !hasSessionMap && match
+            && typeof VoucherManager.findMatchingVoucherForBankTx === 'function')
+            ? VoucherManager.findMatchingVoucherForBankTx(tx)
+            : null;
         const alreadyVouchered = renderCtx?.dupByIndex?.has(index)
             ? renderCtx.dupByIndex.get(index)
-            : (!alreadyLinked && match && VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date));
+            : (!alreadyLinked && match && (
+                VoucherManager.checkDuplicateVoucher(match, tx.amount, tx.date, { voucherType: vchType })
+                || !!matchedVoucher
+            ));
 
         if ((tx.converted || alreadyLinked || alreadyVouchered) && !hasSessionMap) {
             const existsLabel = alreadyLinked || alreadyVouchered ? 'Already Exists' : 'Imported';
+            const dupVoucherId = matchedVoucher?.id || matchedVoucher?.voucherId || '';
             const linkHint = alreadyLinked && linkInfo?.linkedVoucherId
                 ? ` <span class="opacity-75">(${linkInfo.linkedVoucherId})</span>`
-                : '';
+                : (alreadyVouchered && dupVoucherId
+                    ? ` <span class="opacity-75">(${dupVoucherId})</span>`
+                    : '');
             const reassignBtn = alreadyLinked
                 ? `<button class="btn btn-sm btn-outline-warning mt-1" onclick="VouchersUI.reassignBankVoucherFromRow(this)" title="Change linked voucher">
                         <i class="bi bi-arrow-repeat"></i> Reassign
@@ -2525,8 +2547,12 @@ const VouchersUI = {
             this.showStatementProcessingModal(this.currentBankTransactions);
             return;
         }
+        this._buildBankRenderContext(this.currentBankTransactions);
+        const ctx = this._bankRenderCtx;
         (this.currentBankTransactions || []).forEach((tx, idx) => {
             if (VoucherManager.getBankMatchSignature(tx.description, partyName) === signature) {
+                const desc = (tx?.description || '').toString();
+                if (ctx?.partyCache) ctx.partyCache.set(desc, partyName);
                 this._replaceBankRowAt(idx);
             }
         });
@@ -3112,6 +3138,9 @@ const VouchersUI = {
                 sessionBankTx,
                 voucherType === 'payment' ? 'payment' : 'receipt'
             );
+            if (typeof InvoiceManager !== 'undefined' && InvoiceManager._balanceCache) {
+                InvoiceManager._balanceCache = null;
+            }
         }
 
         if (!name) {
@@ -3139,25 +3168,51 @@ const VouchersUI = {
             });
             
             const nameLc = name.toLowerCase();
-            pendingDocs = Array.from(uniqueDocsMap.values()).filter(doc => {
-                if (this._isDebitNotePurchase(doc)) return false;
+            const paymentMap = (typeof VoucherManager !== 'undefined')
+                ? VoucherManager.getVoucherAllocationsMap(null, 'payment')
+                : new Map();
+            pendingDocs = Array.from(uniqueDocsMap.values()).map((doc) => {
+                if (this._isDebitNotePurchase(doc)) return null;
+                const docTotal = Math.abs(parseFloat(doc.total ?? doc.amount ?? doc.vch_amt ?? 0) || 0);
+                let balance = (typeof VoucherManager !== 'undefined')
+                    ? VoucherManager.getDocumentBalance(
+                        doc.id,
+                        docTotal,
+                        paymentMap,
+                        doc.billNo || doc.vch_no || doc.invoiceNo,
+                        doc,
+                        { allowLooseFallback: false }
+                    )
+                    : docTotal;
+                const importedStatus = String(doc.status || '').toLowerCase();
+                const srcBk = String(doc.source || '').toLowerCase() === 'bookkeeper'
+                    || !!(doc.bookkeeperId && String(doc.bookkeeperId).trim());
+                if (balance >= (docTotal - 0.05) && srcBk) {
+                    if (importedStatus === 'paid') balance = 0;
+                    else if (importedStatus === 'partial') balance = Math.max(0.01, docTotal * 0.5);
+                }
+                return { ...doc, balance, isPaid: balance <= 0.05 };
+            }).filter((doc) => {
+                if (!doc) return false;
                 const party = (doc.vendor || doc.customerName || doc.partyName || doc.supplier || '').toString().trim().toLowerCase();
                 const partyMatch = party === nameLc;
                 const st = (doc.status || '').toLowerCase();
-                return partyMatch && st !== 'cancelled';
+                return partyMatch && st !== 'cancelled' && !doc.isPaid;
             });
 
         } else {
-            // Load Pending Sales Invoices (match customer by id or name, case-insensitive)
-            const allInvoices = DataManager.getData('invoices') || [];
+            // Live balances — same source as GST/Plain invoice lists (not raw import snapshot).
+            const allInvoices = (typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoicesWithBalance)
+                ? InvoiceManager.getInvoicesWithBalance()
+                : (DataManager.getData('invoices') || []);
             const nameLc = name.toLowerCase();
             pendingDocs = allInvoices.filter(inv => {
                 if (this._isCreditNoteInvoice(inv)) return false;
+                if (inv.isPaid || (inv.balance != null && inv.balance <= 0.05)) return false;
                 const invName = (inv.customerName || '').toString().trim().toLowerCase();
                 const nameMatch = (customer && inv.customerId && inv.customerId === customer.id) ||
                     (invName && invName === nameLc);
                 const st = (inv.status || 'pending').toLowerCase();
-                // Show any non-cancelled invoice — remaining balance decides visibility (partial payments stay listed)
                 const statusMatch = st !== 'cancelled';
 
                 let modeMatch = true;
@@ -3201,9 +3256,6 @@ const VouchersUI = {
             tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">No pending ${isPayment ? 'bills' : 'invoices'} — the full amount will be posted as Advance Payment / On Account.</td></tr>`;
         } else {
             const mapFilter = isPayment ? 'payment' : 'receipt';
-            const explicitIndex = (typeof VoucherManager !== 'undefined' && VoucherManager.buildExplicitPaidIndex)
-                ? VoucherManager.buildExplicitPaidIndex(sessionBankTx, mapFilter, allocOpts.excludeTxIndex)
-                : new Map();
             const frag = document.createDocumentFragment();
             pendingDocs.forEach(doc => {
                 const tr = document.createElement('tr');
@@ -3214,30 +3266,11 @@ const VouchersUI = {
                 const sessionPaid = (typeof VoucherManager.sumSessionAllocationsForDoc === 'function')
                     ? VoucherManager.sumSessionAllocationsForDoc(doc, sessionBankTx, mapFilter, allocOpts.excludeTxIndex)
                     : 0;
-                const explicitPaid = (typeof VoucherManager.lookupExplicitPaidAmount === 'function')
-                    ? VoucherManager.lookupExplicitPaidAmount(doc, explicitIndex)
-                    : 0;
-                const totalPaid = Math.max(explicitPaid, sessionPaid);
-                let pendingNum = Math.max(0, totalAmountNum - totalPaid);
+                const liveBalance = parseFloat(doc.balance);
+                let pendingNum = !Number.isNaN(liveBalance)
+                    ? Math.max(0, liveBalance - sessionPaid)
+                    : Math.max(0, totalAmountNum - sessionPaid);
 
-                const storedDue = doc.balanceDue != null ? parseFloat(doc.balanceDue) : NaN;
-                const storedPaid = doc.paidSoFar != null ? parseFloat(doc.paidSoFar) : NaN;
-                const hintedDue = !Number.isNaN(storedDue) && storedDue > 0.05
-                    ? storedDue
-                    : (!Number.isNaN(storedPaid) && storedPaid > 0.05 && storedPaid < totalAmountNum - 0.05
-                        ? totalAmountNum - storedPaid
-                        : NaN);
-                // Session partial hints lower balance; also rescue when alloc index missed but memory has partial paid
-                if (!Number.isNaN(hintedDue)) {
-                    if (hintedDue < pendingNum - 0.05 || pendingNum <= 0.01) {
-                        pendingNum = hintedDue;
-                    }
-                }
-                const docStatus = (doc.status || '').toLowerCase();
-                if (pendingNum <= 0.01 && docStatus === 'partial' && !Number.isNaN(storedDue) && storedDue > 0.05) {
-                    pendingNum = storedDue;
-                }
-                
                 // RESTORE: Check if this doc was already assigned in this session
                 let isAssigned = false;
                 let assignedAmt = 0;
@@ -3247,36 +3280,16 @@ const VouchersUI = {
                         if (a) { isAssigned = true; assignedAmt = a.amount; }
                     } else if (mv.linkedInvoices && mv.linkedInvoices.includes(doc.id)) {
                         isAssigned = true;
-                        // For legacy links with no detailed allocation, we might not know the exact amount easily
-                        // but let's assume it was the whole transaction if it's the only one, or 0.
                         assignedAmt = mv.linkedInvoices.length === 1 ? mv.amount : 0;
                     }
                 }
 
-                if (pendingNum <= 0.01 && !isAssigned) {
-                    if (sessionPaid > 0.05 && sessionPaid < totalAmountNum - 0.05) {
-                        pendingNum = totalAmountNum - sessionPaid;
-                    } else {
-                        const memPaid = parseFloat(doc.paidSoFar);
-                        if (!Number.isNaN(memPaid) && memPaid > 0.05 && memPaid < totalAmountNum - 0.05) {
-                            pendingNum = totalAmountNum - memPaid;
-                        } else if (!Number.isNaN(hintedDue) && hintedDue > 0.05) {
-                            pendingNum = hintedDue;
-                        } else {
-                            return;
-                        }
-                    }
-                }
-
-                if (pendingNum > 0.05 && docStatus === 'paid') {
-                    doc.status = pendingNum >= (totalAmountNum - 0.05) ? 'pending' : 'partial';
-                    doc.balanceDue = pendingNum;
-                }
+                if (pendingNum <= 0.01 && !isAssigned) return;
 
                 // On the row being edited, show balance after this voucher's assignment too
                 let displayPending = pendingNum;
                 if (isAssigned && assignedAmt > 0) {
-                    displayPending = Math.max(0, totalAmountNum - totalPaid - assignedAmt);
+                    displayPending = Math.max(0, pendingNum - assignedAmt);
                 }
                 const pending = displayPending.toFixed(2);
 
@@ -3322,6 +3335,108 @@ const VouchersUI = {
         }
     },
 
+    /** Live document balance for a pending-invoice row (excludes this row's form allocation). */
+    _getDocLivePending(docId, docNo, isPayment) {
+        if (isPayment) {
+            const expenses = DataManager.getData(DataManager.KEYS.EXPENSES) || DataManager.getData('gtes_expenses') || [];
+            const purchases = DataManager.getData('purchases') || [];
+            const doc = [...expenses, ...purchases].find((d) =>
+                d.id === docId || String(d.billNo || d.vch_no || d.invoiceNo || '') === String(docNo || ''));
+            if (!doc) return 0;
+            const docTotal = Math.abs(parseFloat(doc.total ?? doc.amount ?? doc.vch_amt ?? 0) || 0);
+            const paymentMap = (typeof VoucherManager !== 'undefined')
+                ? VoucherManager.getVoucherAllocationsMap(null, 'payment')
+                : new Map();
+            let balance = (typeof VoucherManager !== 'undefined')
+                ? VoucherManager.getDocumentBalance(
+                    doc.id,
+                    docTotal,
+                    paymentMap,
+                    doc.billNo || doc.vch_no || doc.invoiceNo,
+                    doc,
+                    { allowLooseFallback: false }
+                )
+                : docTotal;
+            const importedStatus = String(doc.status || '').toLowerCase();
+            const srcBk = String(doc.source || '').toLowerCase() === 'bookkeeper'
+                || !!(doc.bookkeeperId && String(doc.bookkeeperId).trim());
+            if (balance >= (docTotal - 0.05) && srcBk) {
+                if (importedStatus === 'paid') balance = 0;
+                else if (importedStatus === 'partial') balance = Math.max(0.01, docTotal * 0.5);
+            }
+            return Math.max(0, balance);
+        }
+        const inv = (typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoicesWithBalance)
+            ? InvoiceManager.getInvoicesWithBalance().find((i) =>
+                i.id === docId || String(i.invoiceNo || i.id || '') === String(docNo || ''))
+            : (DataManager.getData('invoices') || []).find((i) => i.id === docId);
+        if (!inv) return 0;
+        const liveBalance = parseFloat(inv.balance);
+        if (!Number.isNaN(liveBalance)) return Math.max(0, liveBalance);
+        return Math.max(0, parseFloat(inv.total || 0) || 0);
+    },
+
+    /** Mapped voucher for the row being edited (bank import or saved voucher edit). */
+    _getEditingMappedVoucher() {
+        const indexField = document.getElementById('bankTxIndex');
+        const currentIndex = (indexField && indexField.value !== '') ? parseInt(indexField.value, 10) : -1;
+        if (currentIndex >= 0 && VouchersUI.currentBankTransactions) {
+            const tx = VouchersUI.currentBankTransactions[currentIndex];
+            if (tx && tx.mappedVoucher) return tx.mappedVoucher;
+        }
+        return this._editingVoucher || null;
+    },
+
+    /** Restore PENDING column after unchecking a bill (accounts for other rows, not this one). */
+    _refreshRowPendingDisplay(row) {
+        if (!row) return 0;
+        const cb = row.querySelector('.invoice-check');
+        if (!cb) return 0;
+
+        const voucherType = document.getElementById('voucherType')?.value || 'receipt';
+        const isPayment = voucherType === 'payment';
+        const docId = cb.value;
+        const docNo = cb.dataset.no || '';
+
+        const indexField = document.getElementById('bankTxIndex');
+        const currentIndex = (indexField && indexField.value !== '') ? parseInt(indexField.value, 10) : -1;
+        const sessionBankTx = VouchersUI.currentBankTransactions || [];
+        const allocOpts = { excludeTxIndex: Number.isInteger(currentIndex) && currentIndex >= 0 ? currentIndex : -1 };
+        const mapFilter = isPayment ? 'payment' : 'receipt';
+
+        const docStub = { id: docId, billNo: docNo, vch_no: docNo, invoiceNo: docNo };
+        const sessionPaid = (typeof VoucherManager.sumSessionAllocationsForDoc === 'function')
+            ? VoucherManager.sumSessionAllocationsForDoc(docStub, sessionBankTx, mapFilter, allocOpts.excludeTxIndex)
+            : 0;
+
+        let pendingNum = Math.max(0, this._getDocLivePending(docId, docNo, isPayment) - sessionPaid);
+
+        // Restore this row's allocation only when editing a SAVED voucher whose amount is
+        // already deducted from live balance. Bank-import session rows are NOT in live balance —
+        // adding mapped amount here would double-count (e.g. 8968 → 17936).
+        const mv = this._getEditingMappedVoucher();
+        const isSavedVoucherEdit = !!(this._editingVoucher && this._editingVoucher.id);
+        if (mv && isSavedVoucherEdit) {
+            if (mv.allocations) {
+                const prev = mv.allocations.find((a) => a.id === docId || a.no === docNo);
+                if (prev && prev.amount > 0) pendingNum = Math.max(0, pendingNum + prev.amount);
+            } else if (mv.linkedInvoices && mv.linkedInvoices.includes(docId)) {
+                const share = mv.linkedInvoices.length === 1 ? (parseFloat(mv.amount) || 0) : 0;
+                if (share > 0) pendingNum = Math.max(0, pendingNum + share);
+            }
+        }
+
+        const pendingCell = row.querySelector('td.text-warning') || row.cells[3];
+        const pendingStr = pendingNum.toFixed(2);
+        if (pendingCell) pendingCell.textContent = pendingStr;
+        cb.dataset.amount = pendingStr;
+
+        const input = row.querySelector('.pay-input');
+        if (input) input.max = pendingStr;
+
+        return pendingNum;
+    },
+
     calculateTotal(checkbox) {
         // Get the base transaction amount (the bank import / manually entered amount)
         const visibleAmountInput = document.querySelector('#createVoucherForm [name="amount"]');
@@ -3352,8 +3467,15 @@ const VouchersUI = {
 
                 // Fill min(bill pending, remaining) — partial payment if needed
                 input.value = Math.min(billAmount, remaining).toFixed(2);
+
+                const assigned = parseFloat(input.value) || 0;
+                const pendingCell = row.querySelector('td.text-warning') || row.cells[3];
+                if (pendingCell) {
+                    pendingCell.textContent = Math.max(0, billAmount - assigned).toFixed(2);
+                }
             } else {
                 input.value = 0;
+                this._refreshRowPendingDisplay(row);
             }
         }
 

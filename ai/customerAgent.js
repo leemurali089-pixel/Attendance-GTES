@@ -7,6 +7,10 @@ const CustomerAgent = {
         const suggestions = type === 'employee'
             ? ErpFunctions.suggestSimilarEmployees(name)
             : ErpFunctions.suggestSimilarCustomers(name);
+        if (typeof NotificationAgent !== 'undefined' && NotificationAgent.formatClarify) {
+            const key = type === 'employee' ? 'employee_not_found' : 'customer_not_found';
+            return NotificationAgent.formatClarify(key, { query: name, suggestions });
+        }
         let msg = `No ${type} found matching "${name}".`;
         if (suggestions.length) msg += ` Did you mean: ${suggestions.join(', ')}?`;
         return msg;
@@ -26,11 +30,24 @@ const CustomerAgent = {
     async getOutstanding(slots) {
         const name = this._resolveCustomer(slots);
         if (!name) {
-            return { success: false, needClarify: true, message: `Which customer? Say the name, e.g. "outstanding of Vega" or just "Vega". ${this._ambiguousOptions()}` };
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                message: NotificationAgent.formatClarify('customer_need_name')
+            };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
-            return { success: false, needClarify: true, message: this._notFoundMessage('customer', name) };
+            const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                query: name,
+                candidates: suggestions.map((n) => ({ name: n })),
+                message: this._notFoundMessage('customer', name)
+            };
         }
         const data = await ErpFunctions.getCustomerOutstanding(customer.name);
         return { success: true, message: NotificationAgent.format('customer_outstanding', data), data };
@@ -42,11 +59,24 @@ const CustomerAgent = {
             name = TamilCommandRegistry.stripTemporalAndNoise(slots.customerName);
         }
         if (!name) {
-            return { success: false, needClarify: true, message: `Which customer last invoice should I show? Say "last invoice billed to [name]" or just the customer name. ${this._ambiguousOptions()}` };
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                message: NotificationAgent.formatClarify('customer_need_last_invoice')
+            };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
-            return { success: false, needClarify: true, message: this._notFoundMessage('customer', name) };
+            const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                query: name,
+                candidates: suggestions.map((n) => ({ name: n })),
+                message: this._notFoundMessage('customer', name)
+            };
         }
         const data = await ErpFunctions.getCustomerLastInvoice(customer.name);
         return { success: true, message: NotificationAgent.format('customer_last_invoice', data), data };
@@ -55,11 +85,24 @@ const CustomerAgent = {
     async getInvoiceList(slots) {
         const name = this._resolveCustomer(slots);
         if (!name) {
-            return { success: false, needClarify: true, message: `Which customer invoices should I list? Say the customer name or check outstanding first. ${this._ambiguousOptions()}` };
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                message: NotificationAgent.formatClarify('customer_need_invoice_list')
+            };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
-            return { success: false, needClarify: true, message: this._notFoundMessage('customer', name) };
+            const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            return {
+                success: false,
+                needClarify: true,
+                state: 'need_name',
+                query: name,
+                candidates: suggestions.map((n) => ({ name: n })),
+                message: this._notFoundMessage('customer', name)
+            };
         }
         const data = await ErpFunctions.getCustomerInvoiceList(customer.name);
         return { success: true, message: NotificationAgent.format('customer_invoice_list', data), data };

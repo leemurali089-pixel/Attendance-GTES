@@ -802,42 +802,61 @@ const DeliveryUI = {
         });
     },
 
+    _resolveCustomerFromForm(customerId, customerNameText) {
+        const id = String(customerId || '').trim();
+        if (id && typeof CustomerManager !== 'undefined') {
+            const byId = CustomerManager.getCustomer(id);
+            if (byId) return { customer: byId, customerId: byId.id };
+        }
+
+        const name = String(customerNameText || '').trim();
+        if (!name || typeof CustomerManager === 'undefined') return null;
+
+        const norm = (s) => String(s || '').trim().toLowerCase();
+        const q = norm(name);
+        const pool = CustomerManager.getAllCustomers().filter((c) => {
+            const cat = this.getAccountCategory(c);
+            return cat === 'Customer' || cat === 'Supplier';
+        });
+
+        let found = pool.find((c) =>
+            norm(c.name) === q ||
+            norm(c.displayName) === q ||
+            (c.phone && norm(c.phone) === q)
+        );
+        if (!found && typeof CustomerManager.getCustomerByName === 'function') {
+            found = CustomerManager.getCustomerByName(name);
+        }
+        if (found) return { customer: found, customerId: found.id };
+        return null;
+    },
+
     handleCustomerSearch(inputId, targetId) {
         const input = document.getElementById(inputId);
         const targetSelect = document.getElementById(targetId);
         if (!input || !targetSelect) return;
 
         const updateTarget = (value) => {
-            const query = value.trim().toLowerCase();
-            console.log(`Searching for customer: "${query}"`);
-
-            if (!query) {
+            const resolved = this._resolveCustomerFromForm(targetSelect.value, value);
+            if (!String(value || '').trim()) {
                 targetSelect.value = '';
                 return;
             }
-
-            const customers = CustomerManager.getAllCustomers().filter(c => {
-                const cat = this.getAccountCategory(c);
-                return cat === 'Customer' || cat === 'Supplier';
-            });
-            
-            const found = customers.find(c => 
-                (c.name && c.name.trim().toLowerCase() === query) || 
-                (c.phone && String(c.phone).trim().toLowerCase() === query)
-            );
-
-            if (found) {
-                targetSelect.value = found.id;
+            if (resolved) {
+                targetSelect.value = resolved.customerId;
                 targetSelect.dispatchEvent(new Event('change'));
-                console.log(`Customer search matched: ${found.name} (${found.id})`);
+                console.log(`Customer search matched: ${resolved.customer.name} (${resolved.customerId})`);
             } else {
-                targetSelect.value = ''; // Clear if no match
-                if (query.length > 2) console.warn(`Customer search found no match for: "${query}" total checked: ${customers.length}`);
+                targetSelect.value = '';
+                if (String(value).trim().length > 2) {
+                    console.warn(`Customer search found no match for: "${value}"`);
+                }
             }
         };
 
         input.addEventListener('input', () => updateTarget(input.value));
         input.addEventListener('change', () => updateTarget(input.value));
+        input.addEventListener('blur', () => updateTarget(input.value));
     },
 
     async quickAddToInventory(rowId) {
@@ -943,13 +962,18 @@ const DeliveryUI = {
                 throw new Error('Please add at least one item');
             }
 
-            const customerId = document.getElementById('customerId').value;
-            if (!customerId) {
+            const resolvedCustomer = this._resolveCustomerFromForm(
+                document.getElementById('customerId')?.value,
+                document.getElementById('customerSearch')?.value
+            );
+            if (!resolvedCustomer) {
                 throw new Error('Please select a valid customer from the list');
             }
+            const customerId = resolvedCustomer.customerId;
+            document.getElementById('customerId').value = customerId;
 
             const shipSame = document.getElementById('challanShipSame')?.checked !== false;
-            const custRow = typeof CustomerManager !== 'undefined' ? CustomerManager.getCustomer(customerId) : null;
+            const custRow = resolvedCustomer.customer;
             const custSnap = typeof DocumentBuildCommon !== 'undefined'
                 ? DocumentBuildCommon.resolveCustomerSnapshot({
                     customerId,
@@ -996,6 +1020,17 @@ const DeliveryUI = {
                 terms: document.getElementById('terms').value,
                 status: 'finalized'
             };
+
+            if (challanData.type === 'service') {
+                challanData.poNumber = '';
+                challanData.destination = '';
+                challanData.dispatchDocumentNo = '';
+                challanData.ewayBillNo = '';
+                challanData.dispatchVia = '';
+                challanData.lrNo = '';
+                challanData.vehicleNo = '';
+                challanData.dispatchDate = '';
+            }
 
             if (this.currentEditingChallan) {
                 // Update existing challan
@@ -1414,7 +1449,7 @@ const DeliveryUI = {
                             <i class="bi bi-people-fill me-2"></i>${headerListTitle}${headerListCount}
                         </h4>
                         <div class="btn-group">
-                            <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                            <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                                 <i class="bi bi-grid-fill me-1"></i> Apps
                             </button>
                             <button class="btn btn-primary btn-sm ms-2" onclick="DeliveryUI.showCustomerModal()">
@@ -3658,7 +3693,7 @@ const DeliveryUI = {
         <div class="d-flex justify-content-between align-items-center mb-3">
                 <h4 class="mb-0"><i class="bi bi-tools text-warning me-2"></i>Job Cards</h4>
                 <div class="btn-group">
-                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                    <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                         <i class="bi bi-grid-fill me-1"></i> Apps
                     </button>
                     <button class="btn btn-primary btn-sm ms-2" onclick="DeliveryUI.showJobCardForm()">
@@ -3692,18 +3727,42 @@ const DeliveryUI = {
                         ${jobCards.length === 0 ? '<tr><td colspan="7" class="text-center text-light py-4">No job cards found</td></tr>' :
                 jobCards.map(jc => {
                                 try {
+                                    const linkedInvNo = this.getJobCardLinkedInvoiceNo(jc);
+                                    const invoiceLinkBtn = linkedInvNo
+                                        ? `<button class="btn btn-sm btn-outline-warning ms-1" onclick="DeliveryUI.unlinkJobCardFromInvoice('${jc.id}')" title="Unlink invoice ${linkedInvNo}">
+                                            <i class="bi bi-link-break"></i>
+                                           </button>`
+                                        : `<button class="btn btn-sm btn-outline-info ms-1" onclick="DeliveryUI.linkJobCardToInvoice('${jc.id}')" title="Link to Invoice">
+                                            <i class="bi bi-link-45deg"></i>
+                                           </button>`;
                                     return `
                                 <tr>
-                                    <td>${jc.id}</td>
+                                    <td>${jc.id}${linkedInvNo ? `<div class="small text-success mt-1"><i class="bi bi-receipt me-1"></i>${linkedInvNo}</div>` : ''}</td>
                                     <td>${DataManager.formatDateDisplay(jc.date)}</td>
                                     <td>${jc.customerName}</td>
-                                    <td>${jc.equipment}</td>
+                                    <td>${JobCardManager.deriveEquipmentSummary(JobCardManager.normalizeEquipmentItems(jc)) || jc.equipment || '-'}</td>
                                     <td><span class="badge bg-${this.getStatusColor(jc.status)}">${jc.status.toUpperCase()}</span></td>
                                     <td>${jc.lastUpdateDate}</td>
                                     <td>
-                                        <button class="btn btn-sm btn-info" onclick="DeliveryUI.viewJobCard('${jc.id}')" title="View Details">
+                                        <button class="btn btn-sm btn-info" onclick="DeliveryUI.viewJobCard('${jc.id}')" title="View / Edit">
                                             <i class="bi bi-eye"></i>
                                         </button>
+                                        <button class="btn btn-sm btn-outline-primary ms-1" onclick="DeliveryUI.previewJobCard('${jc.id}')" title="Generate PDF">
+                                            <i class="bi bi-file-earmark-pdf"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-warning ms-1" onclick="DeliveryUI.editJobCard('${jc.id}')" title="Edit">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <div class="btn-group ms-1">
+                                            <button type="button" class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown" title="Create Invoice">
+                                                <i class="bi bi-receipt"></i>
+                                            </button>
+                                            <ul class="dropdown-menu dropdown-menu-dark shadow-lg">
+                                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); DeliveryUI.convertJobCardToInvoice('${jc.id}', 'with-bill')">GST Invoice</a></li>
+                                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); DeliveryUI.convertJobCardToInvoice('${jc.id}', 'without-bill')">Non-GST Invoice</a></li>
+                                            </ul>
+                                        </div>
+                                        ${invoiceLinkBtn}
                                         <button class="btn btn-sm btn-danger ms-1" onclick="DeliveryUI.deleteJobCard('${jc.id}')" title="Delete">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -3731,10 +3790,46 @@ const DeliveryUI = {
         return colors[status] || 'secondary';
     },
 
-    async showJobCardForm() {
+    getJobCardLinkedInvoiceNo(jobCard) {
+        if (typeof DocumentBuildCommon !== 'undefined' && DocumentBuildCommon.resolveJobCardInvoiceRef) {
+            return DocumentBuildCommon.resolveJobCardInvoiceRef(jobCard);
+        }
+        if (!jobCard) return '';
+        if (jobCard.linkedInvoiceNo) return jobCard.linkedInvoiceNo;
+        const invId = jobCard.linkedInvoiceId || jobCard.invoiceId;
+        if (invId && typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoice) {
+            const inv = InvoiceManager.getInvoice(invId);
+            if (inv) return inv.invoiceNo || inv.id;
+        }
+        if (typeof InvoiceManager !== 'undefined' && InvoiceManager.getAllInvoices) {
+            const inv = (InvoiceManager.getAllInvoices() || []).find((i) => i.jobCardId === jobCard.id);
+            if (inv) return inv.invoiceNo || inv.id;
+        }
+        return '';
+    },
+
+    getJobCardLinkedInvoiceId(jobCard) {
+        if (!jobCard) return '';
+        const stored = jobCard.linkedInvoiceId || jobCard.invoiceId;
+        if (stored) return stored;
+        if (typeof InvoiceManager !== 'undefined' && InvoiceManager.getAllInvoices) {
+            const inv = (InvoiceManager.getAllInvoices() || []).find((i) => i.jobCardId === jobCard.id);
+            if (inv) return inv.id;
+        }
+        return '';
+    },
+
+    async showJobCardForm(clearEdit = true) {
+        if (clearEdit) this.editingJobCardId = null;
         this.updateInventoryDatalist();
         const container = document.getElementById(this.currentJobCardContainerId || 'jobCardContainer');
         if (!container) return;
+
+        const isEdit = !!this.editingJobCardId;
+        const editingJobCard = isEdit ? JobCardManager.getJobCard(this.editingJobCardId) : null;
+        const suggestedJobCardNo = isEdit
+            ? (editingJobCard?.id || this.editingJobCardId)
+            : JobCardManager.getNextJobCardNumber();
 
         let technicians = [];
         try {
@@ -3754,7 +3849,7 @@ const DeliveryUI = {
         container.innerHTML = `
             <div class="card glass-panel border-secondary">
                 <div class="card-header border-secondary d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-tools me-2"></i>New Job Card</h5>
+                    <h5 class="mb-0"><i class="bi bi-tools me-2"></i>${isEdit ? `Edit Job Card — ${this.editingJobCardId}` : 'New Job Card'}</h5>
                     <button class="btn btn-sm btn-outline-secondary" onclick="DeliveryUI.loadJobCards()">
                         <i class="bi bi-arrow-left me-1"></i> Back to List
                     </button>
@@ -3768,7 +3863,9 @@ const DeliveryUI = {
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Job Card No.</label>
-                                <input type="text" class="form-control" value="Auto-generated" readonly disabled>
+                                <input type="text" class="form-control" id="jcJobCardNo" name="jobCardId"
+                                    value="${suggestedJobCardNo}" ${isEdit ? 'readonly' : ''} required
+                                    placeholder="e.g. JC-0003">
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Customer DC / Ref No</label>
@@ -3800,17 +3897,35 @@ const DeliveryUI = {
                             </div>
                         </div>
 
-                        <div class="row mb-3">
-                            <div class="col-12">
-                                <label class="form-label">Equipment / Device Details *</label>
-                                <input type="text" class="form-control" id="jcEquipment" placeholder="e.g. Dell Laptop, AC Unit, etc." required>
-                            </div>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0">Equipment / Devices Received *</label>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="DeliveryUI.addJobCardEquipmentRow()">
+                                <i class="bi bi-plus"></i> Add Row
+                            </button>
+                        </div>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-dark table-sm" id="jcEquipmentTable">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 25%">Item Name</th>
+                                        <th style="width: 30%">Description</th>
+                                        <th style="width: 10%">Quantity</th>
+                                        <th style="width: 30%">Complaints</th>
+                                        <th style="width: 5%"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="jcEquipmentBody">
+                                    <tr id="emptyEquipmentRow">
+                                        <td colspan="5" class="text-center text-muted small py-3">No equipment added — click Add Row</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
 
                         <div class="row mb-3">
                             <div class="col-md-6">
-                                <label class="form-label">Complaint Reported *</label>
-                                <textarea class="form-control" id="jcComplaint" rows="3" required></textarea>
+                                <label class="form-label">General Complaint / Notes</label>
+                                <textarea class="form-control" id="jcComplaint" rows="3" placeholder="Overall complaint or additional notes (optional)"></textarea>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Work Done / API Report</label>
@@ -3910,6 +4025,68 @@ const DeliveryUI = {
             e.preventDefault();
             this.saveJobCard();
         });
+
+        this.addJobCardEquipmentRow();
+    },
+
+    addJobCardEquipmentRow(data = null, targetBodyId = 'jcEquipmentBody') {
+        const tbody = document.getElementById(targetBodyId);
+        if (!tbody) return;
+        const emptyRow = document.getElementById('emptyEquipmentRow');
+        if (emptyRow) emptyRow.remove();
+
+        const row = document.createElement('tr');
+        const esc = (v) => String(v ?? '').replace(/"/g, '&quot;');
+        row.innerHTML = `
+            <td>
+                <input type="text" class="form-control form-control-sm" name="equipmentItemName"
+                    placeholder="Item name" required value="${data ? esc(data.itemName || data.name) : ''}">
+            </td>
+            <td>
+                <input type="text" class="form-control form-control-sm" name="equipmentDescription"
+                    placeholder="Model / serial / specs" value="${data ? esc(data.description) : ''}">
+            </td>
+            <td>
+                <input type="number" class="form-control form-control-sm" name="equipmentQty"
+                    value="${data ? (parseInt(data.quantity, 10) || 1) : 1}" min="1" required>
+            </td>
+            <td>
+                <input type="text" class="form-control form-control-sm" name="equipmentComplaint"
+                    placeholder="Complaint for this item" value="${data ? esc(data.complaint) : ''}">
+            </td>
+            <td class="text-center">
+                <button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('tr').remove(); DeliveryUI._ensureJobCardEquipmentEmptyRow('${targetBodyId}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    },
+
+    _ensureJobCardEquipmentEmptyRow(targetBodyId = 'jcEquipmentBody') {
+        const tbody = document.getElementById(targetBodyId);
+        if (!tbody || tbody.querySelector('tr:not(#emptyEquipmentRow)')) return;
+        tbody.innerHTML = `
+            <tr id="emptyEquipmentRow">
+                <td colspan="5" class="text-center text-muted small py-3">No equipment added — click Add Row</td>
+            </tr>
+        `;
+    },
+
+    collectJobCardEquipmentItems(targetBodyId = 'jcEquipmentBody') {
+        const items = [];
+        document.querySelectorAll(`#${targetBodyId} tr`).forEach((row) => {
+            if (row.id === 'emptyEquipmentRow') return;
+            const itemName = row.querySelector('[name="equipmentItemName"]')?.value?.trim();
+            if (!itemName) return;
+            items.push({
+                itemName,
+                description: row.querySelector('[name="equipmentDescription"]')?.value?.trim() || '',
+                quantity: parseInt(row.querySelector('[name="equipmentQty"]')?.value, 10) || 1,
+                complaint: row.querySelector('[name="equipmentComplaint"]')?.value?.trim() || ''
+            });
+        });
+        return items;
     },
 
     addJobCardMaterialRow(data = null, targetBodyId = 'jcMaterialsBody') {
@@ -3947,35 +4124,20 @@ const DeliveryUI = {
 
     async saveJobCard() {
         try {
-            let customerId = document.getElementById('jcCustomer').value;
             const customerNameInput = document.getElementById('jcCustomerSearch');
             const customerName = customerNameInput ? customerNameInput.value.trim() : '';
+            const resolvedCustomer = this._resolveCustomerFromForm(
+                document.getElementById('jcCustomer')?.value,
+                customerName
+            );
 
-            console.log('Attempting to save Job Card.', { customerId, customerName });
-            
-            let customer = CustomerManager.getCustomer(customerId);
-            
-            // Fallback Search: If hidden ID is missing but name matches an existing customer exactly
-            if (!customer && customerName) {
-                console.log('Hidden ID missing. Attempting fallback search by name:', customerName);
-                const allCustomers = CustomerManager.getAllCustomers();
-                customer = allCustomers.find(c => 
-                    (c.name && c.name.trim().toLowerCase() === customerName.toLowerCase()) ||
-                    (c.phone && String(c.phone).trim() === customerName)
-                );
-                
-                if (customer) {
-                    customerId = customer.id || '';
-                    console.log('Fallback match found:', customer.name, customer.id);
-                }
-            }
-
-            if (!customer) {
-                const allCustomers = CustomerManager.getAllCustomers();
-                console.error('Validation failed: No valid customer found for input:', customerName);
-                console.log('Available customers in system:', allCustomers.map(c => c.name));
+            if (!resolvedCustomer) {
                 throw new Error('Please select a valid customer');
             }
+
+            const customer = resolvedCustomer.customer;
+            const customerId = resolvedCustomer.customerId;
+            document.getElementById('jcCustomer').value = customerId;
 
             // Gather materials
             const materials = [];
@@ -3997,20 +4159,41 @@ const DeliveryUI = {
                 }
             });
 
+            const equipmentItems = this.collectJobCardEquipmentItems();
+            if (!equipmentItems.length) {
+                throw new Error('Add at least one equipment item');
+            }
+
             const jobCardData = {
                 date: document.getElementById('jcDate').value,
                 customerRef: document.getElementById('jcCustomerRef').value,
                 customerId: customerId,
                 customerName: customer.name,
                 technicianId: document.getElementById('jcTechnician').value,
-                equipment: document.getElementById('jcEquipment').value,
+                equipmentItems,
+                equipment: JobCardManager.deriveEquipmentSummary(equipmentItems),
                 complaint: document.getElementById('jcComplaint').value,
                 workDone: document.getElementById('jcWorkDone').value,
                 materials: materials
             };
 
-            await JobCardManager.createJobCard(jobCardData);
-            App.showNotification('Job Card created successfully!', 'success');
+            if (this.editingJobCardId) {
+                await JobCardManager.updateJobCard(this.editingJobCardId, jobCardData);
+                App.showNotification('Job Card updated successfully!', 'success');
+                this.editingJobCardId = null;
+            } else {
+                const jcNoEl = document.getElementById('jcJobCardNo');
+                const jcNo = jcNoEl ? jcNoEl.value.trim() : '';
+                if (!jcNo) throw new Error('Job Card number is required');
+                jobCardData.id = jcNo;
+                if (JobCardManager.isJobCardIdTaken(jcNo)) {
+                    throw new Error(`Job Card number "${JobCardManager.normalizeJobCardId(jcNo)}" already exists. Please choose a different number.`);
+                }
+                const created = await JobCardManager.createJobCard(jobCardData);
+                const sc = await this.createAutoServiceChallanFromJobCard(created, customer);
+                const scMsg = sc ? ` Service Challan ${sc.id} created.` : '';
+                App.showNotification(`Job Card ${created.id} created successfully!${scMsg}`, 'success');
+            }
             this.loadJobCards();
 
         } catch (error) {
@@ -4027,12 +4210,39 @@ const DeliveryUI = {
         }
 
         const customer = CustomerManager.getCustomer(jobCard.customerId);
+        const linkedInvNo = this.getJobCardLinkedInvoiceNo(jobCard);
+        const linkedInvId = this.getJobCardLinkedInvoiceId(jobCard);
+        const linkedInvHtml = linkedInvNo
+            ? (linkedInvId && typeof InvoicesUI !== 'undefined'
+                ? `<a href="#" class="text-success fw-semibold" onclick="event.preventDefault(); InvoicesUI.previewInvoice('${linkedInvId}')">${linkedInvNo}</a>`
+                : `<span class="text-success fw-semibold">${linkedInvNo}</span>`)
+            : '<span class="text-muted">Not linked</span>';
         const statusColors = {
             'pending': 'warning',
             'in-progress': 'info',
             'job-done': 'success',
             'dispatched': 'secondary'
         };
+        const invoiceLinkBtn = linkedInvNo
+            ? `<button type="button" class="btn btn-outline-warning" onclick="DeliveryUI.unlinkJobCardFromInvoice('${jobCard.id}')" title="Unlink invoice ${linkedInvNo}">
+                    <i class="bi bi-link-break me-1"></i> Unlink Invoice
+               </button>`
+            : `<button type="button" class="btn btn-outline-info" onclick="DeliveryUI.linkJobCardToInvoice('${jobCard.id}')" title="Link to existing invoice">
+                    <i class="bi bi-link-45deg me-1"></i> Link Invoice
+               </button>`;
+
+        const escView = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const equipmentItems = JobCardManager.normalizeEquipmentItems(jobCard);
+        const equipmentTableRows = equipmentItems.length
+            ? equipmentItems.map((row, idx) => `
+                <tr>
+                    <td class="text-center">${idx + 1}</td>
+                    <td>${escView(row.itemName)}</td>
+                    <td>${escView(row.description) || '<span class="text-muted">—</span>'}</td>
+                    <td class="text-center">${row.quantity || 1}</td>
+                    <td>${escView(row.complaint) || '<span class="text-muted">—</span>'}</td>
+                </tr>`).join('')
+            : '<tr><td colspan="5" class="text-center text-muted py-2">No equipment recorded</td></tr>';
 
         const modalHtml = `
             <div class="modal fade" id="jobCardViewModal" tabindex="-1">
@@ -4041,29 +4251,29 @@ const DeliveryUI = {
                         <div class="modal-header border-0 pb-0">
                             <div>
                                 <h5 class="modal-title text-white fw-bold"><i class="bi bi-tools me-2"></i>Job Card Preview</h5>
-                                <div class="d-flex align-items-center mt-1">
+                                <div class="d-flex align-items-center mt-1 flex-wrap gap-1">
                                     <span class="badge bg-${statusColors[jobCard.status] || 'secondary'} me-2">${jobCard.status.toUpperCase()}</span>
                                     <span class="small text-muted">${jobCard.id} | ${jobCard.customerName}</span>
+                                    ${linkedInvNo ? `<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-receipt me-1"></i>${linkedInvNo}</span>` : ''}
                                 </div>
                             </div>
                             <div class="d-flex gap-2 align-items-center">
                                 <button type="button" class="btn btn-outline-light btn-sm border-secondary" onclick="DeliveryUI.toggleModalFullscreen('jobCardViewModal')" title="Toggle Fullscreen">
                                     <i class="bi bi-fullscreen"></i>
                                 </button>
-                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.generateJobCardPDF('${jobCard.id}')" title="Download PDF">
-                                    <i class="bi bi-download me-1"></i> Download PDF
+                                <button type="button" class="btn btn-primary" onclick="DeliveryUI.previewJobCard('${jobCard.id}')" title="Generate PDF">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i> Generate PDF
                                 </button>
-                                ${(jobCard.status === 'job-done' || jobCard.status === 'dispatched') ? `
                                 <div class="dropdown">
                                     <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                                        <i class="bi bi-receipt me-1"></i> Generate Invoice
+                                        <i class="bi bi-receipt me-1"></i> Create Invoice
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-dark shadow-lg">
-                                        <li><a class="dropdown-item" href="#" onclick="DeliveryUI.convertJobCardToInvoice('${jobCard.id}', 'with-bill')"><i class="bi bi-file-earmark-check me-2"></i>GST Invoice</a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="DeliveryUI.convertJobCardToInvoice('${jobCard.id}', 'without-bill')"><i class="bi bi-file-earmark me-2"></i>Non-GST Invoice</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); DeliveryUI.convertJobCardToInvoice('${jobCard.id}', 'with-bill')"><i class="bi bi-file-earmark-check me-2"></i>GST Invoice</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); DeliveryUI.convertJobCardToInvoice('${jobCard.id}', 'without-bill')"><i class="bi bi-file-earmark me-2"></i>Non-GST Invoice</a></li>
                                     </ul>
                                 </div>
-                                ` : ''}
+                                ${invoiceLinkBtn}
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                         </div>
@@ -4083,29 +4293,41 @@ const DeliveryUI = {
                                             <h6 class="text-uppercase text-muted extra-small fw-bold mb-2">Job Details</h6>
                                             <p class="mb-1"><strong>Date:</strong> ${jobCard.date}</p>
                                             <p class="mb-1"><strong>Technician:</strong> ${jobCard.technicianId || 'Not assigned'}</p>
+                                            <p class="mb-1"><strong>Linked Invoice:</strong> ${linkedInvHtml}</p>
                                             <p class="mb-0 extra-small text-muted">Last Updated: ${jobCard.lastUpdateDate || '-'}</p>
                                         </div>
                                     </div>
 
                                     <div class="p-3 border border-secondary rounded bg-light mb-4 text-dark">
-                                        <div class="row">
+                                        <div class="row mb-3">
                                             <div class="col-md-6">
-                                                <div class="mb-3">
-                                                    <label class="form-label extra-small text-muted text-uppercase fw-bold">Customer DC / Ref No</label>
-                                                    <input type="text" class="form-control form-control-sm border-secondary" id="jcViewCustomerRef" value="${jobCard.customerRef || ''}">
-                                                </div>
-                                                <div class="mb-3">
-                                                    <label class="form-label extra-small text-muted text-uppercase fw-bold">Equipment/Details</label>
-                                                    <input type="text" class="form-control form-control-sm border-secondary" id="jcViewEquipment" value="${jobCard.equipment || ''}">
-                                                </div>
+                                                <label class="form-label extra-small text-muted text-uppercase fw-bold">Customer DC / Ref No</label>
+                                                <input type="text" class="form-control form-control-sm border-secondary" id="jcViewCustomerRef" value="${jobCard.customerRef || ''}">
                                             </div>
                                             <div class="col-md-6">
-                                                <label class="form-label extra-small text-muted text-uppercase fw-bold">Complaint</label>
-                                                <textarea class="form-control form-control-sm border-secondary mb-3" rows="2" readonly>${jobCard.complaint}</textarea>
-                                                <label class="form-label extra-small text-muted text-uppercase fw-bold">Work Done / Technician Notes</label>
-                                                <textarea class="form-control form-control-sm border-secondary" id="jcViewWorkDone" rows="2">${jobCard.workDone || ''}</textarea>
+                                                <label class="form-label extra-small text-muted text-uppercase fw-bold">General Complaint / Notes</label>
+                                                <textarea class="form-control form-control-sm border-secondary" rows="2" readonly>${escView(jobCard.complaint)}</textarea>
                                             </div>
                                         </div>
+                                        <h6 class="fw-bold mb-2 small text-dark d-flex align-items-center">
+                                            <i class="bi bi-hdd-stack me-2"></i>Equipment / Devices Received
+                                        </h6>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-bordered border-secondary small text-dark mb-3">
+                                                <thead style="background-color: #f8f9fa;">
+                                                    <tr>
+                                                        <th style="width: 5%">#</th>
+                                                        <th style="width: 22%">Item Name</th>
+                                                        <th style="width: 28%">Description</th>
+                                                        <th style="width: 10%">Qty</th>
+                                                        <th>Complaints</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>${equipmentTableRows}</tbody>
+                                            </table>
+                                        </div>
+                                        <label class="form-label extra-small text-muted text-uppercase fw-bold">Work Done / Technician Notes</label>
+                                        <textarea class="form-control form-control-sm border-secondary" id="jcViewWorkDone" rows="2">${escView(jobCard.workDone)}</textarea>
                                     </div>
 
                                     <div class="card border-info mb-4">
@@ -4309,7 +4531,6 @@ const DeliveryUI = {
 
             const updates = {
                 customerRef: document.getElementById('jcViewCustomerRef').value,
-                equipment: document.getElementById('jcViewEquipment').value,
                 workDone: document.getElementById('jcViewWorkDone').value,
                 status: document.getElementById('jcViewStatus').value,
                 dispatchVia: document.getElementById('jcViewDispatchVia').value,
@@ -4342,8 +4563,14 @@ const DeliveryUI = {
                     const form = document.getElementById('createInvoiceForm');
                     if (!form) return;
 
-                    // Tag form with Job Card ID so the saved invoice triggers a Service Challan
+                    // Tag form with Job Card ID so the saved invoice links back to the JC + SC
                     form.setAttribute('data-source-jc', id);
+                    if (typeof DeliveryManager !== 'undefined' && DeliveryManager.getAllChallans) {
+                        const sc = (DeliveryManager.getAllChallans() || []).find(
+                            (c) => c.jobCardId === id && c.type === 'service'
+                        );
+                        if (sc?.id) form.setAttribute('data-source-sc', sc.id);
+                    }
 
                     // Fill Customer
                     const customerInput = form.querySelector('[name="customerName"]');
@@ -4395,7 +4622,18 @@ const DeliveryUI = {
         }
     },
 
+    previewJobCard(id) {
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.isNative('job-card')) {
+            return DocumentEngine.openPreview({ type: 'job-card', id });
+        }
+        return this.generateJobCardPDF(id);
+    },
+
     async generateJobCardPDF(id) {
+        if (typeof DocumentEngine !== 'undefined' && DocumentEngine.isNative('job-card')) {
+            return DocumentEngine.openPreview({ type: 'job-card', id });
+        }
+
         let element = document.getElementById('jobCardPrintArea');
         if (!element) {
             this.viewJobCard(id);
@@ -4420,6 +4658,7 @@ const DeliveryUI = {
                 const w = Math.min(maxW, Math.max(element.scrollWidth || maxW, 400));
                 const { host, clone } = this.beginPdfClone(element, w);
                 try {
+                    this.sanitizePdfImages(clone);
                     await this.waitPdfImages(clone);
                     const fitted = this.fitHtml2PdfOptionsToClone(clone, opt);
                     const blob = await html2pdf().set(fitted).from(clone).output('blob');
@@ -4554,6 +4793,62 @@ const DeliveryUI = {
 
     // REDUNDANT: Legacy methods removed.
     // Creating invoices is now handled by InvoicesUI.showCreateModal().
+
+    async createAutoServiceChallanFromJobCard(jobCard, customer) {
+        try {
+            if (!jobCard?.id || typeof DeliveryManager === 'undefined') return null;
+
+            const existing = DeliveryManager.getAllChallans().find(
+                (c) => c.jobCardId === jobCard.id && c.type === 'service'
+            );
+            if (existing) return existing;
+
+            const equipmentItems = JobCardManager.normalizeEquipmentItems(jobCard);
+            const itemComplaints = equipmentItems.map((row) => row.complaint).filter(Boolean);
+            const challanData = {
+                type: 'service',
+                date: jobCard.date || new Date().toISOString().split('T')[0],
+                customerId: jobCard.customerId,
+                customerName: jobCard.customerName || customer?.name || '',
+                customerAddress: customer?.address || '',
+                customerPhone: customer?.phone || '',
+                referenceNumber: jobCard.customerRef || '',
+                poNumber: '',
+                destination: '',
+                dispatchDocumentNo: '',
+                ewayBillNo: '',
+                dispatchVia: '',
+                lrNo: '',
+                vehicleNo: '',
+                dispatchDate: '',
+                jobCardId: jobCard.id,
+                technicianId: jobCard.technicianId || '',
+                complaint: jobCard.complaint || '',
+                faultReported: itemComplaints.join('; '),
+                workDone: jobCard.workDone || '',
+                equipmentItems,
+                items: equipmentItems.map((row) => ({
+                    name: row.itemName,
+                    description: row.description || '',
+                    complaint: row.complaint || '',
+                    quantity: parseInt(row.quantity, 10) || 1,
+                    unit: 'nos',
+                    rate: 0,
+                    amount: 0
+                })),
+                gstMode: false,
+                status: 'completed'
+            };
+
+            const challan = await DeliveryManager.createChallan(challanData);
+            console.log('Service Challan created for job card:', jobCard.id, challan.id);
+            return challan;
+        } catch (error) {
+            console.error('Error creating auto service challan from job card:', error);
+            App.showNotification('Warning: Job Card saved but Service Challan could not be created', 'warning');
+            return null;
+        }
+    },
 
     async createAutoChallanFromInvoice(invoice) {
         try {
@@ -5034,6 +5329,25 @@ const DeliveryUI = {
         if (host && host.parentNode) {
             host.parentNode.removeChild(host);
         }
+    },
+
+    sanitizePdfImages(root) {
+        if (!root) return;
+        try {
+            root.querySelectorAll('img').forEach((img) => {
+                const src = (img.getAttribute('src') || '').trim().toLowerCase();
+                const okData = src.startsWith('data:image/png') || src.startsWith('data:image/jpeg')
+                    || src.startsWith('data:image/jpg') || src.startsWith('data:image/gif');
+                const okFile = src.endsWith('.png') || src.endsWith('.jpg') || src.endsWith('.jpeg') || src.endsWith('.gif');
+                if (!src || (!okData && !okFile) || src.startsWith('http') || src.startsWith('file:')
+                    || src.includes('blob:') || src.endsWith('.webp') || src.endsWith('.svg')) {
+                    img.remove();
+                }
+            });
+            root.querySelectorAll('*').forEach((el) => {
+                if (el.style) el.style.backgroundImage = 'none';
+            });
+        } catch (_) { /* ignore */ }
     },
 
     async waitPdfImages(root) {
@@ -5976,23 +6290,256 @@ const DeliveryUI = {
             return;
         }
 
-        this.showJobCardForm();
         this.editingJobCardId = jobCardId;
+        this.showJobCardForm(false);
 
         setTimeout(() => {
-            document.getElementById('jcNumber').value = jobCard.id;
-            document.getElementById('jcCustomerSearch').value = jobCard.customerName || '';
-            document.getElementById('jcCustomer').value = jobCard.customerId;
-            document.getElementById('jcCustomerRef').value = jobCard.customerRef || '';
-            document.getElementById('jcEquipment').value = jobCard.equipment || '';
-            document.getElementById('jcModel').value = jobCard.model || '';
-            document.getElementById('jcSerialNo').value = jobCard.serialNo || '';
-            document.getElementById('jcComplaint').value = jobCard.complaint || '';
-            document.getElementById('jcAccessories').value = jobCard.accessories || '';
-            document.getElementById('jcRemarks').value = jobCard.remarks || '';
+            const jcDate = document.getElementById('jcDate');
+            if (jcDate) jcDate.value = jobCard.date || new Date().toISOString().split('T')[0];
 
-            App.showNotification('Editing Job Card: ' + jobCardId, 'info');
+            const jcNo = document.getElementById('jcJobCardNo');
+            if (jcNo) {
+                jcNo.value = jobCard.id;
+                jcNo.readOnly = true;
+            }
+
+            const jcCustomerSearch = document.getElementById('jcCustomerSearch');
+            if (jcCustomerSearch) jcCustomerSearch.value = jobCard.customerName || '';
+
+            const jcCustomer = document.getElementById('jcCustomer');
+            if (jcCustomer) jcCustomer.value = jobCard.customerId || '';
+
+            const jcCustomerRef = document.getElementById('jcCustomerRef');
+            if (jcCustomerRef) jcCustomerRef.value = jobCard.customerRef || '';
+
+            const jcTechnician = document.getElementById('jcTechnician');
+            if (jcTechnician) jcTechnician.value = jobCard.technicianId || '';
+
+            const eqBody = document.getElementById('jcEquipmentBody');
+            if (eqBody) {
+                eqBody.innerHTML = '';
+                const items = JobCardManager.normalizeEquipmentItems(jobCard);
+                items.forEach((row) => this.addJobCardEquipmentRow(row));
+                if (!items.length) this._ensureJobCardEquipmentEmptyRow();
+            }
+
+            const jcComplaint = document.getElementById('jcComplaint');
+            if (jcComplaint) jcComplaint.value = jobCard.complaint || '';
+
+            const jcWorkDone = document.getElementById('jcWorkDone');
+            if (jcWorkDone) jcWorkDone.value = jobCard.workDone || '';
+
+            const tbody = document.getElementById('jcMaterialsBody');
+            if (tbody) {
+                tbody.innerHTML = '';
+                (jobCard.materials || []).forEach((m) => this.addJobCardMaterialRow(m));
+            }
         }, 200);
+    },
+
+    async linkJobCardToInvoice(jobCardId) {
+        const jc = JobCardManager.getJobCard(jobCardId);
+        if (!jc) {
+            App.showNotification('Job Card not found', 'error');
+            return;
+        }
+
+        const nameLc = (jc.customerName || '').trim().toLowerCase();
+        const candidates = (typeof InvoiceManager !== 'undefined' ? InvoiceManager.getAllInvoices() : [])
+            .filter((inv) => {
+                if (inv.jobCardId && inv.jobCardId !== jobCardId) return false;
+                if (inv.jobCardId === jobCardId) return true;
+                const invName = (inv.customerName || '').trim().toLowerCase();
+                const customerMatch = (jc.customerId && inv.customerId === jc.customerId)
+                    || (nameLc && invName === nameLc);
+                return customerMatch && !inv.jobCardId;
+            });
+
+        if (!candidates.length) {
+            App.showNotification('No unlinked invoices found for this customer', 'warning');
+            return;
+        }
+
+        this._showLinkJobCardInvoiceModal(jobCardId, jc, candidates);
+    },
+
+    _showLinkJobCardInvoiceModal(jobCardId, jobCard, candidates) {
+        const oldModal = document.getElementById('linkJobCardInvoiceModal');
+        if (oldModal) {
+            bootstrap.Modal.getInstance(oldModal)?.dispose();
+            oldModal.remove();
+        }
+
+        const list = candidates.slice(0, 50);
+        const rowsHtml = list.map((inv) => {
+            const invNo = inv.invoiceNo || inv.id || '';
+            const invDate = inv.date || '';
+            const invParty = inv.customerName || '';
+            const invTotal = (parseFloat(inv.total) || 0).toFixed(2);
+            const linked = inv.jobCardId === jobCardId;
+            return `
+                <tr class="jc-link-inv-row ${linked ? 'table-success' : ''}" data-invoice-id="${inv.id}" role="button" style="cursor:pointer">
+                    <td>${invNo}${linked ? ' <span class="badge bg-success ms-1">Linked</span>' : ''}</td>
+                    <td>${invDate}</td>
+                    <td class="text-truncate" style="max-width:180px" title="${invParty}">${invParty}</td>
+                    <td class="text-end">₹${invTotal}</td>
+                </tr>`;
+        }).join('');
+
+        const modalHtml = `
+        <div class="modal fade" id="linkJobCardInvoiceModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content border-0 shadow-lg bg-dark text-white">
+                    <div class="modal-header border-secondary p-4">
+                        <h5 class="modal-title fw-bold">
+                            <i class="bi bi-link-45deg me-2 text-info"></i>Link Job Card to Invoice
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div class="bg-black bg-opacity-25 rounded p-3 mb-4 border border-secondary">
+                            <div class="small text-muted text-uppercase mb-1">Job Card</div>
+                            <div class="fw-bold">${jobCardId} — ${jobCard.customerName || ''}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Select an invoice to link:</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-secondary border-secondary text-white"><i class="bi bi-search"></i></span>
+                                <input type="text" id="jcLinkInvoiceSearch" class="form-control bg-dark border-secondary text-white" placeholder="Search by invoice no, party, or amount...">
+                            </div>
+                        </div>
+                        <div class="table-responsive" style="max-height:280px;">
+                            <table class="table table-dark table-hover table-sm border-secondary mb-0">
+                                <thead class="sticky-top bg-dark">
+                                    <tr class="small text-muted">
+                                        <th>Invoice No</th>
+                                        <th>Date</th>
+                                        <th>Customer</th>
+                                        <th class="text-end">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="jcLinkInvoiceTableBody">${rowsHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modalEl = document.getElementById('linkJobCardInvoiceModal');
+        const modal = new bootstrap.Modal(modalEl);
+
+        const searchInput = modalEl.querySelector('#jcLinkInvoiceSearch');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const q = (e.target.value || '').trim().toLowerCase();
+                modalEl.querySelectorAll('.jc-link-inv-row').forEach((row) => {
+                    const text = (row.textContent || '').toLowerCase();
+                    row.classList.toggle('d-none', !!q && !text.includes(q));
+                });
+            });
+        }
+
+        modalEl.querySelectorAll('.jc-link-inv-row').forEach((row) => {
+            row.addEventListener('click', async () => {
+                const invoiceId = row.getAttribute('data-invoice-id');
+                if (!invoiceId) return;
+                modal.hide();
+                await this._applyLinkJobCardInvoice(jobCardId, invoiceId);
+            });
+        });
+
+        modal.show();
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            bootstrap.Modal.getInstance(modalEl)?.dispose();
+            modalEl.remove();
+        }, { once: true });
+    },
+
+    async _applyLinkJobCardInvoice(jobCardId, invoiceId) {
+        const invoice = (typeof InvoiceManager !== 'undefined' ? InvoiceManager.getAllInvoices() : [])
+            .find((inv) => inv.id === invoiceId);
+        if (!invoice) {
+            App.showNotification('Invoice not found', 'error');
+            return;
+        }
+        try {
+            const jcStatus = (typeof DocumentBuildCommon !== 'undefined' && DocumentBuildCommon.resolveJobCardDispatchStatus)
+                ? DocumentBuildCommon.resolveJobCardDispatchStatus(invoice)
+                : 'job-done';
+            const scNo = (typeof DocumentBuildCommon !== 'undefined' && DocumentBuildCommon.resolveServiceChallanNoForJobCard)
+                ? DocumentBuildCommon.resolveServiceChallanNoForJobCard(jobCardId)
+                : '';
+            await InvoiceManager.updateInvoice(invoice.id, {
+                jobCardId,
+                serviceChallanId: scNo || null,
+                serviceChallanNo: scNo || null
+            });
+            await JobCardManager.updateJobCard(jobCardId, {
+                linkedInvoiceId: invoice.id,
+                linkedInvoiceNo: invoice.invoiceNo || invoice.id,
+                invoiceId: invoice.id,
+                status: jcStatus
+            });
+            App.showNotification(`Linked ${jobCardId} to invoice ${invoice.invoiceNo || invoice.id}`, 'success');
+            this.loadJobCards();
+            const viewModal = document.getElementById('jobCardViewModal');
+            if (viewModal && document.getElementById('jcViewId')?.value === jobCardId) {
+                this.viewJobCard(jobCardId);
+            }
+        } catch (err) {
+            console.error('Link job card error:', err);
+            App.showNotification(err.message || 'Failed to link invoice', 'error');
+        }
+    },
+
+    async unlinkJobCardFromInvoice(jobCardId) {
+        const jc = JobCardManager.getJobCard(jobCardId);
+        if (!jc) {
+            App.showNotification('Job Card not found', 'error');
+            return;
+        }
+
+        const linkedInvNo = this.getJobCardLinkedInvoiceNo(jc);
+        if (!linkedInvNo) {
+            App.showNotification('No linked invoice on this job card', 'warning');
+            return;
+        }
+
+        const ok = await App.confirmAction(
+            `Unlink invoice <strong>${linkedInvNo}</strong> from job card <strong>${jobCardId}</strong>?<br><span class="text-muted">The invoice will remain; only the link is removed.</span>`,
+            { title: 'Unlink Invoice', confirmLabel: 'Unlink', danger: true }
+        );
+        if (!ok) return;
+
+        const invoiceId = this.getJobCardLinkedInvoiceId(jc);
+        try {
+            if (invoiceId && typeof InvoiceManager !== 'undefined') {
+                await InvoiceManager.updateInvoice(invoiceId, {
+                    jobCardId: null,
+                    serviceChallanId: null,
+                    serviceChallanNo: null
+                });
+            }
+            await JobCardManager.updateJobCard(jobCardId, {
+                linkedInvoiceId: null,
+                linkedInvoiceNo: null,
+                invoiceId: null
+            });
+            App.showNotification(`Unlinked invoice from ${jobCardId}`, 'success');
+            this.loadJobCards();
+            const viewModal = document.getElementById('jobCardViewModal');
+            if (viewModal && document.getElementById('jcViewId')?.value === jobCardId) {
+                this.viewJobCard(jobCardId);
+            }
+        } catch (err) {
+            console.error('Unlink job card error:', err);
+            App.showNotification(err.message || 'Failed to unlink invoice', 'error');
+        }
     },
 
 

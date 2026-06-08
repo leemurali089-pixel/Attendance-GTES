@@ -102,7 +102,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Check if running in Electron
     isElectron: true,
-    
+
+    getRuntimeInfo: () => ipcRenderer.invoke('runtime:get-info'),
+    getSpeechEnvHints: () => ipcRenderer.invoke('speech:get-env-hints'),
+
     // Low-level IPC
     send: (channel, data) => ipcRenderer.send(channel, data)
 });

@@ -36,13 +36,19 @@ const MemoryManager = {
             const defaults = {
                 mode: 'free',
                 speechProvider: 'browser',
-                listenMode: 'push_to_talk',
-                responseLang: 'en',
-                continuous: false
+                listenMode: 'tap',
+                responseLang: 'ta',
+                speechInputLang: 'auto',
+                continuous: true,
+                silenceTimeoutMs: 18000,
+                openaiApiKey: '',
+                whisperApiKey: '',
+                deepgramApiKey: '',
+                googleSpeechApiKey: ''
             };
             return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
         } catch (_) {
-            return { mode: 'free', speechProvider: 'browser', listenMode: 'push_to_talk', responseLang: 'en' };
+            return { mode: 'free', speechProvider: 'browser', listenMode: 'tap', responseLang: 'ta', speechInputLang: 'auto', continuous: true, silenceTimeoutMs: 18000 };
         }
     },
 

@@ -28,19 +28,14 @@ const UserManager = {
     async init() {
         let users = await this.getUsers();
 
-        // Cloud may still hold a lone bootstrap admin while disk has real accounts.
-        const onlyBootstrapAdmin =
-            users.length === 1 &&
-            String(users[0] && users[0].username || '').toLowerCase() === 'admin';
-        if (onlyBootstrapAdmin && typeof DataManager !== 'undefined' && DataManager.invalidateDataCache) {
+        // Cloud may hold stale bootstrap admin(s) while disk has real accounts (GTES67, Ganesh, etc.).
+        if (this._needsUserCloudHeal(users) && typeof DataManager !== 'undefined' && DataManager.invalidateDataCache) {
             DataManager.invalidateDataCache(this.STORAGE_KEY);
             const reloaded = await DataManager.loadData(this.STORAGE_KEY, { forceRefresh: true });
-            const norm = typeof DataManager._normalizeGtesUsersPayload === 'function'
-                ? DataManager._normalizeGtesUsersPayload(reloaded)
-                : reloaded;
-            if (Array.isArray(norm) && norm.length > users.length) {
+            const norm = this._dedupeUsersByUsername(this._normalizeUsers(reloaded));
+            if (norm.length > this._dedupeUsersByUsername(users).length) {
                 users = norm;
-                console.log(`[UserManager] Reloaded ${users.length} user(s) after bootstrap-admin cloud overwrite.`);
+                console.log(`[UserManager] Reloaded ${users.length} user(s) after bootstrap-admin cloud heal.`);
                 try {
                     await this.saveUsers(users);
                 } catch (e) {
@@ -48,6 +43,9 @@ const UserManager = {
                 }
             }
         }
+
+        users = this._dedupeUsersByUsername(users);
+        this._logLoadedAccounts(users);
 
         // Create default admin if no users exist
         if (users.length === 0) {
@@ -107,6 +105,44 @@ const UserManager = {
             String(users[0] && users[0].username || '').toLowerCase() === 'admin';
     },
 
+    _dedupeUsersByUsername(users) {
+        const map = new Map();
+        (Array.isArray(users) ? users : []).forEach((u) => {
+            if (!u || !u.username) return;
+            const key = String(u.username).trim().toLowerCase();
+            const prev = map.get(key);
+            if (!prev) {
+                map.set(key, u);
+                return;
+            }
+            const score = (row) => {
+                let s = 0;
+                if (row.webPassword) s += 4;
+                if (row.password && String(row.password).includes(':')) s += 2;
+                if (row.permissions && row.permissions.length > 2) s += 1;
+                s += Date.parse(row.updatedAt || row.createdAt || 0) / 1e15;
+                return s;
+            };
+            map.set(key, score(u) >= score(prev) ? u : prev);
+        });
+        return Array.from(map.values());
+    },
+
+    _logLoadedAccounts(users) {
+        const names = this._dedupeUsersByUsername(users)
+            .map((u) => u.username)
+            .filter(Boolean);
+        console.log(`[UserManager] ${names.length} account(s) loaded: ${names.join(', ') || 'none'}`);
+    },
+
+    _needsUserCloudHeal(users) {
+        const deduped = this._dedupeUsersByUsername(users);
+        if (!deduped.length) return true;
+        const onlyAdmin = deduped.every((u) =>
+            String(u.username || '').toLowerCase() === 'admin');
+        return onlyAdmin && deduped.length <= 2;
+    },
+
     // Get all users
     async getUsers(options = {}) {
         const force = options && options.force === true;
@@ -123,7 +159,7 @@ const UserManager = {
         }
 
         const data = await DataManager.loadData(this.STORAGE_KEY, force ? { forceRefresh: true } : undefined);
-        return this._normalizeUsers(data);
+        return this._dedupeUsersByUsername(this._normalizeUsers(data));
     },
 
     // Save users

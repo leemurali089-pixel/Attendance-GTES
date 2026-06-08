@@ -1006,13 +1006,14 @@ const VoucherManager = {
     /**
      * Check if a voucher already exists for a given party, amount and date
      */
-    checkDuplicateVoucher(partyName, amount, date) {
+    checkDuplicateVoucher(partyName, amount, date, opts = {}) {
         if (!partyName || !amount || !date) return false;
         const d_amount = parseFloat(amount);
-        const d_date = date instanceof Date ? date.toISOString().split('T')[0] : date;
         const p_name = partyName.trim().toLowerCase();
-        const d_date_str = d_date.split('T')[0];
-        const cacheKey = `${p_name}|${d_amount.toFixed(2)}|${d_date_str}`;
+        const d_date_str = this._normalizeBankTxDate(date);
+        if (!d_date_str) return false;
+        const expectedType = opts.voucherType || null;
+        const cacheKey = `${p_name}|${d_amount.toFixed(2)}|${d_date_str}|${expectedType || 'any'}`;
         const voucherCount = (DataManager.getData('vouchers') || []).length;
         if (this._dupVoucherCache && this._dupVoucherCacheVoucherCount === voucherCount) {
             if (this._dupVoucherCache.has(cacheKey)) return this._dupVoucherCache.get(cacheKey);
@@ -1023,14 +1024,45 @@ const VoucherManager = {
 
         const vouchers = this.getAllVouchers();
         const hit = vouchers.some(v => {
+            if (expectedType && (v.type || 'receipt') !== expectedType) return false;
             const v_name = (v.customerName || '').trim().toLowerCase();
-            const v_date = v.date.split('T')[0];
-            return v_name === p_name &&
-                   Math.abs(parseFloat(v.amount) - d_amount) < 0.01 &&
-                   v_date === d_date_str;
+            const v_date = this._normalizeBankTxDate(v.date);
+            if (!v_name || !v_date) return false;
+            if (v_name !== p_name) return false;
+            if (Math.abs(parseFloat(v.amount) - d_amount) >= 0.01) return false;
+            if (v_date === d_date_str) return true;
+            const diff = Math.abs(new Date(v_date).getTime() - new Date(d_date_str).getTime());
+            return diff <= 86400000;
         });
         this._dupVoucherCache.set(cacheKey, hit);
         return hit;
+    },
+
+    /** Find saved voucher matching a bank row (party + amount + date + receipt/payment type). */
+    findMatchingVoucherForBankTx(tx) {
+        const partyName = (typeof VouchersUI !== 'undefined' && VouchersUI.resolveBankTxPartyName)
+            ? VouchersUI.resolveBankTxPartyName(tx)
+            : (tx.bankAssignedParty || tx.assignedParty || '').toString().trim();
+        if (!partyName || !tx?.amount || !tx?.date) return null;
+
+        const amount = parseFloat(tx.amount);
+        if (!amount) return null;
+        const txDate = this._normalizeBankTxDate(tx.date);
+        if (!txDate) return null;
+        const expectedType = tx.type === 'debit' ? 'payment' : 'receipt';
+        const pNorm = partyName.trim().toLowerCase();
+
+        return this.getAllVouchers().find((v) => {
+            if ((v.type || 'receipt') !== expectedType) return false;
+            const vName = (v.customerName || '').trim().toLowerCase();
+            if (vName !== pNorm) return false;
+            if (Math.abs(parseFloat(v.amount) - amount) >= 0.01) return false;
+            const vDate = this._normalizeBankTxDate(v.date);
+            if (!vDate) return false;
+            if (vDate === txDate) return true;
+            const diff = Math.abs(new Date(vDate).getTime() - new Date(txDate).getTime());
+            return diff <= 86400000;
+        }) || null;
     },
 
     /**
@@ -1790,6 +1822,11 @@ const VoucherManager = {
                 || (inv.balanceDue != null && parseFloat(inv.balanceDue) > 0.05);
 
             if (combinedPaid <= 0.05) {
+                const importedStatus = String(inv.status || '').toLowerCase();
+                const srcBk = String(inv.source || '').toLowerCase() === 'bookkeeper'
+                    || !!(inv.bookkeeperId && String(inv.bookkeeperId).trim());
+                // Book Keeper "paid" on import is authoritative until a voucher row settles it in-app.
+                if (srcBk && importedStatus === 'paid') return;
                 if (hadMemHint && dbPaid <= 0.05) {
                     inv.status = 'pending';
                     delete inv.paidSoFar;

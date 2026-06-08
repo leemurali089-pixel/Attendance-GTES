@@ -270,7 +270,8 @@ const CustomerManager = {
         const customers = this.getAllCustomers();
         return customers.find(c => {
             const nm = (c.name || '').toString().trim().toLowerCase();
-            if (nm !== q) return false;
+            const dn = (c.displayName || '').toString().trim().toLowerCase();
+            if (nm !== q && dn !== q) return false;
             if (!accountType) return true;
             return (c.accountType || '').toString().trim().toLowerCase() === accountType.toLowerCase();
         });

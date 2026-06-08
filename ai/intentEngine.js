@@ -2,11 +2,15 @@
  * Rule-based intent detection — Tamil, English, Tanglish.
  */
 const IntentEngine = {
-    CONFIRM_RE: /^(yes|ok|okay|confirm|seri|sari|aadha|aama|pannu|delete\s*pannu|proceed)$/i,
+    CONFIRM_RE: /^(yes|ok|okay|confirm|correct|right|seri|sari|aadha|aama|aamam|aam|athu\s*thaan|athu\s*dhaan|pannu|delete\s*pannu|proceed)$/i,
     CANCEL_RE: /^(no|cancel|venda|illai|stop|abort)$/i,
 
     parse(rawText) {
-        const text = TamilCommandRegistry.normalize(rawText);
+        const normResult = typeof LanguageEngine !== 'undefined' && LanguageEngine.normalizeForParse
+            ? LanguageEngine.normalizeForParse(rawText)
+            : { text: TamilCommandRegistry.normalize(rawText), slots: {} };
+        const text = normResult.text || TamilCommandRegistry.normalize(rawText);
+        const normSlots = normResult.slots || {};
         if (!text) return { intent: null, slots: {}, confidence: 0, raw: rawText };
 
         const pending = ContextManager.getConfirmation();
@@ -23,7 +27,7 @@ const IntentEngine = {
         const clarifyFollow = this._handlePendingClarify(text, rawText);
         if (clarifyFollow) return clarifyFollow;
 
-        const pre = this._preParse(text, rawText);
+        const pre = this._preParse(text, rawText, normSlots);
         if (pre) return pre;
 
         for (const pat of TamilCommandRegistry.patterns) {
@@ -36,6 +40,7 @@ const IntentEngine = {
             });
             if (slots.customerNameAlt && !slots.customerName) slots.customerName = slots.customerNameAlt;
             if (slots.taskHintAlt && !slots.taskHint) slots.taskHint = slots.taskHintAlt;
+            Object.assign(slots, normSlots);
             this._sanitizeSlots(slots);
             if (!this._isValidMatch(pat.intent, slots, text)) continue;
             this._enrichSlots(slots, text);
@@ -115,7 +120,7 @@ const IntentEngine = {
         return null;
     },
 
-    _preParse(text, rawText) {
+    _preParse(text, rawText, normSlots = {}) {
         if (/what\s+(?:are\s+)?(?:the\s+)?things?\s+(?:you\s+)?can\s+do|what\s+can\s+you\s+do|^help$|commands?\s*list|capabilities/i.test(text)) {
             return { intent: 'help', slots: {}, confidence: 0.95, raw: rawText };
         }
@@ -138,8 +143,9 @@ const IntentEngine = {
             return { intent: 'customer_invoice_list', slots: {}, confidence: 0.92, raw: rawText };
         }
 
-        if (/outstanding|pending/i.test(text) && !/invoices?/i.test(text)) {
-            const name = TamilCommandRegistry.extractCustomerName(text);
+        if (/outstanding|pending|niluvai/i.test(text) && !/invoices?/i.test(text)) {
+            const name = TamilCommandRegistry.extractCustomerName(text)
+                || (/\bavon\s+oxygen\b/i.test(text) ? 'avon oxygen' : null);
             if (name) {
                 return { intent: 'customer_outstanding', slots: { customerName: name }, confidence: 0.92, raw: rawText };
             }
@@ -152,11 +158,25 @@ const IntentEngine = {
             }
         }
 
-        if (/(?:how\s+many\s+)?(?:employees?\s+)?(?:are\s+|were\s+)?absent|absent\s+(?:yesterday|today|innal)/i.test(text)) {
-            const slots = {};
+        if (/(?:how\s+many\s+)?(?:employees?\s+)?(?:are\s+|were\s+)?absent|absent\s+(?:yesterday|today|innal)|yaar\s+varala|\bvarala\b/i.test(text)) {
+            const slots = { ...normSlots };
             if (/yesterday|innal/i.test(text)) slots.when = 'yesterday';
             else if (/today|inniku/i.test(text)) slots.when = 'today';
             return { intent: 'absent_employees', slots, confidence: 0.88, raw: rawText };
+        }
+
+        if (/(?:today|daily|inniku)\s+(?:summary|briefing)|daily\s+briefing|today\s+summary/i.test(text)) {
+            return { intent: 'daily_briefing', slots: {}, confidence: 0.92, raw: rawText };
+        }
+
+        if (/\bannadurai\b/i.test(text) && /attendance|varugai|podu|pannu|mark/i.test(text)) {
+            return { intent: 'mark_attendance', slots: { employeeName: 'annadurai' }, confidence: 0.9, raw: rawText };
+        }
+
+        if (/attendance\s+list|varugai\s+list/i.test(text)) {
+            const slots = { ...normSlots };
+            if (/yesterday|innal/i.test(text)) slots.when = 'yesterday';
+            return { intent: 'attendance_summary', slots, confidence: 0.88, raw: rawText };
         }
 
         return null;
@@ -190,7 +210,7 @@ const IntentEngine = {
     _isValidMatch(intent, slots, text) {
         const needsCustomer = ['customer_outstanding', 'customer_last_invoice', 'customer_search'].includes(intent);
         if (needsCustomer && !slots.customerName) {
-            return /pending|outstanding/i.test(text) && !/invoices?\s*(?:list|kaatu|show)/i.test(text);
+            return /pending|outstanding|niluvai/i.test(text) && !/invoices?\s*(?:list|kaatu|show)/i.test(text);
         }
         if (intent === 'customer_last_invoice' && slots.customerName) {
             const n = slots.customerName.toLowerCase();
@@ -266,7 +286,11 @@ const IntentEngine = {
 
         if (text.includes('attendance') && (text.includes('podu') || text.includes('mark') || text.includes('pannu'))) {
             const words = text.split(' ');
-            const name = words.find((w) => w.length > 2 && !['attendance', 'attendence', 'podu', 'mark', 'pannu', 'for'].includes(w));
+            const skip = new Set(['attendance', 'attendence', 'podu', 'mark', 'pannu', 'for', 'today', 'inniku']);
+            const name = words.find((w) => w.length > 2 && !skip.has(w));
+            if (name === 'annadurai' || /\bannadurai\b/i.test(text)) {
+                return { intent: 'mark_attendance', slots: { employeeName: 'annadurai' }, confidence: 0.75, raw: rawText };
+            }
             return { intent: 'mark_attendance', slots: name ? { employeeName: name } : {}, confidence: 0.5, raw: rawText };
         }
 

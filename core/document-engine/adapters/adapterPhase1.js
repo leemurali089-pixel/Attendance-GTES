@@ -155,4 +155,30 @@
         renderPreview: (layout) => EstimatePreviewV4.render(layout, document.getElementById('gtesDocumentEngineStage') || document.getElementById('gtesInvoiceV3Stage')),
         generatePdfBytes: (doc, settings) => EstimatePdfV4.generatePdfBytes(doc, settings)
     });
+
+    AdapterBase.register({
+        type: 'job-card',
+        label: 'Job Card',
+        supportsCopyType: true,
+        copyTypeKey: 'gtes_job_card_copy_by_id',
+        settingsKey: 'gtes_job_card_pdf_settings',
+        subfolder: 'JobCards',
+        getEntity(id) {
+            return typeof JobCardManager !== 'undefined' ? JobCardManager.getJobCard(id) : null;
+        },
+        getTitle(entity) {
+            return `Job Card — ${entity?.id || ''}`;
+        },
+        getSubtitle(entity) {
+            return entity?.customerName || '';
+        },
+        getFilename(entity) {
+            return `JobCard_${String(entity?.id || 'jc').replace(/[^\w.-]+/g, '_')}.pdf`;
+        },
+        buildDocument: (id) => JobCardDataV4.build(id),
+        paginate: (doc, settings) => JobCardLayoutV4.paginate(doc, settings),
+        renderPreview: (layout) => JobCardPreviewV4.render(layout, document.getElementById('gtesDocumentEngineStage') || document.getElementById('gtesInvoiceV3Stage')),
+        generatePdfBytes: (doc, settings) => JobCardPdfV4.generatePdfBytes(doc, settings)
+    });
 })();
+

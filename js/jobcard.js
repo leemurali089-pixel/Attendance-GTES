@@ -4,22 +4,101 @@
  */
 
 const JobCardManager = {
+    _lastSerial: null,
+
     async init() {
         await DataManager.init();
         console.log('JobCardManager initialized');
     },
 
     /**
-     * Generate next job card number
+     * Track last used serial in-session (mirrors VoucherManager.recordUsedSerial).
+     */
+    recordUsedSerial(id) {
+        if (id) this._lastSerial = id;
+    },
+
+    /**
+     * Next job card number — scans all JC-* ids for max suffix (same idea as voucher serials).
      * Format: JC-0001, JC-0002, etc.
      */
-    generateJobCardNumber() {
+    getNextJobCardNumber() {
         const jobCards = DataManager.getData('jobcards') || [];
-        if (jobCards.length === 0) return 'JC-0001';
+        const prefix = 'JC-';
+        let maxNum = 0;
+        let padding = 4;
 
-        const lastId = jobCards[jobCards.length - 1].id;
-        const num = parseInt(lastId.split('-')[1]) + 1;
-        return `JC-${num.toString().padStart(4, '0')}`;
+        const consider = (rawId) => {
+            const match = (rawId || '').match(/^(JC-)(\d+)$/i);
+            if (!match) return;
+            const n = parseInt(match[2], 10);
+            if (n > maxNum) {
+                maxNum = n;
+                padding = match[2].length;
+            }
+        };
+
+        jobCards.forEach((jc) => consider(jc.id));
+        consider(this._lastSerial);
+
+        if (maxNum === 0) return `${prefix}${String(1).padStart(padding, '0')}`;
+        return `${prefix}${String(maxNum + 1).padStart(padding, '0')}`;
+    },
+
+    /** @deprecated use getNextJobCardNumber */
+    generateJobCardNumber() {
+        return this.getNextJobCardNumber();
+    },
+
+    normalizeJobCardId(rawId) {
+        const trimmed = (rawId || '').trim();
+        if (!trimmed) return '';
+        const match = trimmed.match(/^(jc-)(\d+)$/i);
+        if (match) return `JC-${match[2]}`;
+        return trimmed;
+    },
+
+    isJobCardIdTaken(id, excludeId = null) {
+        const normalized = this.normalizeJobCardId(id);
+        if (!normalized) return false;
+        return (DataManager.getData('jobcards') || []).some(
+            (jc) => jc.id === normalized && jc.id !== excludeId
+        );
+    },
+
+    /**
+     * Normalize equipment rows; migrate legacy single equipment string.
+     */
+    normalizeEquipmentItems(jobCard) {
+        if (!jobCard) return [];
+        if (Array.isArray(jobCard.equipmentItems) && jobCard.equipmentItems.length) {
+            return jobCard.equipmentItems.map((row) => ({
+                itemName: (row.itemName || row.name || '').trim(),
+                description: (row.description || '').trim(),
+                quantity: parseInt(row.quantity, 10) || 1,
+                complaint: (row.complaint || '').trim()
+            })).filter((row) => row.itemName);
+        }
+        const legacy = (jobCard.equipment || '').trim();
+        if (legacy) {
+            return [{
+                itemName: legacy,
+                description: '',
+                quantity: 1,
+                complaint: (jobCard.complaint || '').trim()
+            }];
+        }
+        return [];
+    },
+
+    /**
+     * Short summary for list views and legacy PDF fields.
+     */
+    deriveEquipmentSummary(equipmentItems) {
+        return (equipmentItems || []).map((row) => {
+            const qty = parseInt(row.quantity, 10) || 1;
+            return qty > 1 ? `${row.itemName} x${qty}` : row.itemName;
+        }).join('; ');
     },
 
     /**
@@ -27,13 +106,25 @@ const JobCardManager = {
      */
     async createJobCard(jobCardData) {
         const jobCards = DataManager.getData('jobcards') || [];
+        const equipmentItems = jobCardData.equipmentItems || [];
+        const equipment = jobCardData.equipment
+            || this.deriveEquipmentSummary(equipmentItems);
+
+        let id = this.normalizeJobCardId(jobCardData.id);
+        if (!id) id = this.getNextJobCardNumber();
+
+        if (jobCards.some((jc) => jc.id === id)) {
+            throw new Error(`Job Card number "${id}" already exists. Please choose a different number.`);
+        }
 
         const jobCard = {
-            id: jobCardData.id || this.generateJobCardNumber(),
+            id,
             date: jobCardData.date || new Date().toISOString().split('T')[0],
             customerId: jobCardData.customerId,
             customerName: jobCardData.customerName,
-            equipment: jobCardData.equipment,
+            customerRef: jobCardData.customerRef || '',
+            equipment,
+            equipmentItems,
             complaint: jobCardData.complaint,
             status: 'pending', // pending|in-progress|job-done|dispatched
             materials: jobCardData.materials || [],
@@ -46,6 +137,7 @@ const JobCardManager = {
 
         jobCards.push(jobCard);
         DataManager.saveDataSync('jobcards', jobCards);
+        this.recordUsedSerial(id);
         return jobCard;
     },
 

@@ -239,6 +239,125 @@ const DocumentBuildCommon = {
             }],
             total: totalAmt
         };
+    },
+
+    /**
+     * Normalize payment status for invoice / purchase PDFs and previews.
+     */
+    resolvePaymentStatus(opts = {}) {
+        const {
+            status,
+            balance,
+            total,
+            isPaid: explicitPaid,
+            skipDisplay = false
+        } = opts;
+        if (skipDisplay) {
+            return { show: false, isPaid: false, status: '', label: '', color: '' };
+        }
+        const totalAmt = parseFloat(total);
+        let bal = balance;
+        if (bal == null && Number.isFinite(totalAmt)) bal = totalAmt;
+        if (bal != null) bal = Math.max(0, parseFloat(bal) || 0);
+        const st = String(status || '').toLowerCase();
+        const paid = explicitPaid != null
+            ? !!explicitPaid
+            : (bal != null && bal <= 0.05) || st === 'paid';
+        let label = 'PENDING';
+        if (paid) label = 'PAID';
+        else if (st === 'partial') label = 'PARTIAL';
+        else if (status) label = String(status).toUpperCase();
+        return {
+            show: true,
+            isPaid: paid,
+            balance: bal,
+            status: paid ? 'paid' : (st || 'pending'),
+            label,
+            color: paid ? '#27ae60' : (label === 'PARTIAL' ? '#3498db' : '#e67e22')
+        };
+    },
+
+    paidStampHtml() {
+        return '<div class="doc-paid-stamp" aria-hidden="true">PAID</div>';
+    },
+
+    paidStampPdfBlock() {
+        const ctx = (typeof InvoicePdfMakeV3 !== 'undefined' && InvoicePdfMakeV3._ctx)
+            || (typeof DocumentPdfBase !== 'undefined' ? DocumentPdfBase._ctx : null);
+        const fs = ctx?.fs ? (n) => ctx.fs(n) : (n) => n;
+        const pageW = ctx?.pageSizePt?.width || 595;
+        const pageH = ctx?.pageSizePt?.height || 842;
+        return {
+            text: 'PAID',
+            color: '#27ae60',
+            opacity: 0.14,
+            bold: true,
+            fontSize: fs(64),
+            absolutePosition: { x: pageW * 0.22, y: pageH * 0.42 },
+            rotation: -32
+        };
+    },
+
+    /** Invoice number linked to a job card (manual link or created-from-JC). */
+    resolveJobCardInvoiceRef(jobCard) {
+        if (!jobCard) return '';
+        const stored = String(jobCard.linkedInvoiceNo || '').trim();
+        if (stored) return stored;
+        const invId = jobCard.linkedInvoiceId || jobCard.invoiceId;
+        if (invId && typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoice) {
+            const inv = InvoiceManager.getInvoice(invId);
+            if (inv) return String(inv.invoiceNo || inv.id || '').trim();
+        }
+        if (typeof InvoiceManager !== 'undefined' && InvoiceManager.getAllInvoices) {
+            const inv = (InvoiceManager.getAllInvoices() || []).find((i) => i.jobCardId === jobCard.id);
+            if (inv) return String(inv.invoiceNo || inv.id || '').trim();
+        }
+        return '';
+    },
+
+    /** Job card id referenced on an invoice. */
+    resolveInvoiceJobCardRef(invoice) {
+        if (!invoice) return '';
+        return String(invoice.jobCardId || '').trim();
+    },
+
+    /** Service challan serial linked to a job card (SC-xxxx). */
+    resolveServiceChallanNoForJobCard(jobCardId) {
+        const jcId = String(jobCardId || '').trim();
+        if (!jcId) return '';
+        if (typeof DeliveryManager === 'undefined' || !DeliveryManager.getAllChallans) return '';
+        const sc = (DeliveryManager.getAllChallans() || []).find(
+            (c) => c.jobCardId === jcId && c.type === 'service'
+        );
+        return sc ? String(sc.id || '').trim() : '';
+    },
+
+    /** Service challan serial on an invoice (stored or resolved via job card). */
+    resolveInvoiceServiceChallanRef(invoice) {
+        if (!invoice) return '';
+        const stored = String(invoice.serviceChallanNo || invoice.serviceChallanId || '').trim();
+        if (stored) return stored;
+        return this.resolveServiceChallanNoForJobCard(invoice.jobCardId);
+    },
+
+    /** True when invoice has any dispatch field filled (top-level or dispatchDetails). */
+    hasInvoiceDispatchDetails(invoice) {
+        if (!invoice) return false;
+        const dd = invoice.dispatchDetails || {};
+        const fields = [
+            dd.via, dd.lrNo, dd.vehicleNo, dd.date,
+            dd.dispatchThrough, dd.documentNo, dd.dispatchDocNo,
+            dd.destination, dd.ewayBillNo, dd.eWayBillNo,
+            invoice.dispatchThrough, invoice.dispatchVia, invoice.lrNo,
+            invoice.vehicleNo, invoice.dispatchDate, invoice.dispatchDocumentNo,
+            invoice.dispatchDocNo, invoice.transportName, invoice.destination
+        ];
+        return fields.some((v) => String(v ?? '').trim() !== '');
+    },
+
+    /** Job card status after linking or creating invoice from job card. */
+    resolveJobCardDispatchStatus(invoice) {
+        return this.hasInvoiceDispatchDetails(invoice) ? 'dispatched' : 'job-done';
     }
 };
 

@@ -50,7 +50,7 @@ const AccountingUI = {
                         <button class="btn btn-outline-danger btn-sm" onclick="BookKeeperImport.confirmClearData()">
                             <i class="bi bi-trash"></i> Reset Data
                         </button>
-                        <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                        <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
                     </div>
@@ -248,7 +248,7 @@ const AccountingUI = {
             <div class="container-fluid">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2><i class="bi bi-bank text-primary me-2"></i> Trial Balance</h2>
-                    <button class="btn btn-outline-light btn-sm" onclick="App.showLandingPage()">
+                    <button class="btn btn-outline-light btn-sm" onclick="App.goBack()">
                         <i class="bi bi-arrow-left"></i> Back
                     </button>
                 </div>

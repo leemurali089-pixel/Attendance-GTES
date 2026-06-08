@@ -444,8 +444,16 @@ Output strictly ONLY raw JSON.`;
                                 if (probInput) probInput.value = params.problem;
                             }
                             if (params.equipment) {
-                                const eqInput = document.getElementById('jcEquipment');
-                                if (eqInput) eqInput.value = params.equipment;
+                                const eqBody = document.getElementById('jcEquipmentBody');
+                                if (eqBody) {
+                                    eqBody.innerHTML = '';
+                                    DeliveryUI.addJobCardEquipmentRow({
+                                        itemName: params.equipment,
+                                        description: '',
+                                        quantity: 1,
+                                        complaint: params.problem || ''
+                                    });
+                                }
                             }
                         }, 300);
                     }, 200);

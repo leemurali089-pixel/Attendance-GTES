@@ -34,6 +34,9 @@ const InvoicePreviewV3 = {
         const copyLine = copyLabel
             ? `<div style="font-size:10px;font-weight:700;color:#333;">(${this._esc(copyLabel)})</div>`
             : '';
+        const subtitleLine = doc.meta.docSubtitle
+            ? `<div style="font-size:10px;font-style:italic;color:#444;margin-top:4px;">${this._esc(doc.meta.docSubtitle)}</div>`
+            : '';
         const email = c.emails ? `<div style="font-size:9px;">Email: ${this._esc(c.emails)}</div>` : '';
         const phone = c.phones ? `<div style="font-size:9px;">Ph: ${this._esc(c.phones)}</div>` : '';
         return `<div style="text-align:center;margin-bottom:10px;">
@@ -43,31 +46,64 @@ const InvoicePreviewV3 = {
             ${email}${phone}
             <div style="font-size:9px;margin-top:2px;">GSTIN: ${this._esc(c.gstin)} | PAN: ${this._esc(c.pan)}${c.iec ? ` | IEC: ${this._esc(c.iec)}` : ''}</div>
             <div style="font-size:14px;font-weight:800;text-transform:uppercase;margin-top:8px;">${this._esc(doc.meta.docTitle)}</div>
+            ${subtitleLine}
             ${copyLine}
         </div>`;
     },
 
     _renderInfoDispatch(doc) {
         const inv = doc.invoice;
+        let leftRows;
+        let rightRows;
+        if (doc.meta.isServiceChallan) {
+            leftRows = [
+                ['Service Challan No', inv.no],
+                ['Date', inv.dateDisplay || inv.date]
+            ];
+            if (inv.jobCardNo) leftRows.push(['Job Card No', inv.jobCardNo]);
+            if (inv.customerRef) leftRows.push(['Customer DC / Ref', inv.customerRef]);
+            rightRows = null;
+        } else {
+            leftRows = [
+                [doc.meta.isDc ? 'Delivery Challan No' : 'Invoice No', inv.no],
+                ['Date', inv.dateDisplay || inv.date],
+                ['Purchase Order No', inv.poNumber]
+            ];
+            if (inv.jobCardNo) leftRows.push(['Job Card No', inv.jobCardNo]);
+            if (inv.serviceChallanNo) leftRows.push(['Service Challan No', inv.serviceChallanNo]);
+            rightRows = [
+                ['Dispatch Document No', inv.dispatchDocumentNo],
+                ['Dispatch Through', inv.dispatchThrough],
+                ['Destination', inv.destination],
+                ['e-Way Bill No.', inv.ewayBillNo]
+            ];
+        }
+        if (doc.payment?.show) {
+            leftRows.push(['Payment Status', doc.payment.label]);
+        }
+        const leftCellHtml = leftRows.map(([label, value]) => {
+            const isPay = label === 'Payment Status';
+            const color = isPay ? (doc.payment?.color || '#111') : '#111';
+            const weight = isPay ? 'font-weight:800;' : '';
+            return `<tr><td style="padding:1px 0;vertical-align:top;">${this._esc(label)} : <span style="color:${color};${weight}">${this._esc(value)}</span></td></tr>`;
+        }).join('');
+        if (doc.meta.isServiceChallan) {
+            return `<table width="100%" class="inv-v3-box" cellpadding="6" cellspacing="0" style="margin-bottom:8px;">
+                <tr>
+                    <td valign="top">
+                        <table width="100%" cellpadding="0" cellspacing="0" style="font-size:9px;">${leftCellHtml}</table>
+                    </td>
+                </tr>
+            </table>`;
+        }
         return `<table width="100%" class="inv-v3-box" cellpadding="6" cellspacing="0" style="margin-bottom:8px;">
             <tr>
                 <td width="50%" valign="top" style="border-right:1px solid #000;">
-                    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:9px;">
-                        ${this._labelRows([
-                            [doc.meta.isDc ? 'Delivery Challan No' : 'Invoice No', inv.no],
-                            ['Date', inv.dateDisplay || inv.date],
-                            ['Purchase Order No', inv.poNumber]
-                        ])}
-                    </table>
+                    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:9px;">${leftCellHtml}</table>
                 </td>
                 <td width="50%" valign="top">
                     <table width="100%" cellpadding="0" cellspacing="0" style="font-size:9px;">
-                        ${this._labelRows([
-                            ['Dispatch Document No', inv.dispatchDocumentNo],
-                            ['Dispatch Through', inv.dispatchThrough],
-                            ['Destination', inv.destination],
-                            ['e-Way Bill No.', inv.ewayBillNo]
-                        ])}
+                        ${this._labelRows(rightRows)}
                     </table>
                 </td>
             </tr>
@@ -75,6 +111,16 @@ const InvoicePreviewV3 = {
     },
 
     _renderReceiverConsignee(doc) {
+        if (doc.meta.isServiceChallan) {
+            return `<table width="100%" class="inv-v3-box" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+                <tr style="background:#e8e8e8;">
+                    <td align="center" style="font-size:8px;font-weight:700;padding:4px;border-bottom:1px solid #000;">Received From</td>
+                </tr>
+                <tr>
+                    <td valign="top" style="padding:8px;">${this._partyHtml(doc.receiver)}</td>
+                </tr>
+            </table>`;
+        }
         return `<table width="100%" class="inv-v3-box" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
             <tr style="background:#e8e8e8;">
                 <td width="50%" align="center" style="font-size:8px;font-weight:700;padding:4px;border-right:1px solid #000;border-bottom:1px solid #000;">Details of Receiver (Billed To)</td>
@@ -120,10 +166,12 @@ const InvoicePreviewV3 = {
         if (!doc.meta?.isDc) return '';
         const isGst = doc.meta.isGst && !doc.meta.isPlain;
         const cols = isGst ? 8 : 7;
-        const remarksText = String(doc.remarks || '').trim() || '-';
+        const remarksText = String(doc.remarks || '').trim();
+        if (doc.meta.isServiceChallan && !remarksText) return '';
+        const displayText = remarksText || '-';
         return `<table width="100%" class="inv-v3-items" cellpadding="4" cellspacing="0" style="margin-top:0;table-layout:fixed;">
             <tr><td colspan="${cols}" style="font-size:9px;border:0.5px solid #64748b;padding:6px 4px;">
-                <strong>Remarks:</strong> ${this._esc(remarksText)}
+                <strong>Remarks:</strong> ${this._esc(displayText)}
             </td></tr>
         </table>`;
     },
@@ -161,7 +209,7 @@ const InvoicePreviewV3 = {
         return `${this._renderSetOffReferences(doc)}<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-top:10px;">
             <tr>
                 <td width="50%" valign="top" style="padding-right:8px;font-size:9px;">
-                    ${doc.meta.isDc ? '<div style="margin-bottom:8px;font-weight:700;">Received in Good Condition</div>' : ''}
+                    ${doc.meta.isDc ? `<div style="margin-bottom:8px;font-weight:700;">${this._esc(doc.meta.isServiceChallan && doc.serviceAck ? doc.serviceAck : 'Received in Good Condition')}</div>` : ''}
                     <div><strong>Amount in Words:</strong> ${this._esc(s.amountInWords)}</div>
                     <div style="margin-top:10px;"><strong>Terms &amp; Conditions</strong><br>${doc.terms.map((t) => this._esc(t)).join('<br>')}</div>
                     <div style="margin-top:10px;">${this._esc(doc.bankLine)}</div>
@@ -198,9 +246,12 @@ const InvoicePreviewV3 = {
         const copyTag = pageModel.copyLabel
             ? ` · ${this._esc(pageModel.copyLabel)}`
             : (pageModel.copyType === 'none' ? ' · No header' : '');
+        const paidStamp = doc.payment?.isPaid && typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.paidStampHtml()
+            : '';
         return `<section class="inv-v3-page-frame" id="inv-v3-page-${pageModel.pageNumber}" data-page="${pageModel.pageNumber}">
             <div class="inv-v3-page-label">Page ${pageModel.pageNumber} of ${totalPages}${copyTag}</div>
-            <div class="inv-v3-page">${inner}</div>
+            <div class="inv-v3-page doc-page-root">${paidStamp}${inner}</div>
         </section>`;
     },
 
@@ -243,6 +294,9 @@ const InvoicePreviewV3 = {
             || document.getElementById('gtesInvNextPage');
         if (label) label.textContent = `Page ${this._state.currentPage} of ${this._state.pageCount}`;
         if (count) count.textContent = `Pages: ${this._state.pageCount}`;
+        if (typeof DocumentPreview !== 'undefined') {
+            DocumentPreview._state.currentPage = this._state.currentPage;
+        }
         if (prev) prev.disabled = this._state.currentPage <= 1;
         if (next) next.disabled = this._state.currentPage >= this._state.pageCount;
         document.querySelectorAll('.inv-v3-page-frame').forEach((el) => {
@@ -329,10 +383,15 @@ const InvoicePreviewV3 = {
         this._state.pages = pages;
 
         host.innerHTML = pages.map((p) => this._renderPage(p, doc, pages.length)).join('');
-        this._applyPageSettings(host, settings || layoutResult.settings || {});
+        if (typeof DocumentPreview !== 'undefined') {
+            DocumentPreview.applyPageSettings(host, settings || layoutResult.settings || {});
+            DocumentPreview.syncPageCount(pages.length);
+        } else {
+            this._applyPageSettings(host, settings || layoutResult.settings || {});
+            this._updateNav();
+        }
         this._bindNav();
         this._setupPageObserver(host);
-        this._updateNav();
 
         const diagEl = document.getElementById('gtesInvoiceV3Diagnostics');
         if (diagEl && diagnostics) {

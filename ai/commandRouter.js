@@ -11,7 +11,16 @@ const CommandRouter = {
         document: () => DocumentAgent,
         erp: () => ({
             navigate: (slots) => ErpFunctions.navigate(slots.target),
-            getHelp: () => ErpFunctions.getHelp()
+            getHelp: () => ErpFunctions.getHelp(),
+            getDailyBriefing: async () => {
+                if (typeof ProactiveEngine === 'undefined') {
+                    return { success: false, message: 'Daily briefing unavailable.' };
+                }
+                const b = ProactiveEngine.getDailyBriefing();
+                const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+                const msg = lang === 'ta' ? (b.messageTa || b.message) : (b.messageEn || b.message);
+                return { success: true, message: msg, data: b.metrics || b };
+            }
         })
     },
 
@@ -22,10 +31,11 @@ const CommandRouter = {
 
         const intent = parsed.intent;
         if (!intent) {
-            return {
-                success: false,
-                message: 'I did not understand that command. I can check: outstanding, invoice list, last invoice, attendance, salary. Say help for full list.'
-            };
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+            const msg = typeof ResponseI18n !== 'undefined'
+                ? ResponseI18n.format('unknown_intent', {}, lang)
+                : 'I did not understand that command. Say help for full list.';
+            return { success: false, message: msg };
         }
 
         const def = IntentRegistry.get(intent);

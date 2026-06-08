@@ -243,6 +243,61 @@ knowledgeGraphEngine.explainPath(from, to)  // for "why is this overdue?" audit 
 
 Used by: `crmAgent`, `financeAgent`, `proactiveEngine`, Command Center **AI Recommendations** panel.
 
+### 2.5a actionReplayEngine.js (Phase 2 — Approved)
+
+**AI-specific audit trail** — separate from generic `AuditManager`. Every brain turn that queries or mutates ERP state is recorded for replay and compliance.
+
+| Field | Description |
+|-------|-------------|
+| **Who** | `userId`, `username`, `role` from `UserManager` session |
+| **What** | `intent`, `functionName`, `mode` (`preview` \| `execute`), `args` (sanitized) |
+| **When** | ISO timestamp + session turn index |
+| **Why** | `reason` (user utterance), `decisionPath`, `agentId` |
+| **sourceRefs** | Entity keys used in response (`invoiceNo`, `customerId`, …) |
+
+**API:** `record(entry)`, `list(filter)`, `get(id)`, `replay(id)` → re-runs read-only facts or shows execute summary (no silent re-execute of writes).
+
+Persisted: `localStorage` `gtes_ai_action_replay_v1` + optional `Data/gtes_ai_audit.json` via `DataManager`.
+
+### 2.5b sandboxEngine.js (Phase 2 — Approved)
+
+All **financial** and **bulk mutating** actions support two modes:
+
+| Mode | Behavior |
+|------|----------|
+| **Preview** | Dry-run: compute affected rows, totals, warnings; **no ERP writes** |
+| **Execute** | Real `functionEngine.invoke` after `approvalEngine` clears |
+
+**Mandatory sandbox functions (Phase 2):**
+
+- `payroll.generatePayout` — salary payout list
+- `attendance.bulkMark` — bulk attendance
+- `task.bulkCreate` — bulk task creation
+- `voucher.create` — voucher creation with allocation preview
+
+Flow: `decisionEngine` → `sandboxEngine.preview()` → `approvalEngine` (shows preview) → user confirms → `sandboxEngine.execute()`.
+
+### 2.5c trainingCenter.js (Phase 2 — Approved)
+
+**Company-specific AI learning** — consumed by `reasoningEngine` and `knowledgeEngine`.
+
+| Store | Purpose |
+|-------|---------|
+| `aliases.customers` | Spoken name → `customerId` |
+| `aliases.employees` | Spoken name → `employeeId` |
+| `businessTerms` | Company jargon → canonical ERP term |
+| `workflowMappings` | Utterance pattern → preferred intent/workflow |
+| `erpTerminology` | Local labels for invoice/voucher/challan types |
+
+Persisted: `gtes_ai_training_center_v1` (localStorage + optional disk sync).
+
+### 2.5d executiveAgent.js (Phase 5 — Future)
+
+Read-only **business intelligence** agent (stub in Phase 2; full implementation Phase 5):
+
+- Revenue, Profit, Cash Flow, Collections, Customer Analysis
+- Delegates to `analyticsEngine` + `BusinessAnalytics`; all figures **ERP-sourced**
+
 ### 2.5 approvalEngine.js
 
 **All destructive and financial actions require approval** before `functionEngine.invoke` executes.
@@ -868,17 +923,21 @@ Phase 2 implements **deterministic, ERP-sourced intelligence only**. LLM adapter
   reasoningEngine.js          # rules-only; migrate /ai/intentEngine.js
   decisionEngine.js
   functionEngine.js
-  approvalEngine.js           # NEW — gate all T3/T4/destructive
-  knowledgeEngine.js          # read caches + indexes
-  knowledgeGraphEngine.js     # NEW — relationship graph (Phase 2: core edges)
-  proactiveEngine.js          # NEW — daily briefing + alerts
+  approvalEngine.js           # gate all T3/T4/destructive
+  actionReplayEngine.js       # NEW — AI-specific audit trail + replay (Who/What/When/Why/sourceRefs)
+  sandboxEngine.js            # NEW — Preview Mode + Execute Mode for financial/bulk actions
+  trainingCenter.js           # NEW — company-specific AI learning (aliases, terms, workflows)
+  knowledgeEngine.js          # read caches + indexes; uses trainingCenter
+  knowledgeGraphEngine.js     # relationship graph (Phase 2: core edges)
+  proactiveEngine.js          # daily briefing + alerts
   voiceEngine.js              # wrap existing speech adapters
   agents/
     financeAgent.js           # NEW
     hrAgent.js                # NEW
     crmAgent.js               # NEW
     operationsAgent.js        # NEW
-    documentAgent.js          # NEW
+    documentAgent.js
+    executiveAgent.js         # Phase 5 stub — revenue, profit, cash flow, collections, BI
   engines/
     attendanceEngine.js
     employeeEngine.js
@@ -913,6 +972,10 @@ Phase 2 implements **deterministic, ERP-sourced intelligence only**. LLM adapter
 - [ ] All five domain features work via voice + text + Command Center
 - [ ] Every numeric response includes verifiable `sourceRefs`
 - [ ] Destructive/financial actions blocked without `approvalEngine` confirm
+- [ ] `actionReplayEngine` records Who/What/When/Why + sourceRefs for every AI action
+- [ ] `sandboxEngine` Preview/Execute works for payout, bulk attendance, bulk tasks, vouchers
+- [ ] `trainingCenter` aliases/terms used by `reasoningEngine` + `knowledgeEngine`
+- [ ] `executiveAgent` stub present (Phase 5 BI — no write actions)
 - [ ] `knowledgeGraphEngine` resolves Customer → Invoice → Payment chains
 - [ ] Daily briefing runs on dashboard load without errors
 - [ ] V1 `/ai/voiceAgent.js` remains functional behind compatibility façade

@@ -54,14 +54,15 @@ const DataManager = {
         // Raw Data Storage (Bookkeeper Import)
         IMPORT_COLUMNS: 'gtes_import_columns',
         IMPORT_RAW: 'gtes_import_raw',
-        RECYCLE_BIN: 'gtes_recycle_bin'
+        RECYCLE_BIN: 'gtes_recycle_bin',
+        JOB_CARDS: 'jobcards'
     },
 
     /** Never wiped by Book Keeper reset; saves blocked if data would be erased accidentally. */
     PROTECTED_CORE_KEYS: new Set(['gtes_attendance', 'invoices', 'vouchers', 'gtes_employees']),
 
     /** On load, union-merge local/cloud for append-heavy transactional collections only. */
-    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_challans', 'customers', 'purchases', 'gtes_employees']),
+    MERGE_ON_LOAD_KEYS: new Set(['invoices', 'vouchers', 'challans', 'gtes_challans', 'customers', 'purchases', 'gtes_employees', 'jobcards']),
 
     /**
      * Coalesce `gtes:data-changed` emissions to avoid UI refresh storms during sync/import.
@@ -137,6 +138,10 @@ const DataManager = {
                 if (party) return `inv:${party}|${noKey}`;
                 return `invno:${noKey}`;
             }
+        }
+        if (storageKey === 'gtes_users') {
+            const un = String(item.username || '').trim().toLowerCase();
+            if (un) return `user:${un}`;
         }
         if (storageKey === 'customers') {
             const bka = item.bookkeeperAccountId != null ? String(item.bookkeeperAccountId).trim() : '';
@@ -659,7 +664,8 @@ const DataManager = {
             'purchases',
             'gtes_expenses',
             K.EXPENSES,
-            K.ATTENDANCE
+            K.ATTENDANCE,
+            K.JOB_CARDS
         ].filter(Boolean))];
     },
 
@@ -692,6 +698,7 @@ const DataManager = {
                 'gtes_services',
                 'inventoryTransactions',
                 this.KEYS.CHALLANS,
+                this.KEYS.JOB_CARDS,
                 'gtes_inventory_items',
                 'gtes_expenses'
             ]
@@ -710,7 +717,8 @@ const DataManager = {
             this.KEYS.TAX_SCHEMES,
             this.KEYS.BANK_ALIAS,
             this.KEYS.BANK_LINKS,
-            this.KEYS.CHALLANS
+            this.KEYS.CHALLANS,
+            this.KEYS.JOB_CARDS
         ];
         return [...new Set([...core, ...background, ...extra])];
     },
@@ -745,7 +753,8 @@ const DataManager = {
             'purchases',
             'inventory',
             'inventoryTransactions',
-            'gtes_expenses'
+            'gtes_expenses',
+            'jobcards'
         ]);
     },
 

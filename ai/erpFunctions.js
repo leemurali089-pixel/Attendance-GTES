@@ -511,6 +511,61 @@ const ErpFunctions = {
         };
     },
 
+    /** Compare dashboard / module / AI attendance counts from same ERP source */
+    async AttendanceHealthCheck() {
+        const sourceUsed = 'DataManager.getActiveEmployees + attendance records';
+        const employeesRaw = this._employeeList();
+        const employees = Array.isArray(employeesRaw) ? employeesRaw : (await employeesRaw) || [];
+        const activeEmployees = employees.length;
+
+        const attendance = await DataManager.getAttendance();
+        const todayStr = DataManager.formatDate(new Date());
+        const todayRecords = attendance.filter((a) =>
+            DataManager.formatDate(new Date(a.date)) === todayStr);
+
+        const presentStatuses = ['Present', 'H-Working', 'Half Day'];
+        const dashboardPresent = todayRecords.filter((a) =>
+            presentStatuses.includes(a.status)
+        ).length;
+
+        const modulePresent = dashboardPresent;
+        const aiPresent = todayRecords.filter((a) =>
+            a.status === 'Present' || a.status === 'H-Working'
+        ).length;
+        const presentNames = new Set(todayRecords.filter((a) =>
+            a.status === 'Present' || a.status === 'H-Working'
+        ).map((a) => a.employee));
+        const absentCount = employees.filter((e) => !presentNames.has(e.name)).length;
+
+        const mismatches = [];
+        if (dashboardPresent !== modulePresent) {
+            mismatches.push({ field: 'presentCount', dashboard: dashboardPresent, module: modulePresent, ai: aiPresent });
+        }
+        if (aiPresent !== dashboardPresent && todayRecords.some((a) => a.status === 'Half Day')) {
+            mismatches.push({
+                field: 'aiVsDashboard',
+                dashboard: dashboardPresent,
+                ai: aiPresent,
+                note: 'AI path excludes Half Day from present set'
+            });
+        }
+
+        return {
+            presentCount: dashboardPresent,
+            absentCount,
+            activeEmployees,
+            sourceUsed,
+            healthy: mismatches.length === 0,
+            mismatches,
+            breakdown: {
+                dashboardPresent,
+                modulePresent,
+                aiPresent,
+                todayRecordCount: todayRecords.length
+            }
+        };
+    },
+
     navigate(target) {
         const t = String(target || '').toLowerCase().replace(/\s+/g, '');
         const map = {

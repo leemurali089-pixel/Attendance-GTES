@@ -36,6 +36,7 @@ const IntentRegistry = {
 
         navigate: { agent: 'erp', handler: 'navigate', required: ['target'], destructive: false },
         help: { agent: 'erp', handler: 'getHelp', required: [], destructive: false },
+        daily_briefing: { agent: 'erp', handler: 'getDailyBriefing', required: [], destructive: false },
 
         delete_invoice: { agent: 'document', handler: 'deleteInvoice', required: [], destructive: true, confirm: 'Delete this invoice?' },
         delete_task: { agent: 'task', handler: 'deleteTask', required: [], destructive: true, confirm: 'Delete this task?' },

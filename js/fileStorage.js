@@ -146,7 +146,7 @@ const FileStorage = {
     /** Keys that must reach Firebase quickly for desktop ↔ web sync. */
     _priorityCloudSyncKeys() {
         if (this._priorityCloudKeySet) return this._priorityCloudKeySet;
-        const s = new Set(['invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses', 'challans', 'gtes_challans']);
+        const s = new Set(['invoices', 'vouchers', 'customers', 'purchases', 'gtes_expenses', 'challans', 'gtes_challans', 'jobcards']);
         try {
             const DM = window.DataManager;
             if (DM && DM.KEYS) {
@@ -154,6 +154,7 @@ const FileStorage = {
                 if (DM.KEYS.VOUCHERS) s.add(DM.KEYS.VOUCHERS);
                 if (DM.KEYS.EXPENSES) s.add(DM.KEYS.EXPENSES);
                 if (DM.KEYS.CHALLANS) s.add(DM.KEYS.CHALLANS);
+                if (DM.KEYS.JOB_CARDS) s.add(DM.KEYS.JOB_CARDS);
             }
         } catch (_) { /* ignore */ }
         this._priorityCloudKeySet = s;
@@ -212,30 +213,32 @@ const FileStorage = {
         }
     },
 
+    /** Wait for Firebase Anonymous Auth before RTDB reads (rules use auth != null). */
+    async _awaitFirebaseAuth(maxMs = 15000) {
+        if (!window.firebaseAuthReady) return false;
+        try {
+            const ar = await Promise.race([
+                window.firebaseAuthReady,
+                new Promise((resolve) => setTimeout(() => resolve({ ok: false, timeout: true }), maxMs))
+            ]);
+            return !!(ar && ar.ok);
+        } catch (e) {
+            console.warn('[FileStorage] firebaseAuthReady error:', e && e.message);
+            return false;
+        }
+    },
+
     async init() {
         if (typeof window.db === 'undefined') {
             console.error("Realtime DB not initialized.");
             return false;
         }
-        // Finish Firebase Anonymous Auth before any RTDB read, or security
-        // rules that require `auth != null` will deny every path.
-        if (window.firebaseAuthReady) {
-            try {
-                const ar = await Promise.race([
-                    window.firebaseAuthReady,
-                    new Promise((resolve) => setTimeout(() => resolve({ ok: false, timeout: true }), 6000))
-                ]);
-                if (ar && ar.timeout) {
-                    console.warn('[FileStorage] Firebase auth still pending after 6s — continuing with local cache.');
-                } else if (!ar || !ar.ok) {
-                    console.warn(
-                        '[FileStorage] Firebase Anonymous Auth did not succeed — cloud sync may show permission_denied. ' +
-                        'Enable Anonymous in Firebase Console (Authentication → Sign-in method).'
-                    );
-                }
-            } catch (e) {
-                console.warn('[FileStorage] firebaseAuthReady error:', e && e.message);
-            }
+        const authOk = await this._awaitFirebaseAuth(15000);
+        if (!authOk) {
+            console.warn(
+                '[FileStorage] Firebase Anonymous Auth not ready — using disk/local cache until auth succeeds. ' +
+                'Enable Anonymous sign-in (Authentication → Sign-in method) and publish database.rules.json.'
+            );
         }
         this.isCloudReady = true;
         console.log("☁️ Realtime Database cloud connection active.");
@@ -395,6 +398,17 @@ const FileStorage = {
             } catch (e) {
                 console.warn(`[FileStorage] Corrupt localStorage for '${key}', ignoring:`, e);
                 return null;
+            }
+        }
+
+        const authOk = await this._awaitFirebaseAuth();
+        if (!authOk) {
+            if (localData != null) return arrayKey ? toArr(localData) : localData;
+            try {
+                const raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                return localData;
             }
         }
 

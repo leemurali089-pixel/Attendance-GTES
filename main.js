@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, protocol } = require('electron');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -20,6 +20,19 @@ try {
 } catch (e) {
     console.warn('[main] setPath(cache) skipped:', e && e.message);
 }
+
+// Web Speech API in Electron needs a secure context; treat file:// as privileged.
+protocol.registerSchemesAsPrivileged([
+    {
+        scheme: 'file',
+        privileges: {
+            secure: true,
+            standard: true,
+            supportFetchAPI: true,
+            corsEnabled: true
+        }
+    }
+]);
 
 // Prevent noisy Node warnings from background Gmail OAuth/network failures.
 // These errors are already surfaced to the renderer via gmail IPC status.
@@ -238,6 +251,17 @@ app.whenReady().then(async () => {
             console.warn('Dev cache disable skipped:', e && e.message);
         }
     }
+
+    // Allow microphone for voice ERP assistant (Chromium speech recognition).
+    try {
+        session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+            callback(true);
+        });
+        session.defaultSession.setPermissionCheckHandler(() => true);
+    } catch (e) {
+        console.warn('[main] speech permission handler skipped:', e && e.message);
+    }
+
     await ensureDataFolder();
     createWindow();
 
@@ -527,6 +551,22 @@ ipcMain.handle('file-exists', async (event, key) => {
         return false;
     }
 });
+
+// Runtime info for voice diagnostics (Electron vs browser STT)
+ipcMain.handle('runtime:get-info', async () => ({
+    electron: process.versions.electron || null,
+    chromium: process.versions.chrome || null,
+    node: process.versions.node || null,
+    platform: process.platform,
+    isPackaged: app.isPackaged
+}));
+
+ipcMain.handle('speech:get-env-hints', async () => ({
+    hasGoogleApiKey: !!(process.env.GOOGLE_API_KEY && String(process.env.GOOGLE_API_KEY).trim()),
+    hasGoogleClientId: !!(process.env.GOOGLE_DEFAULT_CLIENT_ID),
+    electron: process.versions.electron || null,
+    chromium: process.versions.chrome || null
+}));
 
 // Get data folder path
 ipcMain.handle('get-data-folder', async () => {

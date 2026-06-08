@@ -5,8 +5,12 @@ The app signs in with Firebase ANONYMOUS auth so paths satisfy "auth != null".
 Your project rules must ALLOW any signed-in user (including anonymous) to read/write.
 
 1) Open https://console.firebase.google.com/ → select project "mjs-primelogic"
-2) Build → Realtime Database → Rules
-3) Replace the rules with the contents of database.rules.json in this repo:
+2) Build → Realtime Database
+   IMPORTANT: Use the database in region "asia-southeast1" (URL ends with
+   mjs-primelogic-default-rtdb.asia-southeast1.firebasedatabase.app).
+   If you have multiple databases, pick the DEFAULT one — not Firestore.
+3) Open the Rules tab
+4) Replace the rules with the contents of database.rules.json in this repo:
 
    {
      "rules": {
@@ -15,9 +19,12 @@ Your project rules must ALLOW any signed-in user (including anonymous) to read/w
      }
    }
 
-4) Click "Publish"
+5) Click "Publish" (top right) and confirm
 
-5) Reload the web app (Ctrl+F5). The console should stop showing permission_denied.
+6) Authentication → Sign-in method → Anonymous → Enable (if not already on)
+
+7) Reload the app (Ctrl+Shift+R). Console should show Anonymous auth OK BEFORE any cloud fetch.
+   permission_denied should stop after rules are on the correct Realtime Database.
 
 Security note: Your real access control is the in-app login (gtes_users). These rules
 only let the Firebase client sync data; they do not replace username/password.

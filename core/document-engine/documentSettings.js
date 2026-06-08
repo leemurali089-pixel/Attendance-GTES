@@ -53,7 +53,8 @@ const DocumentSettings = {
 
     defaultsFor(adapter) {
         const base = this.defaults();
-        if (adapter?.settingsKey === 'gtes_invoice_pdf_settings') {
+        if (adapter?.settingsKey === 'gtes_invoice_pdf_settings'
+            || adapter?.settingsKey === 'gtes_job_card_pdf_settings') {
             return { ...base, orientation: 'landscape' };
         }
         return base;

@@ -1,18 +1,36 @@
 const NotificationAgent = {
     getHelpText() {
+        const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+        if (lang === 'ta') {
+            return [
+                'நான் உதவ முடியும்:',
+                'வருகை — "Rajesh attendance podu", "inniku yaar absent", "innal absent"',
+                'வாடிக்கையாளர் — "Vega outstanding evlo", "invoice list", "last invoice"',
+                'ஊழியர் — "Annadurai attendance", "salary evlo", "OT evlo"',
+                'சம்பளம் — "March salary generate pannu", "இந்த மாதம் சம்பளம் எவ்வளவு"',
+                'சுருக்கம் — "இன்றைய சுருக்கம்", "இன்று என்ன நிலை", "today summary"',
+                'Task — "task create pannu", "task complete pannu"',
+                'தமிழ், English, Tanglish — எதுவும் பேசலாம். English வேண்டும்னா "in English" சொல்லுங்கள்.'
+            ].join('\n');
+        }
         return [
             'I can help with:',
             'Attendance — "Rajesh attendance podu", "who absent today", "absent yesterday"',
             'Customers — "outstanding of Vega", "list invoices", "recent invoice billed", "last invoice of Artech"',
             'Employees — "Anna Durai employee details", "show employee Murali", "Annadurai yesterday attendance", "last month salary", "OT evlo"',
-            'Payroll — "March salary generate pannu"',
+            'Payroll — "March salary generate pannu", "this month salary summary"',
+            'Daily briefing — "today summary", "daily briefing", "இன்றைய சுருக்கம்"',
             'Tasks — "installation task create pannu", "complete task"',
             'Documents — "invoice create pannu", "delivery challan create pannu", "job card create pannu"',
-            'Say commands in Tamil, English, or Tanglish.'
+            'Say commands in Tamil, English, or Tanglish. Say "in English" to switch replies.'
         ].join('\n');
     },
 
     format(intent, data = {}) {
+        if (typeof ResponseI18n !== 'undefined') {
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+            return ResponseI18n.format(intent, data, lang);
+        }
         switch (intent) {
             case 'mark_attendance':
                 return `${data.employeeName} has been marked ${data.status} for ${data.date}.`;
@@ -65,6 +83,10 @@ const NotificationAgent = {
     },
 
     formatClarify(type, data = {}) {
+        if (typeof ResponseI18n !== 'undefined') {
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+            return ResponseI18n.formatClarify(type, data, lang);
+        }
         switch (type) {
             case 'employee_need_name':
                 return 'Which employee? Say the name or employee ID (e.g. emp_0001 or EMP001).';
@@ -92,8 +114,28 @@ const NotificationAgent = {
         }
     },
 
+    formatClarifySpeak(type, data = {}) {
+        if (typeof ResponseI18n !== 'undefined') {
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+            return ResponseI18n.formatClarifySpeak(type, data, lang);
+        }
+        return data.message || 'Please choose an option.';
+    },
+
+    formatClarifySummary(type, data = {}) {
+        if (typeof ResponseI18n !== 'undefined') {
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+            return ResponseI18n.formatClarifySummary(type, data, lang);
+        }
+        return data.message || 'Please clarify.';
+    },
+
     speak(text) {
-        if (typeof SpeechEngine !== 'undefined') return SpeechEngine.speak(text);
+        if (typeof SpeechEngine !== 'undefined') {
+            const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getSpeechSynthesisLang() : undefined;
+            if (lang && SpeechEngine.speakWithLang) return SpeechEngine.speakWithLang(text, lang);
+            return SpeechEngine.speak(text);
+        }
         if (typeof App !== 'undefined') App.showNotification(text, 'info');
         return Promise.resolve();
     }

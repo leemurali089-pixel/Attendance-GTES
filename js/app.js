@@ -625,6 +625,12 @@ const App = {
                 } catch (e) { /* ignore */ }
                 return;
             }
+            if ((v === 'jobcard' || v === 'delivery') && window.DeliveryUI && (key === 'jobcards' || key === K.JOB_CARDS)) {
+                try {
+                    DeliveryUI.loadJobCards();
+                } catch (e) { /* ignore */ }
+                return;
+            }
             if (v === 'accounting' && window.AccountingUI) {
                 if (['invoices', 'vouchers', 'customers', 'purchases', K.ACCOUNTS, K.JOURNAL_ENTRIES].indexOf(key) !== -1) {
                     await AccountingUI.load();
@@ -842,7 +848,11 @@ const App = {
 
             this._setInitialBootProgress(100, 'Ready');
             this.hideLoader(0);
+            // Premium shell is home after login — drop boot-time landing from the back stack.
+            this.viewHistory = ['dashboard'];
+            this._isGoingBack = true;
             void this.showView('dashboard', {}, { suppressLoader: true, fastBoot: true });
+            this._isGoingBack = false;
             if (typeof window.__gtesSyncShellVisibility === 'function') {
                 window.__gtesSyncShellVisibility();
             }
@@ -1329,7 +1339,9 @@ const App = {
     },
 
     _canNavigateBackViaShortcut() {
-        return this.currentView !== 'dashboard' && this.currentView !== 'landing' && this.viewHistory.length > 1;
+        if (this.currentView === 'dashboard' || this.currentView === 'landing') return false;
+        if (this._isLoggedInForNav()) return true;
+        return this.viewHistory.length > 1;
     },
 
     // Centralized Logout Logic
@@ -1378,6 +1390,14 @@ const App = {
 
     showLandingPage(options = {}) {
         const retainLoginOverlay = options && options.retainLoginOverlay === true;
+
+        if (!retainLoginOverlay && this._isLoggedInForNav()) {
+            this.viewHistory = ['dashboard'];
+            this._isGoingBack = true;
+            void this.showView('dashboard');
+            this._isGoingBack = false;
+            return;
+        }
 
         this.currentView = 'landing';
         this.viewHistory = ['landing'];
@@ -1587,6 +1607,7 @@ const App = {
                 if (!this._isGoingBack && this.viewHistory[this.viewHistory.length - 1] !== viewName) {
                     this.viewHistory.push(viewName);
                 }
+                if (!this._isGoingBack) this._pruneLegacyNavHistory();
             }
             this.currentView = viewName;
             this.currentViewParams = params && typeof params === 'object' ? { ...params } : {};
@@ -1670,22 +1691,48 @@ const App = {
         indicator.style.opacity = '1';
     },
 
+    _isLoggedInForNav() {
+        try {
+            return !!(typeof UserManager !== 'undefined' && UserManager.SESSION_KEY
+                && sessionStorage.getItem(UserManager.SESSION_KEY));
+        } catch (_) {
+            return false;
+        }
+    },
+
+    /** Drop legacy Welcome Back landing from history when the premium shell dashboard is home. */
+    _pruneLegacyNavHistory() {
+        if (!this._isLoggedInForNav()) return;
+        const pruned = this.viewHistory.filter((v) => v !== 'landing');
+        if (pruned.length) {
+            this.viewHistory = pruned;
+            return;
+        }
+        this.viewHistory = ['dashboard'];
+    },
+
     goBack() {
+        if (this.currentView === 'dashboard' || this.currentView === 'landing') {
+            return;
+        }
+
+        if (this._isLoggedInForNav()) {
+            this.viewHistory = ['dashboard'];
+            this._isGoingBack = true;
+            this.showView('dashboard');
+            this._isGoingBack = false;
+            return;
+        }
+
         if (this.viewHistory.length > 1) {
             this.viewHistory.pop();
-            const previousView = this.viewHistory[this.viewHistory.length - 1];
+            this._pruneLegacyNavHistory();
+            const previousView = this.viewHistory[this.viewHistory.length - 1] || 'dashboard';
             this._isGoingBack = true;
             this.showView(previousView);
             this._isGoingBack = false;
             return;
         }
-        // Stack is only the root screen — do not skip intermediate pages elsewhere; nothing to pop.
-        if (this.currentView === 'dashboard' || this.currentView === 'landing') {
-            return;
-        }
-        this._isGoingBack = true;
-        this.showView('dashboard');
-        this._isGoingBack = false;
     },
 
     updateBackButton() {
@@ -1702,8 +1749,10 @@ const App = {
             mainContent.insertBefore(backButtonContainer, mainContent.firstChild);
         }
 
-        // Show back button for all views except dashboard and landing
-        if (this.currentView !== 'dashboard' && this.currentView !== 'landing' && this.viewHistory.length > 1) {
+        const canGoBack = this._isLoggedInForNav()
+            ? (this.currentView !== 'dashboard' && this.currentView !== 'landing')
+            : (this.currentView !== 'dashboard' && this.currentView !== 'landing' && this.viewHistory.length > 1);
+        if (canGoBack) {
             backButtonContainer.innerHTML = `
                 <button class="btn btn-outline-light btn-sm mb-3" onclick="App.goBack()" id="backButton">
                     <i class="bi bi-arrow-left"></i><span class="btn-text">Back</span>

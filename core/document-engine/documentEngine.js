@@ -370,9 +370,9 @@ const DocumentEngine = {
             printReady: !!window.electronAPI?.printPdfBuffer,
             downloadReady: true
         };
-        const badge = document.getElementById('gtesDocPageCount')
-            || document.getElementById('gtesInvPageCount');
-        if (badge) badge.textContent = `Pages: ${layout.pages?.length || 1}`;
+        if (typeof DocumentPreview !== 'undefined') {
+            DocumentPreview.syncPageCount(layout.pages?.length || 1);
+        }
         if (typeof DocumentToolbar !== 'undefined') DocumentToolbar.rewireActions(this);
         this._updateDebugPanel(settings);
         this._prefetchPdf(type, id);
@@ -386,9 +386,6 @@ const DocumentEngine = {
             const m = text.match(/\/Type\s*\/Page\b(?!s)/g);
             const pdfPages = m ? m.length : 1;
             this._session.pdfPageCount = pdfPages;
-            const badge = document.getElementById('gtesDocPageCount')
-                || document.getElementById('gtesInvPageCount');
-            if (badge) badge.textContent = `Pages: ${pdfPages}`;
             this._updateDebugPanel(settings);
         } catch (e) {
             console.error('[DocumentEngine] PDF prefetch failed', e);
@@ -519,6 +516,9 @@ const DocumentEngine = {
 
             // Render HTML preview first — never block on pdfmake (download/print use separate path).
             DocumentPreview.render(pkg.layout, adapter);
+            if (typeof DocumentPreview !== 'undefined') {
+                DocumentPreview.syncPageCount(pkg.layout.pages?.length || 1);
+            }
             this._logPreviewDom();
 
             this._session = {
@@ -598,16 +598,18 @@ const DocumentEngine = {
             console.log('[DocumentEngine] print start', { type, id });
             const { bytes, settings } = await this._ensurePdfBytes(type, id);
             const filename = this._session?.filename || adapter.getFilename(entity);
-            await DocumentPrintManager.print(bytes, filename, {
+            const printRes = await DocumentPrintManager.print(bytes, filename, {
                 landscape: settings.orientation === 'landscape',
                 pageSize: settings.pageSize || 'A4'
             });
+            if (printRes?.canceled) return;
             if (this._session) {
                 this._session.lastPrintSettings = { ...settings };
             }
             this._updateDebugPanel(settings);
             App.showNotification('Sent to printer', 'success');
         } catch (e) {
+            if (/cancel/i.test(e?.message || '')) return;
             console.error('[DocumentEngine] print failed', e);
             App.showNotification(e.message || 'Print failed', 'error');
         }

@@ -36,6 +36,51 @@ const DocumentPreview = {
         this._updateNav();
     },
 
+    syncPageCount(pageCount) {
+        const pages = Math.max(1, parseInt(pageCount, 10) || 1);
+        this._state.pageCount = pages;
+        if (this._state.currentPage > pages) this._state.currentPage = pages;
+        if (typeof InvoicePreviewV3 !== 'undefined') {
+            InvoicePreviewV3._state.pageCount = pages;
+            if (InvoicePreviewV3._state.currentPage > pages) {
+                InvoicePreviewV3._state.currentPage = pages;
+            }
+        }
+        this._updateNav();
+    },
+
+    applyPageSettings(host, settings = {}) {
+        if (!host) return;
+        const dims = typeof DocumentSettings !== 'undefined'
+            ? DocumentSettings.pageDimensionsMm(settings)
+            : { w: 210, h: 297 };
+        const marginMm = typeof DocumentSettings !== 'undefined'
+            ? DocumentSettings.marginMm(settings.marginPreset || 'normal')
+            : 8;
+        const scale = (settings.scale || 100) / 100;
+        host.dataset.docScale = String(settings.scale || 100);
+        host.dataset.docPageSize = settings.pageSize || 'A4';
+        host.dataset.docOrientation = settings.orientation || 'portrait';
+        host.style.setProperty('--doc-page-w', `${dims.w}mm`);
+        host.style.setProperty('--doc-page-h', `${dims.h}mm`);
+        host.style.setProperty('--doc-margin', `${marginMm}mm`);
+        host.style.setProperty('--doc-scale', String(scale));
+        host.querySelectorAll('.inv-v3-page-label').forEach((el) => {
+            el.style.width = `${dims.w}mm`;
+        });
+        host.querySelectorAll('.doc-engine-page-frame, .inv-v3-page-frame').forEach((frame) => {
+            frame.style.maxWidth = `${dims.w * scale}mm`;
+        });
+        host.querySelectorAll('.inv-v3-page, .inv-v3-page-sheet').forEach((page) => {
+            page.style.width = `${dims.w}mm`;
+            page.style.minHeight = `${dims.h}mm`;
+            page.style.padding = `${marginMm}mm`;
+            page.style.transform = scale !== 1 ? `scale(${scale})` : '';
+            page.style.transformOrigin = 'top center';
+            page.style.marginBottom = scale !== 1 ? `${(dims.h * (scale - 1))}mm` : '';
+        });
+    },
+
     _updateNav() {
         const label = document.getElementById('gtesDocPageNavLabel')
             || document.getElementById('gtesInvPageNavLabel');
@@ -95,10 +140,11 @@ const DocumentPreview = {
         }
         const host = this._stageEl();
         if (!host || !layoutResult?.pages) return;
-        const { pages, doc } = layoutResult;
-        this._state.pageCount = pages.length;
+        const { pages, doc, settings } = layoutResult;
+        this.syncPageCount(pages.length);
         this._state.currentPage = 1;
         host.innerHTML = pages.map((p) => `<section class="doc-engine-page-frame" data-page="${p.pageNumber}">Page ${p.pageNumber}</section>`).join('');
+        this.applyPageSettings(host, settings || layoutResult.settings || {});
         this._bindNavOnce();
         host.querySelectorAll('.doc-engine-page-frame').forEach((f) => this._observer?.observe(f));
         this._updateNav();

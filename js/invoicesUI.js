@@ -2581,6 +2581,24 @@ const InvoicesUI = {
             return;
         }
 
+        const sourceJobCardId = form.getAttribute('data-source-jc') || null;
+        let serviceChallanId = form.getAttribute('data-source-sc') || null;
+        let serviceChallanNo = serviceChallanId;
+        if (sourceJobCardId && !serviceChallanNo) {
+            if (typeof DocumentBuildCommon !== 'undefined' && DocumentBuildCommon.resolveServiceChallanNoForJobCard) {
+                serviceChallanNo = DocumentBuildCommon.resolveServiceChallanNoForJobCard(sourceJobCardId) || null;
+                serviceChallanId = serviceChallanNo;
+            } else if (typeof DeliveryManager !== 'undefined' && DeliveryManager.getAllChallans) {
+                const sc = (DeliveryManager.getAllChallans() || []).find(
+                    (c) => c.jobCardId === sourceJobCardId && c.type === 'service'
+                );
+                if (sc) {
+                    serviceChallanId = sc.id;
+                    serviceChallanNo = sc.id;
+                }
+            }
+        }
+
         const invoiceData = {
             id: formData.get('invoiceNo'),
             invoiceNo: formData.get('invoiceNo'), // Also store explicitly for table display
@@ -2616,7 +2634,9 @@ const InvoicesUI = {
                 date: formData.get('dispatchDate') || ''
             },
             status: 'pending',
-            jobCardId: form.getAttribute('data-source-jc') || null,
+            jobCardId: sourceJobCardId,
+            serviceChallanId: serviceChallanId || null,
+            serviceChallanNo: serviceChallanNo || null,
             ledgerAccount: salesLedgerForType,
             gstLedgerAccount: isGST ? enteredLedgerAccount : null,
             plainLedgerAccount: !isGST ? enteredLedgerAccount : null,
@@ -2672,9 +2692,14 @@ const InvoicesUI = {
             }
 
             if (invoiceData.jobCardId && typeof JobCardManager !== 'undefined') {
+                const jcStatus = (typeof DocumentBuildCommon !== 'undefined' && DocumentBuildCommon.resolveJobCardDispatchStatus)
+                    ? DocumentBuildCommon.resolveJobCardDispatchStatus(invoice)
+                    : 'job-done';
                 void JobCardManager.updateJobCard(invoiceData.jobCardId, {
-                    status: 'dispatched',
-                    invoiceId: invoice.id
+                    status: jcStatus,
+                    invoiceId: invoice.id,
+                    linkedInvoiceId: invoice.id,
+                    linkedInvoiceNo: invoice.invoiceNo || invoice.id
                 }).catch((err) => console.error('Job card update:', err));
             }
 

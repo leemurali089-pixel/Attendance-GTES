@@ -1,49 +1,56 @@
 /**
- * Speech abstraction — swap providers without changing ERP agents.
+ * Speech facade — delegates to SpeechProviderManager (never binds to browser directly).
  */
 const SpeechEngine = {
-    _adapter: null,
-    _adapters: {
-        browser: () => BrowserSpeechAdapter,
-        openai: () => OpenAISpeechAdapter,
-        google: () => GoogleSpeechAdapter,
-        deepgram: () => DeepgramSpeechAdapter
-    },
-
     init() {
-        const settings = MemoryManager.getSettings();
-        const factory = this._adapters[settings.speechProvider] || this._adapters.browser;
-        this._adapter = factory();
-        const ok = this._adapter.init();
-        this._adapter.setLanguage(settings.responseLang === 'ta' ? 'ta-IN' : 'en-IN');
-        return ok;
+        if (typeof SpeechProviderManager === 'undefined') {
+            console.warn('[SpeechEngine] SpeechProviderManager not loaded');
+            return false;
+        }
+        return SpeechProviderManager.init();
     },
 
     getAdapter() {
-        if (!this._adapter) this.init();
-        return this._adapter;
+        return SpeechProviderManager.getProvider();
+    },
+
+    getDiagnostics() {
+        return typeof SpeechProviderManager !== 'undefined'
+            ? SpeechProviderManager.getDiagnostics()
+            : null;
     },
 
     startListening(options) {
-        return this.getAdapter().start(options);
+        const lang = typeof LanguageEngine !== 'undefined'
+            ? LanguageEngine.getSpeechRecognitionLang()
+            : 'en-IN';
+        SpeechProviderManager.setLanguage(lang);
+        return SpeechProviderManager.startListening(options);
     },
 
     stopListening() {
-        if (this._adapter) this._adapter.stop();
+        if (typeof SpeechProviderManager !== 'undefined') {
+            SpeechProviderManager.stopListening();
+        }
     },
 
     speak(text) {
-        const settings = MemoryManager.getSettings();
-        const lang = settings.responseLang === 'ta' ? 'ta-IN' : 'en-IN';
-        return this.getAdapter().speak(text, lang);
+        const lang = typeof LanguageEngine !== 'undefined'
+            ? LanguageEngine.getSpeechSynthesisLang()
+            : 'en-IN';
+        return SpeechProviderManager.speak(text, lang);
+    },
+
+    speakWithLang(text, lang) {
+        return SpeechProviderManager.speak(text, lang || 'en-IN');
+    },
+
+    setResponseLanguage(lang) {
+        if (typeof LanguageEngine !== 'undefined') LanguageEngine.setResponseLang(lang);
     },
 
     setProvider(name) {
-        const settings = MemoryManager.getSettings();
-        settings.speechProvider = name;
-        MemoryManager.saveSettings(settings);
-        this._adapter = null;
-        return this.init();
+        return SpeechProviderManager.setProvider(name);
     }
 };
 

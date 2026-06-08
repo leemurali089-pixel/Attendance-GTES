@@ -117,6 +117,15 @@ const InvoicePdfMakeV3 = {
             { stack, margin: [0, 0, 0, sp(6)] },
             { text: doc.meta.docTitle, fontSize: fs(13), bold: true, alignment: 'center' }
         ];
+        if (doc.meta.docSubtitle) {
+            titleStack.push({
+                text: doc.meta.docSubtitle,
+                fontSize: fs(9),
+                italics: true,
+                alignment: 'center',
+                margin: [0, sp(2), 0, 0]
+            });
+        }
         if (doc.copyLabel) {
             titleStack.push({
                 text: `(${doc.copyLabel})`,
@@ -152,6 +161,9 @@ const InvoicePdfMakeV3 = {
             : null;
         if (setOff) blocks.push(setOff);
         blocks.push(this._closingBlock(doc));
+        if (doc.payment?.isPaid && typeof DocumentBuildCommon !== 'undefined') {
+            blocks.push(DocumentBuildCommon.paidStampPdfBlock());
+        }
         return blocks;
     },
 
@@ -160,20 +172,59 @@ const InvoicePdfMakeV3 = {
         const fs = (n) => this._ctx.fs(n);
         const sp = (n) => this._ctx.sp(n);
         const line = (text) => ({ text, fontSize: fs(8), margin: [0, 0, 0, sp(2)] });
-        const noLabel = doc.meta.isDc ? 'Delivery Challan No' : 'Invoice No';
-        const leftStack = [
-            line(`${noLabel} : ${inv.no || '-'}`),
-            line(`Date : ${inv.dateDisplay || inv.date || '-'}`),
-            line(`Purchase Order No : ${inv.poNumber || '-'}`)
-        ];
-        const rightStack = [
-            line(`Dispatch Document No : ${inv.dispatchDocumentNo || '-'}`),
-            line(`Dispatch Through : ${inv.dispatchThrough || '-'}`),
-            line(`Destination : ${inv.destination || '-'}`),
-            line(`e-Way Bill No. : ${inv.ewayBillNo || '-'}`)
-        ];
+        let leftStack;
+        let rightStack;
+        if (doc.meta.isServiceChallan) {
+            leftStack = [
+                line(`Service Challan No : ${inv.no || '-'}`),
+                line(`Date : ${inv.dateDisplay || inv.date || '-'}`)
+            ];
+            if (inv.jobCardNo) leftStack.push(line(`Job Card No : ${inv.jobCardNo}`));
+            if (inv.customerRef) leftStack.push(line(`Customer DC / Ref : ${inv.customerRef}`));
+            rightStack = null;
+        } else {
+            const noLabel = doc.meta.isDc ? 'Delivery Challan No' : 'Invoice No';
+            leftStack = [
+                line(`${noLabel} : ${inv.no || '-'}`),
+                line(`Date : ${inv.dateDisplay || inv.date || '-'}`),
+                line(`Purchase Order No : ${inv.poNumber || '-'}`)
+            ];
+            if (inv.jobCardNo) leftStack.push(line(`Job Card No : ${inv.jobCardNo}`));
+            if (inv.serviceChallanNo) leftStack.push(line(`Service Challan No : ${inv.serviceChallanNo}`));
+            rightStack = [
+                line(`Dispatch Document No : ${inv.dispatchDocumentNo || '-'}`),
+                line(`Dispatch Through : ${inv.dispatchThrough || '-'}`),
+                line(`Destination : ${inv.destination || '-'}`),
+                line(`e-Way Bill No. : ${inv.ewayBillNo || '-'}`)
+            ];
+        }
+        if (doc.payment?.show) {
+            leftStack.push({
+                text: `Payment Status : ${doc.payment.label}`,
+                fontSize: fs(8),
+                bold: true,
+                color: doc.payment.color || '#111',
+                margin: [0, 0, 0, sp(2)]
+            });
+        }
         const pad = sp(6);
         const marginB = sp(8);
+        const gridLayout = {
+            hLineWidth: () => 1,
+            vLineWidth: () => 1,
+            hLineColor: () => '#000',
+            vLineColor: () => '#000'
+        };
+        if (doc.meta.isServiceChallan) {
+            return {
+                table: {
+                    widths: [this._ctx.contentWidthPt],
+                    body: [[{ stack: leftStack, margin: [pad, pad, pad, pad] }]]
+                },
+                layout: gridLayout,
+                margin: [0, 0, 0, marginB]
+            };
+        }
         return {
             table: {
                 widths: this._halfTableWidths(),
@@ -182,12 +233,7 @@ const InvoicePdfMakeV3 = {
                     { stack: rightStack, margin: [pad, pad, pad, pad] }
                 ]]
             },
-            layout: {
-                hLineWidth: () => 1,
-                vLineWidth: () => 1,
-                hLineColor: () => '#000',
-                vLineColor: () => '#000'
-            },
+            layout: gridLayout,
             margin: [0, 0, 0, marginB]
         };
     },
@@ -210,6 +256,25 @@ const InvoicePdfMakeV3 = {
         const fs = (n) => this._ctx.fs(n);
         const sp = (n) => this._ctx.sp(n);
         const hdrStyle = { bold: true, fontSize: fs(8), alignment: 'center', fillColor: '#e8e8e8' };
+        const gridLayout = {
+            hLineWidth: () => 1,
+            vLineWidth: () => 1,
+            hLineColor: () => '#000',
+            vLineColor: () => '#000'
+        };
+        if (doc.meta.isServiceChallan) {
+            return {
+                table: {
+                    widths: [this._ctx.contentWidthPt],
+                    body: [
+                        [{ text: 'Received From', ...hdrStyle }],
+                        [{ stack: this._partyLines(doc.receiver, fs), margin: [sp(4), sp(4), sp(4), sp(4)] }]
+                    ]
+                },
+                layout: gridLayout,
+                margin: [0, 0, 0, sp(8)]
+            };
+        }
         return {
             table: {
                 widths: this._halfTableWidths(),
@@ -224,12 +289,7 @@ const InvoicePdfMakeV3 = {
                     ]
                 ]
             },
-            layout: {
-                hLineWidth: () => 1,
-                vLineWidth: () => 1,
-                hLineColor: () => '#000',
-                vLineColor: () => '#000'
-            },
+            layout: gridLayout,
             margin: [0, 0, 0, sp(8)]
         };
     },
@@ -265,13 +325,16 @@ const InvoicePdfMakeV3 = {
 
         if (doc.meta.isDc) {
             const colCount = isGst ? 8 : 7;
-            const remarksText = String(doc.remarks || '').trim() || '-';
-            const remarksRow = [
-                { text: 'Remarks:', bold: true, fontSize: fs(7), alignment: 'left' },
-                { text: remarksText, fontSize: fs(7), colSpan: colCount - 1, alignment: 'left' }
-            ];
-            for (let i = 2; i < colCount; i++) remarksRow.push({});
-            body.push(remarksRow);
+            const remarksText = String(doc.remarks || '').trim();
+            if (!doc.meta.isServiceChallan || remarksText) {
+                const displayText = remarksText || '-';
+                const remarksRow = [
+                    { text: 'Remarks:', bold: true, fontSize: fs(7), alignment: 'left' },
+                    { text: displayText, fontSize: fs(7), colSpan: colCount - 1, alignment: 'left' }
+                ];
+                for (let i = 2; i < colCount; i++) remarksRow.push({});
+                body.push(remarksRow);
+            }
         }
 
         return {
@@ -308,7 +371,9 @@ const InvoicePdfMakeV3 = {
                     {
                         stack: [
                             ...(doc.meta.isDc ? [{
-                                text: 'Received in Good Condition',
+                                text: doc.meta.isServiceChallan && doc.serviceAck
+                                    ? doc.serviceAck
+                                    : 'Received in Good Condition',
                                 fontSize: fs(8),
                                 bold: true,
                                 margin: [0, 0, 0, sp(8)]

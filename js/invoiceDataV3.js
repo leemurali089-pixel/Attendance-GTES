@@ -268,6 +268,12 @@ const InvoiceDataV3 = {
             : DocumentSettings.normalizeCopyTypes([this.getCopyType(invoiceId)]);
         const copyType = copyTypes[0] || 'original';
         const dispatch = this._buildDispatch(invoice);
+        const jobCardNo = typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.resolveInvoiceJobCardRef(invoice)
+            : String(invoice.jobCardId || '').trim();
+        const serviceChallanNo = typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.resolveInvoiceServiceChallanRef(invoice)
+            : String(invoice.serviceChallanNo || invoice.serviceChallanId || '').trim();
         const receiver = this._buildParty(customer, invoice, 'receiver');
         const consignee = this._buildParty(customer, invoice, 'consignee');
         const amountWords = typeof InvoicesUI !== 'undefined' && InvoicesUI.numberToWords
@@ -281,9 +287,24 @@ const InvoiceDataV3 = {
             ? DocumentBuildCommon.resolveDocumentRemarks(invoice)
             : String(invoice.narration || invoice.remarks || '').trim();
 
+        let enriched = invoice;
+        if (typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoicesWithBalance) {
+            enriched = InvoiceManager.getInvoicesWithBalance().find((i) => i.id === invoiceId) || invoice;
+        }
+        const payment = typeof DocumentBuildCommon !== 'undefined'
+            ? DocumentBuildCommon.resolvePaymentStatus({
+                status: enriched.status || invoice.status,
+                balance: enriched.balance,
+                total: grandTotal,
+                isPaid: enriched.isPaid,
+                skipDisplay: isCreditNote || isDc
+            })
+            : { show: false };
+
         return {
             invoiceId,
             meta: { isGst, isPlain, isDc, isCreditNote, isInterstate, docTitle },
+            payment,
             copyTypes,
             copyType,
             copyLabel: this.copyLabel(copyType),
@@ -292,6 +313,8 @@ const InvoiceDataV3 = {
                 no: invoice.invoiceNo || invoice.id,
                 date: invoice.date || '',
                 dateDisplay: this._formatDateDisplay(invoice.date),
+                jobCardNo: jobCardNo || null,
+                serviceChallanNo: serviceChallanNo || null,
                 ...dispatch
             },
             receiver,

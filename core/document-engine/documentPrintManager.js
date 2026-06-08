@@ -75,7 +75,11 @@ const DocumentPrintManager = {
             pageSize: opts.pageSize || 'A4'
         });
         console.log('[DocumentPrintManager] printPdfBuffer result', res);
-        if (!res?.success) throw new Error(res?.error || 'Print failed');
+        if (!res?.success) {
+            const err = res?.error || 'Print failed';
+            if (/cancel/i.test(err)) return { success: false, canceled: true };
+            throw new Error(err);
+        }
         return res;
     }
 };
