@@ -1,7 +1,7 @@
 // OT Calculation Tests
 // Run these tests to verify calcOT() function
 
-const DataManager = require('./data.js');
+const DataManager = require('../js/data.js');
 
 // Test Suite
 const tests = [

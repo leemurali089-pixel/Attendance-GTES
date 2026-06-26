@@ -23,11 +23,11 @@ const TamilCommandRegistry = {
 
     strongCommandRe: /(?:outstanding|pending(?:\s+amount)?|invoices?|help|what\s+(?:are\s+)?(?:the\s+)?things?\s+(?:you\s+)?can\s+do|what\s+can\s+you\s+do|(?:list|show)\s+(?:down\s+)?(?:all\s+)?(?:the\s+)?(?:employees?|invoices?)|employees?\s+list|absent|(?:generate|create)\s+(?:salary|invoice|task)|attendance\s+(?:of|for|od|summary|report)|(?:last|latest|recent)\s+invoice)/i,
 
-    normalize(text) {
-        if (typeof LanguageEngine !== 'undefined' && LanguageEngine.normalizeForParse) {
+    normalize(text, isInternal = false) {
+        if (!isInternal && typeof LanguageEngine !== 'undefined' && LanguageEngine.normalizeForParse) {
             const raw = String(text || '');
             if (LanguageEngine.TAMIL_SCRIPT_RE.test(raw)) {
-                return LanguageEngine.normalizeForParse(raw).text;
+                return LanguageEngine.normalizeForParse(raw, true).text;
             }
         }
         return String(text || '')
@@ -193,7 +193,10 @@ const TamilCommandRegistry = {
         { intent: 'list_employees', re: /employees?\s+(?:list|kaatu|show)\s*$/i, slots: [] },
 
         // Attendance — absent with date
-        { intent: 'absent_employees', re: /(?:how\s+many\s+)?(?:employees?\s+)?(?:are\s+|were\s+)?absent\s+(?:yesterday|innal|innalai)/i, slots: [] },
+        { intent: 'absent_employees', re: /(?:yesterday|innal|innalai|நேற்று)\s+(?:attendance|varugai)\s*(?:status|sollu|report|summary|list)?/i, slots: [] },
+        { intent: 'absent_employees', re: /(?:attendance|varugai)\s*(?:status|sollu|report|summary)?\s*(?:yesterday|innal|innalai|நேற்று)/i, slots: [] },
+        { intent: 'mark_holiday', re: /mark\s+(?:today\s+as\s+)?holiday|mark\s+holiday\s+(?:for\s+)?(?:all|everyone)|(?:all\s+)?employees?\s+holiday|sunday\s+holiday|holiday\s+for\s+all/i, slots: [] },
+        { intent: 'customer_outstanding', re: /^(?:total\s+)?(?:pending\s+amount|total\s+(?:pending|outstanding)|total\s+outstanding)\s*$/i, slots: [] },
         { intent: 'absent_employees', re: /(?:yesterday|innal|innalai)\s+(?:who\s+)?(?:were\s+)?absent|absent\s+(?:yesterday|innal|innalai)/i, slots: [] },
         { intent: 'absent_employees', re: /(?:yaar|who)\s+absent|absent\s+(?:inniku|today|employees?)|absent\s+list|inniku\s+yaar\s+absent|innal\s+yaar\s+absent|yaar\s+varala|(?:inniku|today)\s+yaar\s+varala/i, slots: [] },
         { intent: 'absent_employees', re: /(?:இன்று|நேற்று)?\s*யார்\s*வரவில்லை|இன்று\s*யார்\s*வரவில்லை/u, slots: [] },

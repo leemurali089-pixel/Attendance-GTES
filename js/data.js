@@ -3321,6 +3321,11 @@ const RecurringInvoiceManager = {
     }
 };
 
-// Initialize on load
-DataManager.init();
+// Export/Initialize
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+    module.exports = DataManager;
+} else {
+    // Initialize on load (browser/renderer only)
+    DataManager.init();
+}
 

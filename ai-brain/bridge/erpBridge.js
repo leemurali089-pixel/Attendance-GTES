@@ -35,8 +35,11 @@
         if (typeof ErpFunctions !== 'undefined' && ErpFunctions._employeeList) {
             return ErpFunctions._employeeList();
         }
-        if (typeof DataManager !== 'undefined' && DataManager.getActiveEmployees) {
-            return DataManager.getActiveEmployees() || [];
+        if (typeof DataManager !== 'undefined' && DataManager.getData) {
+            const key = DataManager.KEYS?.EMPLOYEES || 'gtes_employees';
+            const raw = DataManager.getData(key);
+            if (Array.isArray(raw)) return raw;
+            if (raw && typeof raw === 'object') return Object.values(raw).filter(function (v) { return v && typeof v === 'object'; });
         }
         return [];
     }
@@ -193,13 +196,14 @@
             const rawIntent = reasoning.intent;
 
             if (rawIntent === 'briefing.daily' && typeof ProactiveEngine !== 'undefined') {
-                const b = ProactiveEngine.getDailyBriefing();
-                return Promise.resolve(_normalizeResult({
-                    success: true,
-                    message: b.briefing,
-                    data: b,
-                    sourceRefs: b.sourceRefs
-                }));
+                return Promise.resolve(ProactiveEngine.getDailyBriefing()).then(function (b) {
+                    return _normalizeResult({
+                        success: true,
+                        message: b.briefing || b.message,
+                        data: b,
+                        sourceRefs: b.sourceRefs
+                    });
+                });
             }
 
             if (typeof CommandRouter === 'undefined' || !CommandRouter.route) {

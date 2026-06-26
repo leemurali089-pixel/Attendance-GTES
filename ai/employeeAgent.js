@@ -2,10 +2,12 @@ const EmployeeAgent = {
     _resolveEmployee(slots = {}) {
         let query = slots.employeeName || slots.employeeId || ContextManager.resolveEmployeeName(slots);
         if (!query) {
+            const list = typeof ErpFunctions !== 'undefined' ? ErpFunctions.listEmployees() : [];
+            const optText = list.length ? '\nAvailable options: ' + list.join(', ') : '';
             return {
                 needClarify: true,
                 state: 'need_name',
-                message: NotificationAgent.formatClarify('employee_need_name')
+                message: NotificationAgent.formatClarify('employee_need_name') + optText
             };
         }
 
@@ -38,12 +40,14 @@ const EmployeeAgent = {
         }
 
         const suggestions = ErpFunctions.suggestSimilarEmployees(query, 5);
+        const list = typeof ErpFunctions !== 'undefined' ? ErpFunctions.listEmployees() : [];
+        const optText = list.length ? '\nAvailable options: ' + list.join(', ') : '';
         return {
             needClarify: true,
             state: 'need_name',
             query,
             candidates: suggestions.map((name) => ({ name })),
-            message: NotificationAgent.formatClarify('employee_not_found', { query, suggestions })
+            message: NotificationAgent.formatClarify('employee_not_found', { query, suggestions }) + optText
         };
     },
 

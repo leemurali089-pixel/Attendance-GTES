@@ -1,7 +1,7 @@
 // isActiveOnDate() Tests
 // Run these tests to verify employee active date filtering
 
-const DataManager = require('./data.js');
+const DataManager = require('../js/data.js');
 
 // Test Suite
 const tests = [

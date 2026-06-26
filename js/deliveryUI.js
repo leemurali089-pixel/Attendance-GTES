@@ -29,7 +29,8 @@ const DeliveryUI = {
         technician: 'all',
         status: 'all', // all, pending, paid (for invoices), pending-invoice (for challans)
         customerId: 'all',
-        search: ''
+        search: '',
+        dcSource: 'all' // all, bookkeeper, created, auto
     },
     HISTORY_INITIAL_LIMIT: 200,
     HISTORY_LOAD_MORE_STEP: 200,
@@ -159,6 +160,27 @@ const DeliveryUI = {
         const n = String(e.narration || e.description || e.remarks || '').toLowerCase();
         if (n.includes('debit note') || n.includes('debit_note')) return true;
         return false;
+    },
+
+    _dcSourceType(item) {
+        if (!item) return 'created';
+        
+        // 1. Imported from BookKeeper
+        const srcBk = String(item.source || '').toLowerCase().startsWith('bookkeeper')
+            || !!(item.bookkeeperId && String(item.bookkeeperId).trim());
+        if (srcBk) return 'bookkeeper';
+        
+        // 2. Auto-created (linked via invoiceId/sourceDcInvoiceId/sourceChallanId or has link fields)
+        const hasAutoSource = item.invoiceId
+            || item.sourceDcInvoiceId
+            || (Array.isArray(item.sourceDcInvoiceIds) && item.sourceDcInvoiceIds.length > 0)
+            || item.sourceChallanId
+            || (Array.isArray(item.sourceChallanIds) && item.sourceChallanIds.length > 0)
+            || item.skipAutoChallan === true;
+        if (hasAutoSource) return 'auto';
+        
+        // 3. Manually created DC
+        return 'created';
     },
 
     /** One row per GSTIN, else one per normalized name — reduces duplicate parties in filters. */
@@ -2416,7 +2438,13 @@ const DeliveryUI = {
                 (item.customerName && item.customerName.toLowerCase().includes(searchLower)) ||
                 (item.customNumber && item.customNumber.toLowerCase().includes(searchLower));
 
-            return matchesMonth && matchesFy && matchesTech && matchesCustomer && matchesStatus && matchesSearch;
+            // DC Source Filter
+            let matchesDcSource = true;
+            if (dataType === 'challan-dc' && this.historyFilters.dcSource && this.historyFilters.dcSource !== 'all') {
+                matchesDcSource = this._dcSourceType(item) === this.historyFilters.dcSource;
+            }
+
+            return matchesMonth && matchesFy && matchesTech && matchesCustomer && matchesStatus && matchesSearch && matchesDcSource;
         });
 
         // 4. Sorting: Newest first
@@ -2475,6 +2503,18 @@ const DeliveryUI = {
                                     <option value="debit-notes" ${this.historyFilters.dataType === 'debit-notes' ? 'selected' : ''}>Debit notes</option>
                                 </select>
                             </div>
+                            ${dataType === 'challan-dc' ? `
+                            <div class="col-md-2" id="historyDcSourceCol">
+                                <label class="form-label small text-muted"><i class="bi bi-truck me-1"></i>DC Source</label>
+                                <select class="form-select form-select-sm bg-dark text-white border-secondary" 
+                                    onchange="DeliveryUI.setHistoryFilter('dcSource', this.value)">
+                                    <option value="all" ${this.historyFilters.dcSource === 'all' ? 'selected' : ''}>All Sources</option>
+                                    <option value="bookkeeper" ${this.historyFilters.dcSource === 'bookkeeper' ? 'selected' : ''}>BookKeeper Import</option>
+                                    <option value="created" ${this.historyFilters.dcSource === 'created' ? 'selected' : ''}>Created DC</option>
+                                    <option value="auto" ${this.historyFilters.dcSource === 'auto' ? 'selected' : ''}>Auto (from Invoice)</option>
+                                </select>
+                            </div>
+                            ` : ''}
                             <div class="col-md-2">
                                 <label class="form-label small text-muted">Financial year</label>
                                 <select class="form-select form-select-sm bg-dark text-white border-secondary" id="historyFySelect"
@@ -2771,10 +2811,17 @@ const DeliveryUI = {
                             : '<td></td>')
                         : '';
 
+                    const srcType = this._dcSourceType(item);
+                    const srcBadge = srcType === 'bookkeeper'
+                        ? '<span class="badge bg-info ms-1" style="font-size: 0.65rem;" title="Imported from BookKeeper">BK</span>'
+                        : (srcType === 'auto'
+                            ? '<span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;" title="Auto-created while generating invoice">AUTO</span>'
+                            : '<span class="badge bg-primary ms-1" style="font-size: 0.65rem;" title="Manually created in MJS Prime Logic">MJS</span>');
+
                     return `
                         <tr>
                             ${selectCell}
-                            <td><span class="fw-bold">${rowId}</span></td>
+                            <td><span class="fw-bold">${rowId}</span>${dataType === 'challan-dc' ? srcBadge : ''}</td>
                             <td>${DataManager.formatDateDisplay(item.date || item.createdAt)}</td>
                             <td><span class="badge ${typeBadge}">${safeTypeStr}</span></td>
                             <td>${custName}</td>
@@ -2904,7 +2951,12 @@ const DeliveryUI = {
 
     setHistoryFilter(key, value) {
         this.historyFilters[key] = value;
-        if (key === 'dataType' && value !== 'challan-dc') {
+        if (key === 'dataType') {
+            const containerId = this.currentHistoryContainerId || 'historyContainer';
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.innerHTML = '';
+            }
             this.historySelectedDcKeys.clear();
         }
         if (key === 'financialYear') {
@@ -3562,6 +3614,7 @@ const DeliveryUI = {
         this.historyFilters.dataType = type === 'delivery' ? 'challan-dc' : 'challan-sc';
         this.historyFilters.status = 'all';
         this.historyFilters.search = '';
+        this.historyFilters.dcSource = 'all';
         const searchInput = document.getElementById('historySearchInput');
         if (searchInput) searchInput.value = '';
         this.showSection('history');

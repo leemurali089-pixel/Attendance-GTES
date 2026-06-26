@@ -2,15 +2,94 @@
  * ERP Function Registry — direct integration with MJS Prime Logic modules.
  */
 const ErpFunctions = {
+    _toArray(x) {
+        if (!x) return [];
+        if (Array.isArray(x)) return x;
+        if (x && typeof x.then === 'function') return [];
+        if (typeof x === 'object') return Object.values(x).filter((v) => v && typeof v === 'object');
+        return [];
+    },
+
+    async _activeEmployees() {
+        if (typeof DataManager === 'undefined') return [];
+        if (DataManager.getActiveEmployees) {
+            return this._toArray(await DataManager.getActiveEmployees());
+        }
+        return this._employeeList();
+    },
+
     _employeeList() {
-        const employees = DataManager.getActiveEmployees
-            ? DataManager.getActiveEmployees()
-            : (DataManager.getEmployees() || []);
-        return Array.isArray(employees) ? employees : [];
+        if (typeof DataManager === 'undefined') return [];
+        const key = DataManager.KEYS?.EMPLOYEES || 'gtes_employees';
+        let list = this._toArray(DataManager.getData(key));
+        const today = new Date();
+        if (typeof DataManager.isActiveOnDate === 'function') {
+            list = list.filter((emp) => DataManager.isActiveOnDate(emp, today));
+        } else {
+            list = list.filter((emp) => (emp.status || 'Active') !== 'Inactive');
+        }
+        return list;
     },
 
     _compactName(s) {
         return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    },
+
+    _editDistance(a, b) {
+        a = String(a || '').toLowerCase();
+        b = String(b || '').toLowerCase();
+        if (a === b) return 0;
+        const m = a.length;
+        const n = b.length;
+        if (!m) return n;
+        if (!n) return m;
+        const d = Array.from({ length: m + 1 }, (_, i) => [i]);
+        for (let j = 1; j <= n; j++) {
+            d[0][j] = j;
+            for (let i = 1; i <= m; i++) {
+                d[i][j] = Math.min(
+                    d[i - 1][j] + 1,
+                    d[i][j - 1] + 1,
+                    d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+                );
+            }
+        }
+        return d[m][n];
+    },
+
+    _scoreCustomerMatch(c, q, qCompact) {
+        const name = String(c.name || c.displayName || '');
+        const n = name.toLowerCase();
+        const nCompact = this._compactName(n);
+        let score = 0;
+
+        if (n === q) score += 100;
+        if (nCompact === qCompact) score += 95;
+        if (n.includes(q) || q.includes(n)) score += 50;
+        if (nCompact.includes(qCompact) && qCompact.length >= 3) score += 45;
+        if (qCompact.includes(nCompact) && nCompact.length >= 4) score += 40;
+
+        const qWords = q.split(/\s+/).filter((w) => w.length > 1);
+        if (qWords.length && qWords.every((w) => n.includes(w))) score += 35;
+
+        const probe = qWords.length ? qWords[0] : q;
+        const probeCompact = this._compactName(probe);
+        const words = n.split(/\s+/).filter((w) => w.length >= 3);
+        for (const w of words) {
+            const dist = this._editDistance(probe, w);
+            const maxDist = probe.length <= 4 ? 1 : (probe.length <= 7 ? 2 : 3);
+            if (dist <= maxDist) score += 60 - dist * 10;
+            const wCompact = this._compactName(w);
+            if (probeCompact.length >= 3 && wCompact.startsWith(probeCompact.slice(0, Math.min(4, probeCompact.length)))) {
+                score += 25;
+            }
+            if (qCompact.length >= 4 && wCompact.length >= 4) {
+                const compactDist = this._editDistance(qCompact, wCompact);
+                const compactMax = qCompact.length <= 5 ? 2 : 3;
+                if (compactDist <= compactMax) score += 68 - compactDist * 14;
+            }
+        }
+        return score;
     },
 
     _normalizeEmployeeQuery(name) {
@@ -180,15 +259,9 @@ const ErpFunctions = {
         if (typeof CustomerManager === 'undefined') return [];
         const q = String(name || '').toLowerCase().trim();
         if (!q) return [];
+        const qCompact = this._compactName(q);
         return (CustomerManager.getAllCustomers() || [])
-            .map((c) => {
-                const n = String(c.name || c.displayName || '').toLowerCase();
-                let score = 0;
-                if (n.includes(q) || q.includes(n)) score += 2;
-                const qWords = q.split(/\s+/).filter(Boolean);
-                if (qWords.every((w) => n.includes(w))) score += 3;
-                return { name: c.name || c.displayName, score };
-            })
+            .map((c) => ({ name: c.name || c.displayName, score: this._scoreCustomerMatch(c, q, qCompact) }))
             .filter((x) => x.score > 0)
             .sort((a, b) => b.score - a.score)
             .slice(0, limit)
@@ -202,11 +275,18 @@ const ErpFunctions = {
         let c = CustomerManager.getCustomerByName(q);
         if (c) return c;
         const norm = q.toLowerCase();
+        const qCompact = this._compactName(norm);
         const all = CustomerManager.getAllCustomers() || [];
-        return all.find((x) => {
+        const includesMatch = all.find((x) => {
             const n = String(x.name || x.displayName || '').toLowerCase();
             return n.includes(norm) || norm.includes(n);
-        }) || null;
+        });
+        if (includesMatch) return includesMatch;
+        const scored = all
+            .map((x) => ({ c: x, score: this._scoreCustomerMatch(x, norm, qCompact) }))
+            .filter((x) => x.score >= 35)
+            .sort((a, b) => b.score - a.score);
+        return scored[0]?.c || null;
     },
 
     formatMoney(n) {
@@ -271,8 +351,8 @@ const ErpFunctions = {
     async getAbsentEmployeesForDate(date = new Date()) {
         const d = date instanceof Date ? date : new Date(date);
         const dateStr = DataManager.formatDate(d);
-        const employees = DataManager.getActiveEmployees() || [];
-        const attendance = await DataManager.getAttendance();
+        const employees = await this._activeEmployees();
+        const attendance = this._toArray(await DataManager.getAttendance());
         const dayRecords = attendance.filter((a) => DataManager.formatDate(new Date(a.date)) === dateStr);
         const presentNames = new Set(dayRecords.filter((a) => a.status === 'Present' || a.status === 'H-Working').map((a) => a.employee));
         const onLeave = dayRecords.filter((a) => ['Paid Leave', 'Unpaid Leave', 'Sick Leave', 'Half Day'].includes(a.status));
@@ -280,6 +360,58 @@ const ErpFunctions = {
             .map((e) => e.name)
             .filter((name) => !presentNames.has(name));
         return { date: dateStr, absent, onLeave: onLeave.map((r) => ({ name: r.employee, status: r.status })), count: absent.length };
+    },
+
+    async markAllHolidayForDate({ date = new Date(), reason = 'Holiday' } = {}) {
+        const d = date instanceof Date ? new Date(date) : new Date(date);
+        d.setHours(0, 0, 0, 0);
+        const dateStr = DataManager.formatDate(d);
+        const employees = await this._activeEmployees();
+        if (!employees.length) {
+            return { dateStr, markedCount: 0, skipped: 0, reason };
+        }
+
+        let attendance = this._toArray(await DataManager.getAttendance());
+        const existingKeys = new Set(attendance.map((a) => `${a.employee}_${DataManager.formatDate(new Date(a.date))}`));
+        let markedCount = 0;
+        let skipped = 0;
+        const holidayReason = reason || (typeof DataManager.isSunday === 'function' && DataManager.isSunday(d) ? 'Sunday' : 'Holiday');
+
+        for (const employee of employees) {
+            const key = `${employee.name}_${dateStr}`;
+            if (existingKeys.has(key)) {
+                skipped += 1;
+                continue;
+            }
+            const record = DataManager.addTimestamp({
+                id: `ATT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                employee: employee.name,
+                date: d.toISOString(),
+                status: 'Holiday',
+                checkIn: '',
+                checkOut: '',
+                overTime: 'No',
+                otHours: 0,
+                holidayReason,
+                autoMarked: true
+            });
+            attendance.push(record);
+            existingKeys.add(key);
+            markedCount += 1;
+        }
+
+        if (markedCount) {
+            await DataManager.saveAttendance(attendance);
+            if (typeof AttendanceModule !== 'undefined') {
+                if (typeof AttendanceModule.loadAttendanceForDate === 'function') {
+                    await AttendanceModule.loadAttendanceForDate();
+                } else if (typeof AttendanceModule.load === 'function') {
+                    await AttendanceModule.load();
+                }
+            }
+        }
+
+        return { dateStr, markedCount, skipped, reason: holidayReason };
     },
 
     async getAbsentEmployeesToday() {
@@ -359,10 +491,12 @@ const ErpFunctions = {
     resolveDateFromWhen(when) {
         const d = new Date();
         const w = String(when || '').toLowerCase();
-        if (w === 'yesterday' || w === 'innal' || w === 'innalai') {
+        if (w === 'yesterday' || w === 'innal' || w === 'innalai' || w === 'நேற்று') {
             d.setDate(d.getDate() - 1);
-        } else if (w === 'tomorrow' || w === 'naalai') {
+        } else if (w === 'tomorrow' || w === 'naalai' || w === 'நாளை') {
             d.setDate(d.getDate() + 1);
+        } else if (w === 'today' || w === 'inniku' || w === 'innikku' || w === 'இன்று') {
+            /* keep today */
         }
         return d;
     },
@@ -514,8 +648,7 @@ const ErpFunctions = {
     /** Compare dashboard / module / AI attendance counts from same ERP source */
     async AttendanceHealthCheck() {
         const sourceUsed = 'DataManager.getActiveEmployees + attendance records';
-        const employeesRaw = this._employeeList();
-        const employees = Array.isArray(employeesRaw) ? employeesRaw : (await employeesRaw) || [];
+        const employees = await this._activeEmployees();
         const activeEmployees = employees.length;
 
         const attendance = await DataManager.getAttendance();

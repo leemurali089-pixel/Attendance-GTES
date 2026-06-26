@@ -694,7 +694,13 @@ const ReportsModule = {
             let standardOtHours = 0, hWorkingOtHours = 0, sOtHours = 0;
 
             empAttendance.forEach(record => {
-                switch (record.status) {
+                const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+                let finalStatus = record.status;
+                if (record.status === 'H-Working' && isHolidayRecordOt) {
+                    finalStatus = 'Holiday';
+                }
+
+                switch (finalStatus) {
                     case 'Present':
                         present++;
                         break;
@@ -722,8 +728,12 @@ const ReportsModule = {
                 const isSunday = DataManager.isSunday(dateObj);
                 const isHoliday = DataManager.isHoliday(dateObj);
 
-                if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                    hWorkingOtHours += hours;
+                if (record.status === 'H-Working') {
+                    if (isHolidayRecordOt) {
+                        hWorkingOtHours += hours;
+                    } else if (record.overTime === 'Yes') {
+                        standardOtHours += hours;
+                    }
                 } else if (isSunday && !isHoliday && record.status === 'Present') {
                     sOtHours += hours;
                 } else {
@@ -886,27 +896,43 @@ const ReportsModule = {
                 const empAttendance = attendance.filter(a => a.employee === emp.name);
 
                 // Calculate stats
-                let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0;
-                let standardOtHours = 0, hWorkingOtHours = 0;
+                let present = 0, paidLeave = 0, unpaidLeave = 0, sickLeaves = 0, halfDays = 0, holidays = 0, holidayWorking = 0;
+                let standardOtHours = 0, hWorkingOtHours = 0, sOtHours = 0;
 
                 empAttendance.forEach(record => {
-                    switch (record.status) {
+                    const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+                    let finalStatus = record.status;
+                    if (record.status === 'H-Working' && isHolidayRecordOt) {
+                        finalStatus = 'Holiday';
+                    }
+
+                    switch (finalStatus) {
                         case 'Present': present++; break;
                         case 'Paid Leave': paidLeave++; break;
                         case 'Unpaid Leave': unpaidLeave++; break;
                         case 'Sick Leave': sickLeaves++; break;
                         case 'Half Day': halfDays++; break;
                         case 'Holiday': holidays++; break;
-                        case 'H-Working': holidays++; break;
+                        case 'H-Working': holidayWorking++; break;
                     }
                     const hours = parseFloat(record.otHours || 0) || 0;
-                    if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                        hWorkingOtHours += hours;
+                    const dateObj = new Date(record.date);
+                    const isSunday = DataManager.isSunday(dateObj);
+                    const isHoliday = DataManager.isHoliday(dateObj);
+
+                    if (record.status === 'H-Working') {
+                        if (isHolidayRecordOt) {
+                            hWorkingOtHours += hours;
+                        } else if (record.overTime === 'Yes') {
+                            standardOtHours += hours;
+                        }
+                    } else if (isSunday && !isHoliday && record.status === 'Present') {
+                        sOtHours += hours;
                     } else {
                         standardOtHours += hours;
                     }
                 });
-                const totalOtHours = standardOtHours + hWorkingOtHours;
+                const totalOtHours = standardOtHours + hWorkingOtHours + sOtHours;
 
                 // Get employee data
                 const allEmps = await DataManager.getEmployees();
@@ -923,13 +949,19 @@ const ReportsModule = {
                     perDaySalary = baseSalary / daysInMonth;
                 }
 
-                const paidDays = present + paidLeave + holidays + (halfDays * 0.5);
+                let paidDays;
+                if (salaryType === 'daily') {
+                    paidDays = present + holidayWorking + (halfDays * 0.5);
+                } else {
+                    paidDays = present + paidLeave + holidays + (halfDays * 0.5) + 2 * holidayWorking;
+                }
+
                 const basePay = paidDays * perDaySalary;
                 const otBreakdown = DataManager.calculateOTPay(
                     totalOtHours,
                     baseSalary,
                     salaryType,
-                    { hWorkingOtHours, perDaySalary, returnBreakdown: true, settings }
+                    { hWorkingOtHours, sOtHours, returnBreakdown: true, settings }
                 );
                 const otPay = otBreakdown.totalPay;
                 const standardOtPay = otBreakdown.standardPay || 0;

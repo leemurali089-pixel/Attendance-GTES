@@ -2018,6 +2018,10 @@ const App = {
             const advances = await DataManager.getAdvances();
             totalAdvEl.textContent = advances.length;
         }
+
+        if (typeof AICommandCenter !== 'undefined' && AICommandCenter.runDashboardBriefing) {
+            AICommandCenter.runDashboardBriefing();
+        }
     },
 
     /** Active All/GST/Plain scope for premium dashboard (toolbar pills). */

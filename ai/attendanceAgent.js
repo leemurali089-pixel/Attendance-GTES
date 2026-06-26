@@ -18,19 +18,35 @@ const AttendanceAgent = {
         return { success: true, message: NotificationAgent.format('mark_leave', data), data };
     },
 
+    _whenLabel(when) {
+        const w = String(when || '').toLowerCase();
+        if (w === 'yesterday' || w === 'innal' || w === 'innalai') return 'yesterday';
+        if (w === 'tomorrow' || w === 'naalai') return 'tomorrow';
+        return 'today';
+    },
+
     async getAbsentToday(slots = {}) {
-        let date = new Date();
-        if (slots.when === 'yesterday') {
-            date = new Date();
-            date.setDate(date.getDate() - 1);
-        }
+        const date = ErpFunctions.resolveDateFromWhen(slots.when || 'today');
         const data = await ErpFunctions.getAbsentEmployeesForDate(date);
-        const label = slots.when === 'yesterday' ? 'yesterday' : 'today';
+        const label = this._whenLabel(slots.when);
         return {
             success: true,
             message: NotificationAgent.format('absent_employees', { ...data, label }),
             data
         };
+    },
+
+    async markAllHoliday(slots = {}) {
+        const when = slots.when || 'today';
+        const date = ErpFunctions.resolveDateFromWhen(when);
+        let reason = slots.reason || 'Holiday';
+        if (!slots.reason && typeof DataManager !== 'undefined' && DataManager.isSunday && DataManager.isSunday(date)) {
+            reason = 'Sunday';
+        }
+        const data = await ErpFunctions.markAllHolidayForDate({ date, reason });
+        const parts = [`Marked ${data.markedCount} employee(s) as Holiday for ${data.dateStr}`];
+        if (data.skipped) parts.push(`${data.skipped} already had attendance records`);
+        return { success: true, message: parts.join('. ') + '.', data };
     },
 
     async getMonthlySummary() {

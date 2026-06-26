@@ -13,13 +13,19 @@ const CommandRouter = {
             navigate: (slots) => ErpFunctions.navigate(slots.target),
             getHelp: () => ErpFunctions.getHelp(),
             getDailyBriefing: async () => {
+                if (typeof AIBrain !== 'undefined' && AIBrain.getProactiveBriefing) {
+                    const b = await AIBrain.getProactiveBriefing();
+                    const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
+                    const msg = lang === 'ta' ? (b.messageTa || b.message) : (b.messageEn || b.message);
+                    return { success: true, message: msg, data: b.metrics || b, sourceRefs: b.sourceRefs || [] };
+                }
                 if (typeof ProactiveEngine === 'undefined') {
                     return { success: false, message: 'Daily briefing unavailable.' };
                 }
-                const b = ProactiveEngine.getDailyBriefing();
+                const b = await Promise.resolve(ProactiveEngine.getDailyBriefing());
                 const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'en';
                 const msg = lang === 'ta' ? (b.messageTa || b.message) : (b.messageEn || b.message);
-                return { success: true, message: msg, data: b.metrics || b };
+                return { success: true, message: msg, data: b.metrics || b, sourceRefs: b.sourceRefs || [] };
             }
         })
     },

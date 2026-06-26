@@ -9,11 +9,19 @@ const VoiceAgent = {
     _silenceTimer: null,
     _maxListenTimer: null,
     _micFatalError: null,
+    _sttBlockedUntilKey: false,
+    _sttBlockToastShown: false,
 
     async init() {
         ContextManager.loadFromMemory();
         ConversationHistory.init();
         const ok = SpeechEngine.init();
+        if (typeof SpeechProviderManager !== 'undefined' && SpeechProviderManager.ensureElectronProvider) {
+            SpeechProviderManager.ensureElectronProvider();
+            if (SpeechProviderManager.isElectronSttBlocked && SpeechProviderManager.isElectronSttBlocked()) {
+                this._sttBlockedUntilKey = true;
+            }
+        }
         if (!ok && typeof App !== 'undefined') {
             App.showNotification('Voice recognition is not supported in this browser.', 'warning');
         }
@@ -158,6 +166,7 @@ const VoiceAgent = {
         newBtn.addEventListener('mousedown', (e) => {
             if (MemoryManager.getSettings().listenMode !== 'push_to_talk') return;
             if (e.button !== 0) return;
+            if (this._sttBlockedUntilKey) return;
             this._pttActive = true;
             this.openPanel();
             this.startListening();
@@ -270,23 +279,50 @@ const VoiceAgent = {
         }, Math.max(ms * 4, 120000));
     },
 
+    clearSttBlock() {
+        this._sttBlockedUntilKey = false;
+        this._sttBlockToastShown = false;
+        this._micFatalError = null;
+        if (typeof SpeechProviderManager !== 'undefined' && SpeechProviderManager.clearSttBlock) {
+            SpeechProviderManager.clearSttBlock();
+        }
+    },
+
     _handleMicFatal(err, retriesDone) {
-        if (this._micFatalError) return;
-        this._micFatalError = err;
-        const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'ta';
         const classified = typeof SpeechProviderManager !== 'undefined'
             ? SpeechProviderManager.getDiagnostics().classifiedError
             : null;
         const code = classified || err;
+        if (code === 'electron_no_stt_key') {
+            this._sttBlockedUntilKey = true;
+            if (this._sttBlockToastShown) {
+                this.stopListening(false);
+                return;
+            }
+        } else if (this._micFatalError) {
+            return;
+        }
         let msg;
+        const lang = typeof LanguageEngine !== 'undefined' ? LanguageEngine.getResponseLang() : 'ta';
+        this._micFatalError = err;
         if (err === 'not-allowed' || err === 'service-not-allowed') {
             msg = lang === 'ta'
                 ? 'Mic permission இல்லை — Windows Settings → Privacy → Microphone. Text box use செய்யுங்கள்.'
                 : 'Microphone blocked — allow mic in Windows settings. Use the text box.';
+        } else if (code === 'electron_no_stt_key') {
+            msg = typeof SpeechProviderManager !== 'undefined' && SpeechProviderManager.getElectronSttErrorMessage
+                ? SpeechProviderManager.getElectronSttErrorMessage()
+                : 'Voice input needs Deepgram or OpenAI key in Settings → Voice Health. Browser speech does not work in desktop app.';
         } else if (code === 'electron_speech_provider_failure') {
+            const hasDeepgram = typeof DeepgramSpeechAdapter !== 'undefined' && DeepgramSpeechAdapter.isConfigured();
+            const hasWhisper = typeof OpenAISpeechAdapter !== 'undefined' && OpenAISpeechAdapter.isConfigured();
             msg = lang === 'ta'
-                ? 'Electron-ல் Browser Speech STT வேலை செய்யாது. Voice Health → Deepgram/Whisper தேர்வு செய்து API key சேர்க்கவும்.'
-                : 'Browser Speech STT is blocked in Electron. Switch to Deepgram or Whisper in Voice Health and add an API key.';
+                ? (hasDeepgram || hasWhisper
+                    ? 'Browser STT வேலை செய்யாது — Deepgram key கண்டுபிடிக்கப்பட்டது; mic மீண்டும் tap செய்யுங்கள்.'
+                    : 'Electron-ல் Browser Speech STT வேலை செய்யாது. Voice Health → Deepgram/Whisper தேர்வு செய்து API key சேர்க்கவும்.')
+                : (hasDeepgram || hasWhisper
+                    ? 'Browser STT blocked in Electron — cloud key found; tap mic again to use Deepgram/Whisper.'
+                    : 'Browser Speech STT is blocked in Electron. Open Voice Health, choose Deepgram or Whisper, and add an API key.');
         } else if (code === 'api_error') {
             msg = lang === 'ta'
                 ? 'Deepgram API error — Voice Health-ல் provider/key சரி பாருங்கள். App restart செய்யுங்கள்.'
@@ -307,6 +343,9 @@ const VoiceAgent = {
         console.warn('[VoiceAgent] mic stopped after retries:', code);
         this.stopListening(false);
         this._setStatus(msg);
+        if (code === 'electron_no_stt_key') {
+            this._sttBlockToastShown = true;
+        }
         ConversationHistory.add('assistant', msg, { success: false });
         if (typeof App !== 'undefined') App.showNotification(msg, 'warning');
         document.getElementById('voiceAgentManualInput')?.focus();
@@ -314,6 +353,18 @@ const VoiceAgent = {
 
     startListening() {
         if (this.isListening || this.isProcessing) return;
+        if (this._sttBlockedUntilKey) {
+            this._handleMicFatal('electron_no_stt_key', 0);
+            return;
+        }
+        if (typeof SpeechProviderManager !== 'undefined' && SpeechProviderManager.ensureElectronProvider) {
+            SpeechProviderManager.ensureElectronProvider();
+            if (SpeechProviderManager.isElectronSttBlocked && SpeechProviderManager.isElectronSttBlocked()) {
+                this._sttBlockedUntilKey = true;
+                this._handleMicFatal('electron_no_stt_key', 0);
+                return;
+            }
+        }
         this.openPanel();
         this.isListening = true;
         this._micFatalError = null;
@@ -366,8 +417,10 @@ const VoiceAgent = {
                     }
                 },
                 onError: (err) => {
-                    if (err === 'no-speech' || err === 'aborted' || err === 'network') return;
-                    if (err === 'not-allowed' || err === 'service-not-allowed') {
+                    if (err === 'no-speech' || err === 'aborted') return;
+                    if (err === 'network' && typeof SpeechProviderManager !== 'undefined'
+                        && SpeechProviderManager.getDiagnostics().provider !== 'browser') return;
+                    if (err === 'electron_no_stt_key' || err === 'not-allowed' || err === 'service-not-allowed') {
                         this._handleMicFatal(err, 0);
                     }
                 }

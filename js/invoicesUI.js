@@ -430,6 +430,8 @@ const InvoicesUI = {
     currentStatusFilter: 'all',
     /** Sales list: filter by whether receipt vouchers allocate to this bill (explains bill vs ledger gaps). */
     currentVoucherLinkFilter: 'all',
+    /** Filter DC invoices by their origin: 'all' | 'bookkeeper' | 'created' | 'auto' */
+    currentDcSourceFilter: 'all',
     searchTimeout: null,
     _salesTableRaf: null,
     _purchaseTableRaf: null,
@@ -934,6 +936,27 @@ const InvoicesUI = {
                                 </div>
                             </div>
                         </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-12">
+                                <label class="form-label small text-white-50 mb-1"><i class="bi bi-truck me-1"></i>DC Source Filter</label>
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <div class="btn-group" role="group" aria-label="DC source filter">
+                                        <input type="radio" class="btn-check" name="dcSourceFilter" id="dcSrcAll" value="all" ${this.currentDcSourceFilter === 'all' ? 'checked' : ''} onchange="InvoicesUI.setDcSourceFilter('all')">
+                                        <label class="btn btn-outline-secondary btn-sm" for="dcSrcAll">All DC</label>
+
+                                        <input type="radio" class="btn-check" name="dcSourceFilter" id="dcSrcBk" value="bookkeeper" ${this.currentDcSourceFilter === 'bookkeeper' ? 'checked' : ''} onchange="InvoicesUI.setDcSourceFilter('bookkeeper')">
+                                        <label class="btn btn-outline-info btn-sm" for="dcSrcBk"><i class="bi bi-cloud-download me-1"></i>BookKeeper Import</label>
+
+                                        <input type="radio" class="btn-check" name="dcSourceFilter" id="dcSrcCreated" value="created" ${this.currentDcSourceFilter === 'created' ? 'checked' : ''} onchange="InvoicesUI.setDcSourceFilter('created')">
+                                        <label class="btn btn-outline-primary btn-sm" for="dcSrcCreated"><i class="bi bi-pencil-square me-1"></i>Created DC</label>
+
+                                        <input type="radio" class="btn-check" name="dcSourceFilter" id="dcSrcAuto" value="auto" ${this.currentDcSourceFilter === 'auto' ? 'checked' : ''} onchange="InvoicesUI.setDcSourceFilter('auto')">
+                                        <label class="btn btn-outline-warning btn-sm" for="dcSrcAuto"><i class="bi bi-lightning me-1"></i>Auto (from Invoice)</label>
+                                    </div>
+                                    <span class="text-white-50 small">Filters the <strong>View DC</strong> panel below the table.</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="row g-2">
                             <div class="col-12">
                                 <label class="form-label small text-white-50">Search</label>
@@ -952,6 +975,7 @@ const InvoicesUI = {
                         <div class="spinner-border text-info" role="status"></div>
                     </div>
                 </div>
+                <div id="invoicesDcPanel"></div>
                 <p class="text-white-50 small mt-2 mb-0" id="invoicesDcHint" style="display: none;">
                     <i class="bi bi-info-circle me-1"></i> Delivery challan bills (numbers containing DC) count toward totals above; open them from <strong>Accounting → Challans → View DC</strong>.
                 </p>
@@ -966,6 +990,31 @@ const InvoicesUI = {
         this.currentStatusFilter = val;
         this.updateTable();
         this.updatePurchasesTable();
+    },
+
+    setDcSourceFilter(val) {
+        this.currentDcSourceFilter = val || 'all';
+        this.updateTable();
+    },
+
+    /**
+     * Classify a DC invoice by its origin source.
+     * Returns: 'bookkeeper' | 'auto' | 'created'
+     */
+    _dcSourceType(inv) {
+        // 1. Imported from BookKeeper
+        const srcBk = String(inv.source || '').toLowerCase().startsWith('bookkeeper')
+            || !!(inv.bookkeeperId && String(inv.bookkeeperId).trim());
+        if (srcBk) return 'bookkeeper';
+        // 2. Auto-created while generating a tax invoice (linked via sourceDcInvoiceId, sourceChallanId, etc.)
+        const hasAutoSource = inv.sourceDcInvoiceId
+            || (Array.isArray(inv.sourceDcInvoiceIds) && inv.sourceDcInvoiceIds.length > 0)
+            || inv.sourceChallanId
+            || (Array.isArray(inv.sourceChallanIds) && inv.sourceChallanIds.length > 0)
+            || inv.skipAutoChallan === true;
+        if (hasAutoSource) return 'auto';
+        // 3. Manually created DC in MJS Prime Logic
+        return 'created';
     },
 
     debouncedFilter() {
@@ -1052,9 +1101,16 @@ const InvoicesUI = {
         });
 
         const isDc = (inv) => (typeof InvoiceManager !== 'undefined') && InvoiceManager.isDcStyleSalesInvoice(inv);
+        const dcSourceFilter = this.currentDcSourceFilter || 'all';
         const forTable = filteredAll.filter(inv => !isDc(inv));
 
-        // Summary includes DC-style bills (View DC) so totals match receipts / Book Keeper
+        // DC rows — apply DC source filter
+        const allDcRows = filteredAll.filter(inv => isDc(inv));
+        const dcRows = dcSourceFilter === 'all'
+            ? allDcRows
+            : allDcRows.filter(inv => this._dcSourceType(inv) === dcSourceFilter);
+
+        // Summary includes ALL DC-style bills so totals match receipts / Book Keeper
         let totalPending = filteredAll.reduce((sum, inv) => sum + (inv.balance || 0), 0);
         const pendingCount = filteredAll.filter(inv => (inv.balance || 0) > 0.05).length;
         let outstandingParties = new Set(filteredAll.filter(inv => (inv.balance || 0) > 0.05).map(inv => inv.customerId || inv.customerName)).size;
@@ -1088,10 +1144,70 @@ const InvoicesUI = {
         updateEl('summaryPendingBills', pendingCount);
         updateEl('summaryPendingParties', outstandingParties);
 
+        // DC hint (legacy small note)
         const dcHint = document.getElementById('invoicesDcHint');
-        if (dcHint) {
-            const hasDcInScope = filteredAll.some(inv => isDc(inv));
-            dcHint.style.display = hasDcInScope ? 'block' : 'none';
+        if (dcHint) dcHint.style.display = allDcRows.length > 0 ? 'block' : 'none';
+
+        // ── Render DC Panel (View DC) ────────────────────────────────────────
+        const dcPanel = document.getElementById('invoicesDcPanel');
+        if (dcPanel) {
+            if (dcRows.length === 0) {
+                dcPanel.innerHTML = allDcRows.length > 0
+                    ? `<div class="alert alert-secondary py-2 mt-3 small">No DC invoices match the selected source filter.
+                       <button class="btn btn-link btn-sm p-0 ms-2" onclick="InvoicesUI.setDcSourceFilter('all')">Show all DC (${allDcRows.length})</button></div>`
+                    : '';
+            } else {
+                const dcLabelMap = { all: 'All', bookkeeper: 'BookKeeper Import', created: 'Created DC', auto: 'Auto (from Invoice)' };
+                const dcPending = dcRows.reduce((s, inv) => s + (inv.balance || 0), 0);
+                const dcRowsHtml = dcRows.map(inv => {
+                    const srcType = this._dcSourceType(inv);
+                    const srcBadge = srcType === 'bookkeeper'
+                        ? '<span class="badge bg-info ms-1" title="Imported from BookKeeper">BK</span>'
+                        : (srcType === 'auto'
+                            ? '<span class="badge bg-warning text-dark ms-1" title="Auto-created while generating invoice">AUTO</span>'
+                            : '<span class="badge bg-primary ms-1" title="Manually created in MJS Prime Logic">MJS</span>');
+                    const bal = inv.balance || 0;
+                    const statusBadge = inv.isPaid
+                        ? '<span class="badge bg-success-subtle text-success border border-success">Paid</span>'
+                        : (inv.isPartial
+                            ? '<span class="badge bg-warning-subtle text-warning border border-warning">Partial</span>'
+                            : '<span class="badge bg-danger-subtle text-danger border border-danger">Pending</span>');
+                    return `<tr>
+                        <td>${DataManager.formatDateDisplay(inv.date)}</td>
+                        <td><div class="fw-bold text-info">${inv.invoiceNo || inv.id}${srcBadge}</div></td>
+                        <td>${inv.customerName || '—'}</td>
+                        <td class="text-end">₹${(parseFloat(inv.total || 0)).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                        <td class="text-end fw-bold ${bal > 0.05 ? 'text-danger' : 'text-success'}">₹${bal.toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                        <td class="text-center">${statusBadge}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-info py-0 px-2" onclick="InvoicesUI.viewInvoice('${inv.id}')" title="View"><i class="bi bi-eye"></i></button>
+                            <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="InvoicesUI.editInvoice('${inv.id}')" title="Edit"><i class="bi bi-pencil"></i></button>
+                        </td>
+                    </tr>`;
+                }).join('');
+                dcPanel.innerHTML = `
+                    <div class="card bg-dark border-secondary mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center py-2">
+                            <span class="fw-bold text-white-50 small">
+                                <i class="bi bi-truck me-1"></i>View DC
+                                <span class="text-white ms-1">${dcLabelMap[dcSourceFilter] || 'All'}</span>
+                                <span class="badge bg-secondary ms-1">${dcRows.length}</span>
+                                ${allDcRows.length !== dcRows.length ? `<span class="text-muted ms-2 small">(${allDcRows.length} total)</span>` : ''}
+                            </span>
+                            <span class="text-muted small">Pending: <strong class="text-warning">₹${dcPending.toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2})}</strong></span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover align-middle border-secondary mb-0 small">
+                                <thead><tr>
+                                    <th>Date</th><th>DC #</th><th>Customer</th>
+                                    <th class="text-end">Total</th><th class="text-end">Balance</th>
+                                    <th class="text-center">Status</th><th class="text-end">Actions</th>
+                                </tr></thead>
+                                <tbody>${dcRowsHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>`;
+            }
         }
 
         const container = document.getElementById('invoicesTableContainer');

@@ -263,6 +263,12 @@ app.whenReady().then(async () => {
     }
 
     await ensureDataFolder();
+    try {
+        const { initRagIpc } = require('./ai-brain/rag/ragIpcMain');
+        await initRagIpc(ipcMain, DATA_FOLDER);
+    } catch (e) {
+        console.warn('[main] RAG IPC init skipped:', e && e.message);
+    }
     createWindow();
 
     try { gmailIpc.init(); } catch (e) { console.error('[main] gmailIpc init error:', e.message); }

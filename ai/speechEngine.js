@@ -7,7 +7,11 @@ const SpeechEngine = {
             console.warn('[SpeechEngine] SpeechProviderManager not loaded');
             return false;
         }
-        return SpeechProviderManager.init();
+        const ok = SpeechProviderManager.init();
+        if (typeof SpeechProviderManager.ensureElectronProvider === 'function') {
+            SpeechProviderManager.ensureElectronProvider();
+        }
+        return ok;
     },
 
     getAdapter() {

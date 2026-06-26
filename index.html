@@ -519,7 +519,7 @@
             </div>
             <div class="gtes-footer-bottom">
                 <span id="dashFCopyright">© 2026 Gas Tech Engineering Service. All rights reserved.</span>
-                <span id="dashFVersionLine">Version 1.3.51 | Developed by Murali D | Support: leemurali001@gmail.com / +91 99529 70089</span>
+                 <span id="dashFVersionLine">Version 1.3.53 | Developed by Murali D | Support: leemurali001@gmail.com / +91 99529 70089</span>
             </div>
         </footer>
 
@@ -2199,44 +2199,45 @@
     
     <script src="ai/memoryManager.js?v=1.3"></script>
     <script src="ai/contextManager.js?v=1.5"></script>
-    <script src="ai/languageEngine.js?v=1.2"></script>
+    <script src="ai/languageEngine.js?v=1.3"></script>
     <script src="ai/responseI18n.js?v=1.2"></script>
     <script src="ai/conversationHistory.js?v=1.1"></script>
-    <script src="ai/tamilCommandRegistry.js?v=1.8"></script>
-    <script src="ai/intentRegistry.js?v=1.7"></script>
-    <script src="ai/erpFunctions.js?v=1.7"></script>
+    <script src="ai/tamilCommandRegistry.js?v=1.9"></script>
+    <script src="ai/intentRegistry.js?v=1.8"></script>
+    <script src="ai/erpFunctions.js?v=1.9"></script>
     <script src="ai/notificationAgent.js?v=1.6"></script>
-    <script src="ai/attendanceAgent.js?v=1.3"></script>
-    <script src="ai/customerAgent.js?v=1.6"></script>
+    <script src="ai/attendanceAgent.js?v=1.4"></script>
+    <script src="ai/customerAgent.js?v=1.7"></script>
     <script src="ai/taskAgent.js?v=1.0"></script>
     <script src="ai/payrollAgent.js?v=1.0"></script>
     <script src="ai/employeeAgent.js?v=1.6"></script>
     <script src="ai/documentAgent.js?v=1.0"></script>
     <script src="ai/speechAdapters/browserSpeechAdapter.js?v=1.6"></script>
     <script src="ai/providers/browserSpeechProvider.js?v=1.0"></script>
-    <script src="ai/speechProviderManager.js?v=1.2.4"></script>
-    <script src="ai/voiceDiagnostics.js?v=1.2"></script>
+    <script src="ai/speechProviderManager.js?v=1.3.1"></script>
+    <script src="ai/voiceDiagnostics.js?v=1.3"></script>
     <script src="ai/speechAdapters/openaiSpeechAdapter.js?v=1.1"></script>
     <script src="ai/speechAdapters/googleSpeechAdapter.js?v=1.1"></script>
     <script src="ai/speechAdapters/deepgramSpeechAdapter.js?v=1.3"></script>
-    <script src="ai/speechEngine.js?v=2.0"></script>
-    <script src="ai/intentEngine.js?v=1.8"></script>
+    <script src="ai/speechEngine.js?v=2.1"></script>
+    <script src="ai/intentEngine.js?v=1.9"></script>
     <script src="ai/commandRouter.js?v=1.7"></script>
-    <script src="ai/voiceAgent.js?v=2.7"></script>
+    <script src="ai/voiceAgent.js?v=3.0"></script>
 
     <!-- AI Brain Phase 2 -->
+    <script src="ai-brain/interactionLogger.js?v=1.0"></script>
     <script src="ai-brain/trainingCenter.js?v=2.6"></script>
     <script src="ai-brain/actionReplayEngine.js?v=2.5"></script>
     <script src="ai-brain/sandboxEngine.js?v=2.5"></script>
-    <script src="ai-brain/contextEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/contextEngine.js?v=3.0"></script>
     <script src="ai-brain/memoryEngine.js?v=2.5"></script>
-    <script src="ai-brain/knowledgeEngine.js?v=2.5.1"></script>
-    <script src="ai-brain/knowledgeGraphEngine.js?v=2.5"></script>
-    <script src="ai-brain/reasoningEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/knowledgeEngine.js?v=3.0"></script>
+    <script src="ai-brain/knowledgeGraphEngine.js?v=3.1"></script>
+    <script src="ai-brain/reasoningEngine.js?v=3.0"></script>
     <script src="ai-brain/decisionEngine.js?v=2.5"></script>
     <script src="ai-brain/approvalEngine.js?v=2.5"></script>
-    <script src="ai-brain/bridge/erpBridge.js?v=2.5"></script>
-    <script src="ai-brain/engines/attendanceEngine.js?v=2.5.1"></script>
+    <script src="ai-brain/bridge/erpBridge.js?v=2.5.1"></script>
+    <script src="ai-brain/engines/attendanceEngine.js?v=2.5.3"></script>
     <script src="ai-brain/engines/employeeEngine.js?v=2.5"></script>
     <script src="ai-brain/engines/customerEngine.js?v=2.5"></script>
     <script src="ai-brain/engines/taskEngine.js?v=2.0"></script>
@@ -2245,18 +2246,33 @@
     <script src="ai-brain/engines/analyticsEngine.js?v=2.0"></script>
     <script src="ai-brain/engines/documentEngine.js?v=2.0"></script>
     <script src="ai-brain/functionEngine.js?v=2.5"></script>
-    <script src="ai-brain/proactiveEngine.js?v=2.6"></script>
-    <script src="ai-brain/voiceEngine.js?v=2.5.1"></script>
+    <!-- AI Brain RAG + Multi-Agent -->
+    <script src="ai-brain/rag/embeddingProvider.js?v=3.0"></script>
+    <script src="ai-brain/rag/vectorStore.js?v=3.0"></script>
+    <script src="ai-brain/rag/retriever.js?v=3.0"></script>
+    <script src="ai-brain/rag/documentIndexer.js?v=3.0"></script>
+    <script src="ai-brain/rag/ragEngine.js?v=3.0"></script>
+    <script src="ai-brain/rag/embeddingEngine.js?v=1.0"></script>
+    <script src="ai-brain/rag/indexingEngine.js?v=1.0"></script>
+    <script src="ai-brain/rag/retrievalEngine.js?v=1.0"></script>
+    <script src="ai-brain/agents/hrAgent.js?v=3.3"></script>
+    <script src="ai-brain/agents/payrollAgent.js?v=3.0"></script>
+    <script src="ai-brain/agents/accountingAgent.js?v=3.3"></script>
+    <script src="ai-brain/agents/workflowAgent.js?v=3.0"></script>
+    <script src="ai-brain/agents/adminAgent.js?v=3.0"></script>
+    <script src="ai-brain/orchestratorAgent.js?v=3.4"></script>
+    <script src="ai-brain/proactiveEngine.js?v=3.0"></script>
+    <script src="ai-brain/voiceEngine.js?v=2.5.3"></script>
     <script src="ai-brain/agents/financeAgent.js?v=2.0"></script>
-    <script src="ai-brain/agents/hrAgent.js?v=2.0"></script>
-    <script src="ai-brain/agents/crmAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/crmAgent.js?v=3.1"></script>
     <script src="ai-brain/agents/operationsAgent.js?v=2.0"></script>
-    <script src="ai-brain/agents/documentAgent.js?v=2.0"></script>
-    <script src="ai-brain/agents/executiveAgent.js?v=2.0"></script>
+    <script src="ai-brain/agents/paymentsAgent.js?v=1.0"></script>
+    <script src="ai-brain/agents/documentAgent.js?v=3.0"></script>
+    <script src="ai-brain/agents/executiveAgent.js?v=3.0"></script>
     <script src="ai-brain/ui/approvalModal.js?v=2.0"></script>
     <script src="ai-brain/ui/brainPanel.js?v=2.0"></script>
-    <script src="ai-brain/ui/aiCommandCenter.js?v=2.1"></script>
-    <script src="ai-brain/brain.js?v=2.5.1"></script>
+    <script src="ai-brain/ui/aiCommandCenter.js?v=3.1"></script>
+    <script src="ai-brain/brain.js?v=3.2"></script>
     
     <!-- Recycle Bin UI -->
     <script src="js/recycleBinUI.js?v=1.1"></script>

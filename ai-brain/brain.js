@@ -1,11 +1,11 @@
 /**
- * brain.js — AI Brain orchestrator (Phase 2.5 — CommandRouter integration)
+ * brain.js — AI Brain entry (OrchestratorAgent + legacy CommandRouter)
  */
 (function (global) {
     'use strict';
 
     const AIBrain = {
-        version: '2.5.1',
+        version: '3.0.0',
         _initialized: false,
 
         init: function () {
@@ -16,10 +16,17 @@
             if (typeof ContextManager !== 'undefined' && ContextManager.loadFromMemory) {
                 ContextManager.loadFromMemory();
             }
+            if (typeof RagEngine !== 'undefined') {
+                RagEngine.init().then(function () {
+                    return RagEngine.indexAll();
+                }).catch(function (e) {
+                    console.warn('[AIBrain] RAG init deferred:', e && e.message);
+                });
+            }
             if (typeof AICommandCenter !== 'undefined' && AICommandCenter.init) {
                 AICommandCenter.init();
             }
-            console.log('[AIBrain] Phase 2.5 initialized v' + this.version);
+            console.log('[AIBrain] Multi-agent v' + this.version + ' initialized');
             return this;
         },
 
@@ -31,7 +38,7 @@
                 mode: mode || 'read',
                 args: decision.slots || decision.args,
                 reason: utterance,
-                agentId: decision.agentId,
+                agentId: decision.agentId || (result && result.agents && result.agents[0]),
                 decisionPath: decision.decisionPath,
                 sourceRefs: (result && result.sourceRefs) || [],
                 resultSummary: (result && (result.summary || result.message)) || null,
@@ -39,16 +46,18 @@
             });
         },
 
-        processTurn: function (utterance, opts) {
-            opts = opts || {};
+        _orchestratorTurn: function (utterance, ctx) {
+            if (typeof OrchestratorAgent === 'undefined') {
+                return Promise.resolve({ handled: false });
+            }
+            return OrchestratorAgent.processQuery(utterance, ctx).then(function (result) {
+                if (result.delegateLegacy) return { handled: false };
+                return { handled: !!result.handled, result: result };
+            });
+        },
+
+        _legacyTurn: function (utterance, opts, ctx) {
             const self = this;
-
-            if (!this._initialized) this.init();
-
-            const ctx = typeof ContextEngine !== 'undefined'
-                ? ContextEngine.buildTurnContext(utterance)
-                : { utterance: utterance };
-
             const reasoning = typeof ReasoningEngine !== 'undefined'
                 ? ReasoningEngine.parse(utterance, ctx)
                 : { ok: false };
@@ -83,22 +92,62 @@
             }
 
             return promise.then(function (result) {
-                if (typeof MemoryEngine !== 'undefined') {
-                    MemoryEngine.remember('user', utterance);
-                    MemoryEngine.remember('assistant', self.formatResult(result), {
-                        intent: decision.intent,
-                        success: result && result.success !== false
-                    });
+                return { reasoning: reasoning, decision: decision, result: result };
+            });
+        },
+
+        processTurn: function (utterance, opts) {
+            opts = opts || {};
+            const self = this;
+            const skipUiHistory = !!opts.skipUiHistory;
+
+            if (!this._initialized) this.init();
+
+            const ctx = typeof ContextEngine !== 'undefined'
+                ? ContextEngine.buildTurnContext(utterance)
+                : { utterance: utterance };
+
+            return this._orchestratorTurn(utterance, ctx).then(function (orch) {
+                if (orch.handled && orch.result) {
+                    const result = orch.result;
+                    if (typeof MemoryEngine !== 'undefined' && !skipUiHistory) {
+                        MemoryEngine.remember('user', utterance);
+                        MemoryEngine.remember('assistant', self.formatResult(result), {
+                            intent: 'orchestrator.multi',
+                            success: result.success !== false
+                        });
+                    }
+                    return {
+                        ok: result.ok !== false,
+                        utterance: utterance,
+                        reasoning: { ok: true, intent: 'orchestrator.multi', agents: result.agents },
+                        decision: { action: 'orchestrator', agentId: 'orchestratorAgent' },
+                        result: result
+                    };
                 }
-                const hasMessage = result && (result.message || result.summary);
-                const clarified = result && result.needClarify;
-                return {
-                    ok: !!(result && (result.success !== false || clarified || hasMessage)),
-                    utterance: utterance,
-                    reasoning: reasoning,
-                    decision: decision,
-                    result: result
-                };
+
+                return self._legacyTurn(utterance, opts, ctx).then(function (legacy) {
+                    const result = legacy.result;
+                    if (typeof MemoryEngine !== 'undefined' && !skipUiHistory) {
+                        MemoryEngine.remember('user', utterance);
+                        MemoryEngine.remember('assistant', self.formatResult(result), {
+                            intent: legacy.decision.intent,
+                            success: result && result.success !== false
+                        });
+                    }
+                    if (typeof InteractionLogger !== 'undefined') {
+                        InteractionLogger.log(utterance, legacy.decision, result);
+                    }
+                    const hasMessage = result && (result.message || result.summary);
+                    const clarified = result && result.needClarify;
+                    return {
+                        ok: !!(result && (result.success !== false || clarified || hasMessage)),
+                        utterance: utterance,
+                        reasoning: legacy.reasoning,
+                        decision: legacy.decision,
+                        result: result
+                    };
+                });
             });
         },
 
@@ -116,6 +165,16 @@
 
         handleVoiceInput: function (text) {
             return this.processTurn(text);
+        },
+
+        getProactiveBriefing: function () {
+            if (typeof OrchestratorAgent !== 'undefined') {
+                return OrchestratorAgent.getProactiveBriefing();
+            }
+            if (typeof ProactiveEngine !== 'undefined') {
+                return Promise.resolve(ProactiveEngine.getDailyBriefing());
+            }
+            return Promise.resolve({ ok: false, message: 'Briefing unavailable' });
         }
     };
 

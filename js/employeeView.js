@@ -278,7 +278,13 @@ const EmployeeViewModule = {
             const dateStr = new Date(record.date).toISOString().split('T')[0];
             attendanceMap[dateStr] = record;
 
-            switch (record.status) {
+            const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+            let finalStatus = record.status;
+            if (record.status === 'H-Working' && isHolidayRecordOt) {
+                finalStatus = 'Holiday';
+            }
+
+            switch (finalStatus) {
                 case 'Present':
                     present++;
                     break;
@@ -306,8 +312,12 @@ const EmployeeViewModule = {
             const isSunday = DataManager.isSunday(dateObj);
             const isHoliday = DataManager.isHoliday(dateObj);
 
-            if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                hWorkingOtHours += hours;
+            if (record.status === 'H-Working') {
+                if (isHolidayRecordOt) {
+                    hWorkingOtHours += hours;
+                } else if (record.overTime === 'Yes') {
+                    standardOtHours += hours;
+                }
             } else if (isSunday && !isHoliday && record.status === 'Present') {
                 sOtHours += hours;
             } else {
@@ -573,7 +583,13 @@ const EmployeeViewModule = {
                 };
             }
 
-            switch (record.status) {
+            const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+            let finalStatus = record.status;
+            if (record.status === 'H-Working' && isHolidayRecordOt) {
+                finalStatus = 'Holiday';
+            }
+
+            switch (finalStatus) {
                 case 'Present':
                     present++;
                     monthlyData[monthKey].present++;
@@ -603,8 +619,12 @@ const EmployeeViewModule = {
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
-            if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                hWorkingOtHours += hours;
+            if (record.status === 'H-Working') {
+                if (isHolidayRecordOt) {
+                    hWorkingOtHours += hours;
+                } else if (record.overTime === 'Yes') {
+                    standardOtHours += hours;
+                }
             } else {
                 standardOtHours += hours;
             }
@@ -643,7 +663,9 @@ const EmployeeViewModule = {
             avgPerDaySalary = baseSalary / avgDaysPerMonth;
         }
 
-        const totalPaidDays = present + paidLeave + holidays + (halfDays * 0.5);
+        const totalPaidDays = salaryType === 'daily'
+            ? present + hWorking + (halfDays * 0.5)
+            : present + paidLeave + holidays + (halfDays * 0.5) + 2 * hWorking;
         const totalBasePay = totalPaidDays * avgPerDaySalary;
         const totalOtHours = standardOtHours + hWorkingOtHours;
         const annualOtBreakdown = DataManager.calculateOTPay(

@@ -130,6 +130,23 @@ const IntentEngine = {
             return { intent: 'list_employees', slots: {}, confidence: 0.95, raw: rawText };
         }
 
+        if (/^(?:total\s+)?(?:pending\s+amount|total\s+(?:pending|outstanding)|total\s+outstanding)\s*$/i.test(text)) {
+            return { intent: 'customer_outstanding', slots: {}, confidence: 0.93, raw: rawText };
+        }
+
+        if (/mark\s+(?:today\s+as\s+)?holiday|mark\s+holiday\s+(?:for\s+)?(?:all|everyone)|(?:all\s+)?employees?\s+holiday|sunday\s+holiday|holiday\s+for\s+all/i.test(text)) {
+            const slots = { ...normSlots };
+            if (/yesterday|innal|innalai/i.test(text)) slots.when = 'yesterday';
+            else if (/today|inniku|innikku|sunday/i.test(text)) slots.when = 'today';
+            if (/sunday/i.test(text)) slots.reason = 'Sunday';
+            return { intent: 'mark_holiday', slots, confidence: 0.9, raw: rawText };
+        }
+
+        if (/(?:yesterday|innal|innalai|நேற்று)\s+(?:attendance|varugai)\s*(?:status|sollu|report|summary|list)?/i.test(text)
+            || /(?:attendance|varugai)\s*(?:status|sollu|report|summary)?\s*(?:yesterday|innal|innalai|நேற்று)/i.test(text)) {
+            return { intent: 'absent_employees', slots: { when: 'yesterday' }, confidence: 0.9, raw: rawText };
+        }
+
         const invoiceCustomer = TamilCommandRegistry.extractLastInvoiceCustomer(text);
         if (invoiceCustomer) {
             return { intent: 'customer_last_invoice', slots: { customerName: invoiceCustomer }, confidence: 0.93, raw: rawText };
@@ -160,8 +177,8 @@ const IntentEngine = {
 
         if (/(?:how\s+many\s+)?(?:employees?\s+)?(?:are\s+|were\s+)?absent|absent\s+(?:yesterday|today|innal)|yaar\s+varala|\bvarala\b/i.test(text)) {
             const slots = { ...normSlots };
-            if (/yesterday|innal/i.test(text)) slots.when = 'yesterday';
-            else if (/today|inniku/i.test(text)) slots.when = 'today';
+            if (/yesterday|innal|innalai|நேற்ற/u.test(text)) slots.when = 'yesterday';
+            else if (/today|inniku|innikku|இன்ற/u.test(text)) slots.when = 'today';
             return { intent: 'absent_employees', slots, confidence: 0.88, raw: rawText };
         }
 
@@ -175,7 +192,7 @@ const IntentEngine = {
 
         if (/attendance\s+list|varugai\s+list/i.test(text)) {
             const slots = { ...normSlots };
-            if (/yesterday|innal/i.test(text)) slots.when = 'yesterday';
+            if (/yesterday|innal|innalai|நேற்ற/u.test(text)) slots.when = 'yesterday';
             return { intent: 'attendance_summary', slots, confidence: 0.88, raw: rawText };
         }
 
@@ -227,9 +244,9 @@ const IntentEngine = {
             if (s.includes('half')) slots.status = 'halfday';
         }
         if (/last\s+month/i.test(text)) slots.monthOffset = -1;
-        if (/yesterday|innal|innalai/i.test(text)) slots.when = 'yesterday';
-        else if (/tomorrow|naalai/i.test(text)) slots.when = 'tomorrow';
-        else if (/today|inniku/i.test(text)) slots.when = 'today';
+        if (/yesterday|innal|innalai|நேற்ற/u.test(text)) slots.when = 'yesterday';
+        else if (/tomorrow|naalai|நாளை/u.test(text)) slots.when = 'tomorrow';
+        else if (/today|inniku|innikku|இன்ற/u.test(text)) slots.when = 'today';
     },
 
     _fallbackParse(text, rawText) {
@@ -273,8 +290,8 @@ const IntentEngine = {
         const employee = TamilCommandRegistry.extractEmployeeName(text);
         if (employee && /attendance|attendence/i.test(text)) {
             const slots = { employeeName: employee };
-            if (/yesterday|innal|innalai/i.test(text)) slots.when = 'yesterday';
-            else if (/today|inniku/i.test(text)) slots.when = 'today';
+            if (/yesterday|innal|innalai|நேற்ற/u.test(text)) slots.when = 'yesterday';
+            else if (/today|inniku|innikku|இன்ற/u.test(text)) slots.when = 'today';
             return { intent: 'employee_attendance', slots, confidence: 0.7, raw: rawText };
         }
 

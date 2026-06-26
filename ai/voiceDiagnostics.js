@@ -81,7 +81,14 @@ const VoiceDiagnostics = {
         if (d && !d.includes('••')) s.deepgramApiKey = d.trim();
         if (g && !g.includes('••')) s.googleSpeechApiKey = g.trim();
         MemoryManager.saveSettings(s);
-        if (typeof SpeechProviderManager !== 'undefined') SpeechProviderManager.init();
+        if (typeof VoiceAgent !== 'undefined' && VoiceAgent.clearSttBlock) {
+            VoiceAgent.clearSttBlock();
+        }
+        if (typeof SpeechProviderManager !== 'undefined') {
+            SpeechProviderManager.clearSttBlock();
+            SpeechProviderManager.ensureElectronProvider();
+            SpeechProviderManager.init(true);
+        }
         this._buildProviderSelect();
         this.refresh();
         if (typeof App !== 'undefined') App.showNotification('Voice API keys saved.', 'success');
@@ -389,7 +396,7 @@ const VoiceDiagnostics = {
             <div class="voice-diag-row"><span>Mic Open</span><strong>${d.micOpen ? 'Yes' : 'No'}</strong></div>
             <div class="voice-diag-row"><span>Transcript Received</span><strong>${d.transcriptReceived ? 'Yes' : 'No'}</strong></div>
             <div class="voice-diag-row"><span>Avg Latency</span><strong>${d.avgLatencyMs || 0} ms</strong></div>
-            ${d.isElectron && d.provider === 'browser' ? '<div class="voice-diag-alert">Browser STT does not work reliably in Electron. Switch to OpenAI Whisper or Deepgram and add an API key below.</div>' : ''}
+            ${d.isElectron && d.provider === 'browser' ? '<div class="voice-diag-alert">Browser STT does not work in the desktop app. Open Voice ERP Assistant → heart icon (Voice Health), choose Deepgram or Whisper, and save your API key.</div>' : ''}
         `;
     },
 

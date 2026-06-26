@@ -167,6 +167,111 @@
             };
         },
 
+        // ── NEW v3: User Correction Handling ─────────────────────────────────
+
+        /**
+         * Parse and persist a user correction utterance.
+         * Supports patterns:
+         *   "Avon means Avon Oxygen"
+         *   "call Avon as Avon Oxygen"
+         *   "Avon is Avon Oxygen"
+         *   "remember Avon as Avon Oxygen"
+         *
+         * @param {string} utterance
+         * @returns {{ ok: boolean, spoken: string, resolved: string, type: string }|null}
+         */
+        processUserCorrection: function (utterance) {
+            const text = String(utterance || '').trim();
+            // Match: "X means Y" | "call X as Y" | "X is Y" | "remember X as Y"
+            const patterns = [
+                /^([\w\s&.'-]+?)\s+means\s+([\w\s&.'-]+)$/i,
+                /^call\s+([\w\s&.'-]+?)\s+as\s+([\w\s&.'-]+)$/i,
+                /^([\w\s&.'-]+?)\s+is\s+([\w\s&.'-]+)$/i,
+                /^remember\s+([\w\s&.'-]+?)\s+as\s+([\w\s&.'-]+)$/i,
+                /^([\w\s&.'-]+?)\s+=\s+([\w\s&.'-]+)$/i
+            ];
+
+            for (let i = 0; i < patterns.length; i++) {
+                const m = text.match(patterns[i]);
+                if (m) {
+                    const spoken = m[1].trim();
+                    const resolved = m[2].trim();
+                    if (!spoken || !resolved || spoken.toLowerCase() === resolved.toLowerCase()) continue;
+
+                    // Determine type: if the resolved name looks like a customer, save as customer alias
+                    let type = 'customer'; // default
+                    if (typeof DataManager !== 'undefined') {
+                        const employees = DataManager.getData(DataManager.KEYS ? DataManager.KEYS.EMPLOYEES : 'gtes_employees') || [];
+                        const empMatch = employees.some(function (e) {
+                            return _norm(e.name || '').indexOf(_norm(resolved)) >= 0;
+                        });
+                        if (empMatch) type = 'employee';
+                    }
+
+                    this.recordCorrection(spoken, resolved, type);
+                    return { ok: true, spoken: spoken, resolved: resolved, type: type };
+                }
+            }
+            return null;
+        },
+
+        /**
+         * Record a correction and persist the alias.
+         * @param {string} spoken    — short/alias name the user said
+         * @param {string} resolved  — full canonical name
+         * @param {string} type      — 'customer'|'employee'
+         */
+        recordCorrection: function (spoken, resolved, type) {
+            if (!spoken || !resolved) return false;
+            if (type === 'employee') {
+                this.addEmployeeAlias(spoken, resolved);
+            } else {
+                this.addCustomerAlias(spoken, resolved);
+            }
+            // Also log to InteractionLogger
+            if (typeof InteractionLogger !== 'undefined') {
+                InteractionLogger.logCorrection(spoken, resolved, type);
+            }
+            return true;
+        },
+
+        // ── NEW v3: Frequency / Preference API ───────────────────────────────
+
+        /**
+         * Get ranked entity list from InteractionLogger.
+         * @param {string} type — 'customers'|'employees'|'intents'
+         * @param {number} n
+         * @returns {Array<{name:string, count:number}>}
+         */
+        getFrequencyMap: function (type, n) {
+            if (typeof InteractionLogger !== 'undefined') {
+                if (type === 'employees') return InteractionLogger.getFrequentEmployees(n || 5);
+                if (type === 'intents')   return InteractionLogger.getFrequentIntents(n || 10);
+                return InteractionLogger.getFrequentCustomers(n || 5);
+            }
+            return [];
+        },
+
+        /**
+         * Apply frequency boost to a candidate list.
+         * Candidates with higher access frequency are sorted higher.
+         *
+         * @param {Entity[]} candidates
+         * @param {string}   type — 'customer'|'employee'
+         * @returns {Entity[]} re-sorted candidates
+         */
+        prioritizeCandidates: function (candidates, type) {
+            if (!candidates || !candidates.length) return candidates;
+            if (typeof InteractionLogger === 'undefined') return candidates;
+            return candidates.slice().sort(function (a, b) {
+                const aBoost = InteractionLogger.getFrequencyBoost(a.name, type);
+                const bBoost = InteractionLogger.getFrequencyBoost(b.name, type);
+                const aScore = (a._score || 0.5) + aBoost;
+                const bScore = (b._score || 0.5) + bBoost;
+                return bScore - aScore;
+            });
+        },
+
         /** Browser-side production audit summary (mirrors validate-voice-stress categories) */
         runProductionAudit: function () {
             const categories = {

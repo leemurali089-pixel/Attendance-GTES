@@ -170,8 +170,12 @@ const LanguageEngine = {
         return m ? parseFloat(m[1]) : null;
     },
 
-    /** Normalize Tamil script + date words before intent regex matching */
-    normalizeForParse(rawText) {
+    /** Normalize Tamil script + date words before intent regex matching.
+     *  @param {string} rawText - The raw text to normalize.
+     *  @param {boolean} [isInternal=false] - When true (called from TamilCommandRegistry.normalize),
+     *    skip the TamilCommandRegistry.normalize() call-back to prevent mutual recursion.
+     */
+    normalizeForParse(rawText, isInternal = false) {
         let s = String(rawText || '').trim();
         const slots = {};
         const hadTamilScript = this.TAMIL_SCRIPT_RE.test(s);
@@ -191,10 +195,12 @@ const LanguageEngine = {
         if (/\b(this\s+month|இந்த\s*மாத)\b/i.test(s)) slots.monthScope = 'this_month';
         if (/\b(last\s+month|கடந்த\s*மாத)\b/i.test(s)) slots.monthOffset = -1;
 
-        if (typeof TamilCommandRegistry !== 'undefined') {
-            s = TamilCommandRegistry.normalize(s);
+        // Guard: when called internally (from TamilCommandRegistry.normalize → here),
+        // skip calling TamilCommandRegistry.normalize() again to prevent mutual recursion.
+        if (!isInternal && typeof TamilCommandRegistry !== 'undefined') {
+            s = TamilCommandRegistry.normalize(s, true);
         } else {
-            s = lower.replace(/[.,!?'"`]/g, ' ').replace(/\s+/g, ' ').trim();
+            s = lower.replace(/[.,!?'\"`]/g, ' ').replace(/\s+/g, ' ').trim();
         }
 
         return { text: s, slots, hadTamilScript };

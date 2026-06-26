@@ -17,9 +17,9 @@
             }
         },
 
-        processTranscript: function (text) {
+        processTranscript: function (text, opts) {
             if (typeof AIBrain !== 'undefined' && AIBrain.processTurn) {
-                return AIBrain.processTurn(text);
+                return AIBrain.processTurn(text, Object.assign({ skipUiHistory: true }, opts || {}));
             }
             return Promise.resolve({ ok: false, result: { message: 'AIBrain not loaded' } });
         },

@@ -20,6 +20,11 @@ const SpeechProviderManager = {
         micOpened: false,
         lastTranscriptAt: null
     },
+    _startupProbeDone: false,
+    _lastInitAt: 0,
+    _initGeneration: 0,
+    _sttBlockedUntilKey: false,
+    _loggedElectronNoKey: false,
 
     diagnostics: {
         recognitionState: 'idle',
@@ -44,7 +49,8 @@ const SpeechProviderManager = {
         avgLatencyMs: 0,
         micOpen: false,
         transcriptReceived: false,
-        googleApiKeyInEnv: false
+        googleApiKeyInEnv: false,
+        electronBrowserBlocked: false
     },
 
     _providers: {
@@ -84,26 +90,93 @@ const SpeechProviderManager = {
         return !!BrowserSpeechAdapter.synthesis;
     },
 
-    init() {
+    _detectElectron() {
+        this.diagnostics.userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+        this.diagnostics.isElectron = !!(typeof window !== 'undefined' && window.electronAPI && window.electronAPI.isElectron)
+            || /Electron/i.test(this.diagnostics.userAgent || '');
+        return this.diagnostics.isElectron;
+    },
+
+    _bootstrapVoiceKeys() {
+        if (typeof MemoryManager === 'undefined' || typeof DataManager === 'undefined') return;
+        const s = MemoryManager.getSettings();
+        let changed = false;
+        try {
+            const erp = DataManager.getData('gtes_settings') || {};
+            const ai = erp.ai || erp.aiBrain || {};
+            if (!String(s.deepgramApiKey || '').trim() && ai.deepgramApiKey) {
+                s.deepgramApiKey = String(ai.deepgramApiKey).trim();
+                changed = true;
+            }
+            if (!String(s.openaiApiKey || '').trim() && ai.openaiApiKey) {
+                s.openaiApiKey = String(ai.openaiApiKey).trim();
+                changed = true;
+            }
+        } catch (_) { /* */ }
+        if (changed) MemoryManager.saveSettings(s);
+    },
+
+    _hasCloudSttKey() {
+        this._bootstrapVoiceKeys();
+        if (typeof DeepgramSpeechAdapter !== 'undefined' && DeepgramSpeechAdapter.isConfigured()) return 'deepgram';
+        if (typeof OpenAISpeechAdapter !== 'undefined' && OpenAISpeechAdapter.isConfigured()) return 'whisper';
+        return null;
+    },
+
+    _persistSpeechProvider(name) {
+        if (typeof MemoryManager === 'undefined') return;
+        const s = MemoryManager.getSettings();
+        if (s.speechProvider === name) return;
+        s.speechProvider = name;
+        MemoryManager.saveSettings(s);
+    },
+
+    _resolveElectronProviderName(settingsName) {
+        const preferred = settingsName || 'browser';
+        if (!this._detectElectron() || preferred !== 'browser') return preferred;
+
+        const picked = this._hasCloudSttKey();
+        if (picked) {
+            this._log('provider', 'switched browser → ' + picked + ' (Electron)');
+            this._persistSpeechProvider(picked);
+            this.diagnostics.electronBrowserBlocked = false;
+            return picked;
+        }
+
+        this.diagnostics.electronBrowserBlocked = true;
+        this._log('electron_stt_warning', 'Browser Web Speech STT is unreliable in Electron');
+        return 'browser';
+    },
+
+    init(force) {
         this._ensureTtsReady();
-        void this._loadRuntimeInfo().then(() => {
-            this._logStartupProbe();
-            this._notifyDiagnostics();
-        });
+        this._detectElectron();
+        this._bootstrapVoiceKeys();
+
+        const now = Date.now();
+        if (!force && this._provider && this._lastInitAt && (now - this._lastInitAt) < 400) {
+            return !!this._provider;
+        }
+        this._lastInitAt = now;
+        this._initGeneration += 1;
+        const gen = this._initGeneration;
+
+        if (!this._startupProbeDone) {
+            this._startupProbeDone = true;
+            void this._loadRuntimeInfo().then(() => {
+                if (gen !== this._initGeneration) return;
+                this._logStartupProbe();
+                this._notifyDiagnostics();
+            });
+        } else {
+            void this._loadRuntimeInfo().then(() => {
+                if (gen !== this._initGeneration) return;
+                this._notifyDiagnostics();
+            });
+        }
 
         const settings = typeof MemoryManager !== 'undefined' ? MemoryManager.getSettings() : {};
-        let name = settings.speechProvider || 'browser';
-
-        if (name === 'browser' && this.diagnostics.isElectron) {
-            this._log('electron_stt_warning', 'Browser Web Speech STT is unreliable in Electron');
-            if (typeof OpenAISpeechAdapter !== 'undefined' && OpenAISpeechAdapter.isConfigured()) {
-                name = 'whisper';
-                this._log('auto_provider', 'Electron detected — using OpenAI Whisper');
-            } else if (typeof DeepgramSpeechAdapter !== 'undefined' && DeepgramSpeechAdapter.isConfigured()) {
-                name = 'deepgram';
-                this._log('auto_provider', 'Electron detected — using Deepgram');
-            }
-        }
+        let name = this._resolveElectronProviderName(settings.speechProvider || 'browser');
 
         const provider = this._resolveProvider(name);
         if (!provider) {
@@ -113,10 +186,30 @@ const SpeechProviderManager = {
 
         const ok = provider.init && provider.init();
         if (!ok && name !== 'browser') {
-            console.warn('[SpeechProviderManager] Provider init failed, falling back to browser:', name);
-            name = 'browser';
-            this._provider = this._resolveProvider('browser');
-            if (!this._provider || !this._provider.init()) return false;
+            if (this.diagnostics.isElectron) {
+                const alt = name === 'deepgram' ? 'whisper' : (name === 'whisper' ? 'deepgram' : null);
+                if (alt && alt !== name) {
+                    const altProvider = this._resolveProvider(alt);
+                    if (altProvider && altProvider.init && altProvider.init()) {
+                        this._provider = altProvider;
+                        name = alt;
+                        this._persistSpeechProvider(name);
+                    } else {
+                        console.warn('[SpeechProviderManager] Cloud STT init failed in Electron:', name);
+                        this.diagnostics.electronBrowserBlocked = true;
+                        return false;
+                    }
+                } else {
+                    console.warn('[SpeechProviderManager] Cloud STT init failed in Electron:', name);
+                    this.diagnostics.electronBrowserBlocked = true;
+                    return false;
+                }
+            } else {
+                console.warn('[SpeechProviderManager] Provider init failed, falling back to browser:', name);
+                name = 'browser';
+                this._provider = this._resolveProvider('browser');
+                if (!this._provider || !this._provider.init()) return false;
+            }
         } else if (!ok) {
             console.warn('[SpeechProviderManager] Browser provider init failed');
             return false;
@@ -130,7 +223,7 @@ const SpeechProviderManager = {
             ? this._provider.isSupported()
             : true;
         this._refreshInternet();
-        void this._probeMicrophone();
+        if (!this._micChecked) void this._probeMicrophone();
         this._log('init', {
             provider: this.diagnostics.provider,
             recognitionAvailable: this.diagnostics.recognitionAvailable,
@@ -140,9 +233,7 @@ const SpeechProviderManager = {
     },
 
     async _loadRuntimeInfo() {
-        this.diagnostics.userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-        this.diagnostics.isElectron = !!(typeof window !== 'undefined' && window.electronAPI && window.electronAPI.isElectron)
-            || /Electron/i.test(this.diagnostics.userAgent);
+        this._detectElectron();
 
         if (typeof window !== 'undefined' && window.electronAPI?.getRuntimeInfo) {
             try {
@@ -182,8 +273,79 @@ const SpeechProviderManager = {
     },
 
     getProvider() {
-        if (!this._provider) void this.init();
+        if (!this._provider) this.init();
         return this._provider;
+    },
+
+    ensureElectronProvider() {
+        this._detectElectron();
+        this._bootstrapVoiceKeys();
+        if (!this.diagnostics.isElectron) return true;
+
+        const settings = typeof MemoryManager !== 'undefined' ? MemoryManager.getSettings() : {};
+        const configured = settings.speechProvider || 'browser';
+        const active = this._provider?.id || configured;
+
+        if (active !== 'browser') {
+            if (!this._provider || this._provider.id !== active) return this.init(true);
+            return true;
+        }
+
+        const picked = this._hasCloudSttKey();
+        if (picked) {
+            this._log('provider', 'switched browser → ' + picked + ' (Electron)');
+            return this.setProvider(picked);
+        }
+
+        this.diagnostics.electronBrowserBlocked = true;
+        return false;
+    },
+
+    getElectronSttErrorMessage() {
+        return 'Voice input needs Deepgram or OpenAI key in Settings → Voice Health. Browser speech does not work in desktop app.';
+    },
+
+    isElectronSttBlocked() {
+        this._detectElectron();
+        this._bootstrapVoiceKeys();
+        if (!this.diagnostics.isElectron) return false;
+        if (this._sttBlockedUntilKey) return true;
+        const settings = typeof MemoryManager !== 'undefined' ? MemoryManager.getSettings() : {};
+        const active = this._provider?.id || settings.speechProvider || 'browser';
+        if (active !== 'browser') return false;
+        return !this._hasCloudSttKey();
+    },
+
+    clearSttBlock() {
+        this._sttBlockedUntilKey = false;
+        this._loggedElectronNoKey = false;
+        this.diagnostics.electronBrowserBlocked = false;
+        if (this.diagnostics.classifiedError === 'electron_no_stt_key') {
+            this.diagnostics.classifiedError = null;
+            this.diagnostics.lastError = null;
+            this.diagnostics.recognitionState = 'idle';
+        }
+    },
+
+    _emitElectronNoKeyError(callbacks) {
+        const err = 'electron_no_stt_key';
+        this._sttBlockedUntilKey = true;
+        this._sessionActive = false;
+        this.diagnostics.electronBrowserBlocked = true;
+        this.diagnostics.classifiedError = err;
+        this.diagnostics.recognitionState = 'error';
+        this.diagnostics.lastError = err;
+        if (!this._loggedElectronNoKey) {
+            this._loggedElectronNoKey = true;
+            this._log('error', err);
+        }
+        const cbs = callbacks || this._userCallbacks;
+        if (cbs?.onNetworkFailed) {
+            cbs.onNetworkFailed(0, err);
+        } else if (cbs?.onError) {
+            cbs.onError(err);
+        }
+        this._notifyDiagnostics();
     },
 
     getDiagnostics() {
@@ -276,6 +438,15 @@ const SpeechProviderManager = {
     },
 
     startListening(callbacks = {}) {
+        if (this._sttBlockedUntilKey || this.isElectronSttBlocked()) {
+            this._emitElectronNoKeyError(callbacks);
+            return;
+        }
+        if (!this.ensureElectronProvider()) {
+            this._emitElectronNoKeyError(callbacks);
+            return;
+        }
+
         const provider = this.getProvider();
         if (!provider) throw new Error('No speech provider available');
 
@@ -350,6 +521,11 @@ const SpeechProviderManager = {
                         return;
                     }
                     if (err === 'network' || err === 'no-api-key') {
+                        if (this.diagnostics.isElectron && this.diagnostics.provider === 'browser') {
+                            if (this._provider) this._provider.stop();
+                            this._emitElectronNoKeyError(this._userCallbacks);
+                            return;
+                        }
                         if (this.diagnostics.internetAvailable) {
                             this.diagnostics.networkFailuresWhileOnline += 1;
                         }
@@ -366,8 +542,13 @@ const SpeechProviderManager = {
                 },
                 onEnd: () => {
                     this._log('end', null);
-                    if (!this._sessionActive) return;
+                    if (!this._sessionActive || this._sttBlockedUntilKey) return;
                     if (this.diagnostics.recognitionState === 'retrying') return;
+                    if (this.diagnostics.recognitionState === 'error') return;
+                    if (this.diagnostics.isElectron && this.diagnostics.provider === 'browser') {
+                        this.diagnostics.recognitionState = 'error';
+                        return;
+                    }
                     this.diagnostics.recognitionState = 'restarting';
                     this._log('restart', null);
                     setTimeout(() => {
@@ -401,6 +582,9 @@ const SpeechProviderManager = {
     },
 
     _classifyNetworkFailure() {
+        if (this.diagnostics.isElectron && this.diagnostics.provider === 'browser') {
+            return 'electron_no_stt_key';
+        }
         if (this.diagnostics.provider && this.diagnostics.provider !== 'browser') {
             return 'api_error';
         }
@@ -414,6 +598,13 @@ const SpeechProviderManager = {
 
     _retryNetwork(errCode) {
         if (!this._sessionActive) return;
+
+        if (this.diagnostics.isElectron && this.diagnostics.provider === 'browser') {
+            this._sessionActive = false;
+            if (this._provider) this._provider.stop();
+            this._emitElectronNoKeyError(this._userCallbacks);
+            return;
+        }
 
         if (this._networkRetries >= this.MAX_NETWORK_RETRIES) {
             const classified = this._classifyNetworkFailure();
@@ -487,7 +678,10 @@ const SpeechProviderManager = {
         }
         this._provider = null;
         this._langFallbackIdx = 0;
-        return this.init();
+        this.diagnostics.electronBrowserBlocked = false;
+        const ok = this.init(true);
+        if (ok && this._hasCloudSttKey()) this.clearSttBlock();
+        return ok;
     },
 
     listProviders() {

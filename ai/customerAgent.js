@@ -30,23 +30,45 @@ const CustomerAgent = {
     async getOutstanding(slots) {
         const name = this._resolveCustomer(slots);
         if (!name) {
+            const invoices = typeof InvoiceManager !== 'undefined' && InvoiceManager.getInvoicesWithBalance
+                ? (InvoiceManager.getInvoicesWithBalance() || [])
+                : [];
+            let pendingTotal = 0;
+            let pendingCount = 0;
+            invoices.forEach((inv) => {
+                const bal = parseFloat(inv.balance ?? inv.pending ?? 0);
+                if (bal > 0.05) {
+                    pendingCount += 1;
+                    pendingTotal += bal;
+                }
+            });
+            const data = {
+                customerName: 'All customers',
+                total: pendingTotal,
+                invoiceCount: pendingCount,
+                overdueCount: pendingCount,
+                invoices: []
+            };
             return {
-                success: false,
-                needClarify: true,
-                state: 'need_name',
-                message: NotificationAgent.formatClarify('customer_need_name')
+                success: true,
+                message: pendingCount
+                    ? `${pendingCount} pending invoice(s), total ${ErpFunctions.formatMoney(pendingTotal)} outstanding.`
+                    : 'No pending invoice balances found.',
+                data
             };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
             const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            const list = typeof CustomerManager !== 'undefined' ? (CustomerManager.getAllCustomers() || []).map(c => c.name || c.displayName).filter(Boolean) : [];
+            const optText = list.length ? '\nAvailable options: ' + list.slice(0, 10).join(', ') + (list.length > 10 ? '...' : '') : '';
             return {
                 success: false,
                 needClarify: true,
                 state: 'need_name',
                 query: name,
                 candidates: suggestions.map((n) => ({ name: n })),
-                message: this._notFoundMessage('customer', name)
+                message: this._notFoundMessage('customer', name) + optText
             };
         }
         const data = await ErpFunctions.getCustomerOutstanding(customer.name);
@@ -59,23 +81,27 @@ const CustomerAgent = {
             name = TamilCommandRegistry.stripTemporalAndNoise(slots.customerName);
         }
         if (!name) {
+            const list = typeof CustomerManager !== 'undefined' ? (CustomerManager.getAllCustomers() || []).map(c => c.name || c.displayName).filter(Boolean) : [];
+            const optText = list.length ? '\nAvailable options: ' + list.slice(0, 10).join(', ') + (list.length > 10 ? '...' : '') : '';
             return {
                 success: false,
                 needClarify: true,
                 state: 'need_name',
-                message: NotificationAgent.formatClarify('customer_need_last_invoice')
+                message: NotificationAgent.formatClarify('customer_need_last_invoice') + optText
             };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
             const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            const list = typeof CustomerManager !== 'undefined' ? (CustomerManager.getAllCustomers() || []).map(c => c.name || c.displayName).filter(Boolean) : [];
+            const optText = list.length ? '\nAvailable options: ' + list.slice(0, 10).join(', ') + (list.length > 10 ? '...' : '') : '';
             return {
                 success: false,
                 needClarify: true,
                 state: 'need_name',
                 query: name,
                 candidates: suggestions.map((n) => ({ name: n })),
-                message: this._notFoundMessage('customer', name)
+                message: this._notFoundMessage('customer', name) + optText
             };
         }
         const data = await ErpFunctions.getCustomerLastInvoice(customer.name);
@@ -85,23 +111,27 @@ const CustomerAgent = {
     async getInvoiceList(slots) {
         const name = this._resolveCustomer(slots);
         if (!name) {
+            const list = typeof CustomerManager !== 'undefined' ? (CustomerManager.getAllCustomers() || []).map(c => c.name || c.displayName).filter(Boolean) : [];
+            const optText = list.length ? '\nAvailable options: ' + list.slice(0, 10).join(', ') + (list.length > 10 ? '...' : '') : '';
             return {
                 success: false,
                 needClarify: true,
                 state: 'need_name',
-                message: NotificationAgent.formatClarify('customer_need_invoice_list')
+                message: NotificationAgent.formatClarify('customer_need_invoice_list') + optText
             };
         }
         const customer = ErpFunctions.findCustomerByName(name);
         if (!customer) {
             const suggestions = ErpFunctions.suggestSimilarCustomers(name);
+            const list = typeof CustomerManager !== 'undefined' ? (CustomerManager.getAllCustomers() || []).map(c => c.name || c.displayName).filter(Boolean) : [];
+            const optText = list.length ? '\nAvailable options: ' + list.slice(0, 10).join(', ') + (list.length > 10 ? '...' : '') : '';
             return {
                 success: false,
                 needClarify: true,
                 state: 'need_name',
                 query: name,
                 candidates: suggestions.map((n) => ({ name: n })),
-                message: this._notFoundMessage('customer', name)
+                message: this._notFoundMessage('customer', name) + optText
             };
         }
         const data = await ErpFunctions.getCustomerInvoiceList(customer.name);

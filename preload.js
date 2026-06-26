@@ -100,6 +100,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Deep Sync operations (New in v1.1.5)
     syncToCloud: (key, data) => ipcRenderer.invoke('sync-to-cloud', key, data),
 
+    // RAG vector store (LanceDB optional in main process)
+    rag: {
+        status: () => ipcRenderer.invoke('rag:status'),
+        upsert: (args) => ipcRenderer.invoke('rag:upsert', args),
+        search: (args) => ipcRenderer.invoke('rag:search', args),
+        clear: (args) => ipcRenderer.invoke('rag:clear', args)
+    },
+
     // Check if running in Electron
     isElectron: true,
 

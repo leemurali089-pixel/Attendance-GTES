@@ -84,6 +84,32 @@
 
     const ProactiveEngine = {
         getDailyBriefing: function () {
+            if (typeof OrchestratorAgent !== 'undefined') {
+                return OrchestratorAgent.getProactiveBriefing().then(function (b) {
+                    if (b && b.ok) {
+                        const date = new Date().toISOString().slice(0, 10);
+                        const rev = _monthRevenue();
+                        const revMoney = _formatMoney(rev);
+                        const messageEn = b.messageEn || b.message;
+                        const withRev = messageEn + '\nThis month revenue: ' + revMoney;
+                        return Object.assign({}, b, {
+                            date: date,
+                            briefing: withRev,
+                            message: withRev,
+                            messageEn: withRev,
+                            messageTa: b.messageTa || withRev,
+                            metrics: Object.assign({}, b.metrics || {}, { monthRevenue: rev })
+                        });
+                    }
+                    return ProactiveEngine._legacyBriefing();
+                }).catch(function () {
+                    return ProactiveEngine._legacyBriefing();
+                });
+            }
+            return ProactiveEngine._legacyBriefing();
+        },
+
+        _legacyBriefing: function () {
             const date = new Date().toISOString().slice(0, 10);
             const ledger = _ledgerOutstanding();
             const att = _attendanceMetrics();

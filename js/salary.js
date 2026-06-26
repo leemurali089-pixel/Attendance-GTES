@@ -352,7 +352,13 @@ const SalaryModule = {
         let standardOtHours = 0, hWorkingSpecialOtHours = 0, sOtHours = 0;
 
         empAttendance.forEach(record => {
-            switch (record.status) {
+            const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+            let finalStatus = record.status;
+            if (record.status === 'H-Working' && isHolidayRecordOt) {
+                finalStatus = 'Holiday';
+            }
+
+            switch (finalStatus) {
                 case 'Present':
                     present++;
                     break;
@@ -373,9 +379,6 @@ const SalaryModule = {
                     break;
                 case 'H-Working':
                     hWorking++; // Count H-Working separately
-
-                    // H-Working payment logic: Only 1 base day + OT, no extra double-pay
-                    // OT Logic is handled below via hWorkingSpecialOtHours or standardOtHours
                     break;
             }
             const hours = parseFloat(record.otHours || 0) || 0;
@@ -383,9 +386,12 @@ const SalaryModule = {
             const isSunday = DataManager.isSunday(dateObj);
             const isHoliday = DataManager.isHoliday(dateObj);
 
-            // 1. H-Working Special OT (Explicit H-Working OT)
-            if (record.status === 'H-Working' && record.overTime === 'H-Working') {
-                hWorkingSpecialOtHours += hours;
+            if (record.status === 'H-Working') {
+                if (isHolidayRecordOt) {
+                    hWorkingSpecialOtHours += hours;
+                } else if (record.overTime === 'Yes') {
+                    standardOtHours += hours;
+                }
             }
             // 2. S-OT (Sunday Present, not Holiday)
             else if (isSunday && !isHoliday && record.status === 'Present') {
@@ -654,7 +660,13 @@ const SalaryModule = {
         let standardOtHours = 0, hWorkingSpecialOtHours = 0, sOtHours = 0;
 
         empAttendance.forEach(record => {
-            switch (record.status) {
+            const isHolidayRecordOt = record.overTime === 'H-Working' || record.overTime === 'Holiday working';
+            let finalStatus = record.status;
+            if (record.status === 'H-Working' && isHolidayRecordOt) {
+                finalStatus = 'Holiday';
+            }
+
+            switch (finalStatus) {
                 case 'Present': present++; break;
                 case 'Paid Leave': paidLeave++; break;
                 case 'Half Day': halfDays++; break;
@@ -668,7 +680,10 @@ const SalaryModule = {
             const isSunday = DataManager.isSunday(dateObj);
             const isHoliday = DataManager.isHoliday(dateObj);
 
-            if (record.status === 'H-Working' && record.overTime === 'H-Working') hWorkingSpecialOtHours += hours;
+            if (record.status === 'H-Working') {
+                if (isHolidayRecordOt) hWorkingSpecialOtHours += hours;
+                else if (record.overTime === 'Yes') standardOtHours += hours;
+            }
             else if (isSunday && !isHoliday && record.status === 'Present') sOtHours += hours;
             else standardOtHours += hours;
         });

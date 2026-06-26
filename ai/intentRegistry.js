@@ -6,6 +6,7 @@ const IntentRegistry = {
         mark_attendance: { agent: 'attendance', handler: 'markAttendance', required: ['employeeName'], destructive: false },
         mark_leave: { agent: 'attendance', handler: 'markLeave', required: ['employeeName'], destructive: false },
         absent_employees: { agent: 'attendance', handler: 'getAbsentToday', required: [], destructive: false },
+        mark_holiday: { agent: 'attendance', handler: 'markAllHoliday', required: [], destructive: false },
         attendance_summary: { agent: 'attendance', handler: 'getMonthlySummary', required: [], destructive: false },
 
         customer_outstanding: { agent: 'customer', handler: 'getOutstanding', required: [], destructive: false },
